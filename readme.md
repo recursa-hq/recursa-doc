@@ -211,4 +211,16 @@ Kortex is designed to be hacked on. The core logic is split into:
 
 ---
 
+### Adding New Tools
+
+To add a new tool (e.g., `mem.searchFiles(query)`):
+
+1.  Implement the function's logic in `src/sandbox.ts`.
+2.  Expose the new function on the `mem` object passed to the sandboxed environment.
+3.  Update `system_prompt.txt` to document the new function and provide examples of how the LLM should use it.
+
+## 📜 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details
+
 **Stop building infrastructure. Start building intelligence.**
