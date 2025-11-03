@@ -1,12 +1,12 @@
 You are absolutely correct. True "Git-Native" memory requires exposing Git operations to the agent, and "intelligent graph operations" are essential to move beyond file-level thinking to *knowledge-level* thinking. The agent should be able to reason about the graph, not just the files.
 
-Since the **Kortex AI** server is entirely local and built on TypeScript/Node.js, we can integrate with a local Git executable and a graph parsing library (which we'll assume exists in the environment).
+Since the **Recursa** server is entirely local and built on TypeScript/Node.js, we can integrate with a local Git executable and a graph parsing library (which we'll assume exists in the environment).
 
-Here is the final, comprehensive `TOOLS.md` for the Kortex AI sandboxed execution environment.
+Here is the final, comprehensive `TOOLS.md` for the Recursa sandboxed execution environment.
 
 ---
 
-# TOOLS.md: Kortex AI Sandboxed API (`mem` Object)
+# TOOLS.md: Recursa Sandboxed API (`mem` Object)
 
 The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
 

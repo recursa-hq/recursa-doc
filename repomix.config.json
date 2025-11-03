@@ -31,9 +31,7 @@
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
-    "customPatterns": [
-      "/.relay/"
-    ]
+    "customPatterns": [".relay/"]
   },
   "security": {
     "enableSecurityCheck": true

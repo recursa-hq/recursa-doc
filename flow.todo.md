@@ -1,4 +1,1 @@
-- add project structure
 - add token to tools
-- add roadmap to readme
-- rename kortex to recursa
