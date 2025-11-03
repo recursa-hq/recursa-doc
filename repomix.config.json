@@ -6,8 +6,8 @@
   "output": {
     "filePath": "repo/repomix.md",
     "style": "markdown",
-    "parsableStyle": false,
-    "fileSummary": true,
+    "parsableStyle": true,
+    "fileSummary": false,
     "directoryStructure": true,
     "files": true,
     "removeComments": false,
@@ -16,7 +16,7 @@
     "topFilesLength": 5,
     "showLineNumbers": false,
     "truncateBase64": false,
-    "copyToClipboard": false,
+    "copyToClipboard": true,
     "includeFullDirectoryStructure": false,
     "tokenCountTree": false,
     "git": {
@@ -31,7 +31,9 @@
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
-    "customPatterns": []
+    "customPatterns": [
+      "/.relay/"
+    ]
   },
   "security": {
     "enableSecurityCheck": true
