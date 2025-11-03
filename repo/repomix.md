@@ -10,6 +10,45 @@ tools.md
 
 # Files
 
+## File: .gitignore
+````
+# relay state
+# /.relay/
+````
+
+## File: relay.config.json
+````json
+{
+  "$schema": "https://relay.noca.pro/schema.json",
+  "projectId": "doc",
+  "core": {
+    "logLevel": "info",
+    "enableNotifications": true,
+    "watchConfig": false
+  },
+  "watcher": {
+    "clipboardPollInterval": 2000,
+    "preferredStrategy": "auto",
+    "enableBulkProcessing": false,
+    "bulkSize": 5,
+    "bulkTimeout": 30000
+  },
+  "patch": {
+    "approvalMode": "manual",
+    "approvalOnErrorCount": 0,
+    "linter": "",
+    "preCommand": "",
+    "postCommand": "",
+    "minFileChanges": 0
+  },
+  "git": {
+    "autoGitBranch": false,
+    "gitBranchPrefix": "relay/",
+    "gitBranchTemplate": "gitCommitMsg"
+  }
+}
+````
+
 ## File: tools.md
 ````markdown
 You are absolutely correct. True "Git-Native" memory requires exposing Git operations to the agent, and "intelligent graph operations" are essential to move beyond file-level thinking to *knowledge-level* thinking. The agent should be able to reason about the graph, not just the files.
@@ -97,15 +136,8 @@ if (success) {
 ```
 ````
 
-## File: .gitignore
-````
-# relay state
-# /.relay/
-````
-
 ## File: flow.todo.md
 ````markdown
-- add project structure
 - add token to tools
 ````
 
@@ -170,6 +202,31 @@ graph TD
 3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet**. Recursa executes this code in a secure sandbox.
 4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
 5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
+
+## Project Structure
+
+Recursa is organized with a clean, production-ready structure to make it easy to navigate and contribute to.
+
+```
+recursa/
+├── .env                # Local environment variables (API keys, paths)
+├── package.json        # Project dependencies and scripts
+├── tsconfig.json       # TypeScript compiler configuration
+├── src/
+│   ├── api/            # Handles incoming requests (e.g., from your chat client)
+│   │   └── mcp.handler.ts
+│   ├── core/           # Core application logic
+│   │   ├── Sandbox.ts  # The secure sandbox for executing LLM-generated code
+│   │   └── MemAPI.ts   # Implementation of the `mem` object and its tools
+│   ├── services/       # Connectors to external services
+│   │   ├── Git.ts      # Wrappers for executing local Git commands
+│   │   └── Llm.ts      # Logic for communicating with the LLM API (OpenRouter)
+│   ├── types/          # Shared TypeScript type definitions
+│   └── server.ts       # Main application entry point that starts the server
+├── .gitignore
+├── readme.md           # You are here!
+└── tools.md            # Detailed documentation of the `mem` API for the LLM
+```
 
 ## An Agent in Action: Example Workflow
 
@@ -319,39 +376,6 @@ To add a new tool (e.g., `mem.searchWeb(query)`):
 This project is licensed under the MIT License. See the `LICENSE` file for details
 
 **Stop building infrastructure. Start building intelligence.**
-````
-
-## File: relay.config.json
-````json
-{
-  "$schema": "https://relay.noca.pro/schema.json",
-  "projectId": "doc",
-  "core": {
-    "logLevel": "info",
-    "enableNotifications": true,
-    "watchConfig": false
-  },
-  "watcher": {
-    "clipboardPollInterval": 2000,
-    "preferredStrategy": "auto",
-    "enableBulkProcessing": false,
-    "bulkSize": 5,
-    "bulkTimeout": 30000
-  },
-  "patch": {
-    "approvalMode": "manual",
-    "approvalOnErrorCount": 0,
-    "linter": "",
-    "preCommand": "",
-    "postCommand": "",
-    "minFileChanges": 0
-  },
-  "git": {
-    "autoGitBranch": false,
-    "gitBranchPrefix": "relay/",
-    "gitBranchTemplate": "gitCommitMsg"
-  }
-}
 ````
 
 ## File: repomix.config.json
