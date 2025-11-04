@@ -1,11 +1,3 @@
-You are absolutely correct. True "Git-Native" memory requires exposing Git operations to the agent, and "intelligent graph operations" are essential to move beyond file-level thinking to *knowledge-level* thinking. The agent should be able to reason about the graph, not just the files.
-
-Since the **Recursa** server is entirely local and built on TypeScript/Node.js, we can integrate with a local Git executable and a graph parsing library (which we'll assume exists in the environment).
-
-Here is the final, comprehensive `TOOLS.md` for the Recursa sandboxed execution environment.
-
----
-
 # TOOLS.md: Recursa Sandboxed API (`mem` Object)
 
 The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
@@ -55,32 +47,24 @@ These tools allow the agent to reason about the relationships and structure inhe
 
 ---
 
-## Category 4: Utility & Diagnostics
+## Category 4: State Management & Checkpoints
+
+Tools for managing the working state during complex, multi-turn operations, providing a safety net against errors.
+
+| Method | Signature | Returns | Description |
+| :--- | :--- | :--- | :--- |
+| **`mem.saveCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Saves the current state.** Stages all working changes (`git add .`) and creates a temporary stash. Use this before a risky operation. |
+| **`mem.revertToLastCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Reverts to the last saved state.** Restores the files to how they were when `saveCheckpoint` was last called. |
+| **`mem.discardChanges`** | `(): Promise<boolean>` | `Promise<boolean>` | **Performs a hard reset.** Abandons all current work (staged and unstaged changes) and reverts the repository to the last commit. |
+
+---
+
+## Category 5: Utility & Diagnostics
 
 General-purpose operations for the sandbox environment.
 
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
-| **`mem.getGraphRoot`** | `(): Promise<string>` | `Promise<string>` | Returns the absolute path of the root directory of the knowledge graph (the `KNOWLEDGE_GRAPH_PATH` from the `.env`). |
-| **`mem.getMemoryUsage`** | `(): Promise<number>` | `Promise<number>` | Returns the total size of the knowledge graph directory in bytes. |
-
-### Tool Execution Flow Philosophy
-
-The LLM MUST understand that all actions are ultimately intended to lead to one or more `mem.updateFile` or `mem.writeFile` calls, followed by a **single** `mem.commitChanges` at the end of a successful thought process.
-
-```typescript
-// Example LLM Thought Process for a modification turn.
-// The agent would generate this code inside a <typescript> tag.
-
-// 1. Read the current state
-const oldContent = await mem.readFile('project-status.md');
-
-// 2. Logic to determine the new state
-const newContent = oldContent + '\n- Task C completed.';
-
-// 3. Write the changes
-const success = await mem.updateFile('project-status.md', oldContent, newContent);
-
-// The agent will see the result of `success`. If true, its next turn will be to commit.
-// If false, it will reason about the failure and may try a different approach.
-```
+| **`mem.getGraphRoot`** | `(): Promise<string>` | `Promise<string>` | Returns the absolute path of the root directory of the knowledge graph. |
+| **`mem.getTokenCount`** | `(filePath: string): Promise<number>` | `Promise<number>` | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
+| **`mem.getTokenCountForPaths`**| `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` |`Promise<PathTokenCount[]>`| A more efficient way to get token counts for multiple files in a single call. |
