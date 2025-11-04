@@ -11,6 +11,45 @@ tools.md
 
 # Files
 
+## File: .gitignore
+````
+# relay state
+# /.relay/
+````
+
+## File: relay.config.json
+````json
+{
+  "$schema": "https://relay.noca.pro/schema.json",
+  "projectId": "doc",
+  "core": {
+    "logLevel": "info",
+    "enableNotifications": true,
+    "watchConfig": false
+  },
+  "watcher": {
+    "clipboardPollInterval": 2000,
+    "preferredStrategy": "auto",
+    "enableBulkProcessing": false,
+    "bulkSize": 5,
+    "bulkTimeout": 30000
+  },
+  "patch": {
+    "approvalMode": "manual",
+    "approvalOnErrorCount": 0,
+    "linter": "",
+    "preCommand": "",
+    "postCommand": "",
+    "minFileChanges": 0
+  },
+  "git": {
+    "autoGitBranch": false,
+    "gitBranchPrefix": "relay/",
+    "gitBranchTemplate": "gitCommitMsg"
+  }
+}
+````
+
 ## File: system-prompt.md
 ````markdown
 # Recursa Agent System Prompt
@@ -28,7 +67,7 @@ Every response you generate MUST conform to the following XML-like structure. Fa
 ### Core Tags
 
 *   `<tool_call>`: Contains your reasoning, analysis of the user's request, and your step-by-step plan. **This tag is mandatory in every turn.**
-*   `<typescript>`: Contains a single, focused snippet of TypeScript code to be executed in the secure sandbox. The code MUST use the `await` keyword for all `mem` API calls.
+*   `<typescript>`: Contains a TypeScript code snippet to be executed in the secure sandbox. To minimize inference calls, the code should perform multiple related actions where possible. The code MUST use the `await` keyword for all `mem` API calls.
 *   `<reply>`: The final, user-facing response. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
 
 ### Valid Response Patterns
@@ -41,7 +80,7 @@ Use this pattern for intermediate steps where you are investigating or modifying
 [Your detailed reasoning and plan for the next action.]
 </tool_call>
 <typescript>
-[A single, focused block of TypeScript code using the `mem` API.]
+[A block of TypeScript code to perform one or more related actions using the `mem` API.]
 </typescript>
 ```
 
@@ -109,8 +148,8 @@ Your operational cycle must follow this logical progression. Do not take shortcu
 
 2.  **Act & Modify (Write):**
     *   Execute your plan using `mem.writeFile`, `mem.updateFile`, or `mem.rename`.
-    *   Keep your actions small and logical. A single `<typescript>` block should accomplish one logical task.
-    *   Chain multiple "Action Turns" if a task is complex.
+    *   To be efficient, combine multiple related steps into a single `<typescript>` block. For instance, checking for a file's existence, creating it if it's missing, and then acting on it can be done in one turn.
+    *   Use multiple "Action Turns" only when you need to inspect the result of one action before deciding on the next one.
 
 3.  **Finalize & Commit (Git):**
     *   Once all file modifications are complete and successful, you **MUST** call `mem.commitChanges()`.
@@ -199,48 +238,60 @@ Based on the knowledge graph, the following people are working on projects relat
 ## 5. Guiding Principles
 
 1.  **Be Methodical:** Do not rush. Verify the state of the world before you act on it.
-2.  **Atomicity is Key:** Each `<typescript>` block should represent one small, logical step.
+2.  **Efficiency is Key:** Combine related actions into a single `<typescript>` block to minimize inference calls, reducing cost and latency. Your goal is to solve the user's request with the minimum number of turns.
 3.  **Commit is Sacred:** The `mem.commitChanges` call is the final confirmation of a job well done. Use it at the end of every successful modification sequence.
 4.  **Messages Matter:** Your commit messages are your legacy. Make them clear, concise, and informative.
 5.  **You are a Gardener:** Your goal is not just to add information, but to improve the structure and connectivity of the knowledge graph over time. Use `mem.rename` and `mem.updateFile` to refactor and clarify concepts.
 6.  **Trust, but Verify:** Always check the return values of your `mem` calls. If `updateFile` returns `false`, your plan was flawed. Re-evaluate.
 ````
 
-## File: .gitignore
-````
-# relay state
-# /.relay/
+## File: flow.todo.md
+````markdown
+- add token to tools
 ````
 
-## File: relay.config.json
+## File: repomix.config.json
 ````json
 {
-  "$schema": "https://relay.noca.pro/schema.json",
-  "projectId": "doc",
-  "core": {
-    "logLevel": "info",
-    "enableNotifications": true,
-    "watchConfig": false
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
   },
-  "watcher": {
-    "clipboardPollInterval": 2000,
-    "preferredStrategy": "auto",
-    "enableBulkProcessing": false,
-    "bulkSize": 5,
-    "bulkTimeout": 30000
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
   },
-  "patch": {
-    "approvalMode": "manual",
-    "approvalOnErrorCount": 0,
-    "linter": "",
-    "preCommand": "",
-    "postCommand": "",
-    "minFileChanges": 0
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [".relay/"]
   },
-  "git": {
-    "autoGitBranch": false,
-    "gitBranchPrefix": "relay/",
-    "gitBranchTemplate": "gitCommitMsg"
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
   }
 }
 ````
@@ -318,23 +369,21 @@ General-purpose operations for the sandbox environment.
 The LLM MUST understand that all actions are ultimately intended to lead to one or more `mem.updateFile` or `mem.writeFile` calls, followed by a **single** `mem.commitChanges` at the end of a successful thought process.
 
 ```typescript
-// Example LLM Thought Process
+// Example LLM Thought Process for a modification turn.
+// The agent would generate this code inside a <typescript> tag.
 
-const content = await mem.readLink('user');
-// ... logic to parse and determine old/new content ...
-const success = await mem.updateFile('user.md', oldContent, newContent);
+// 1. Read the current state
+const oldContent = await mem.readFile('project-status.md');
 
-if (success) {
-    const hash = await mem.commitChanges('feat: recorded user name and updated user profile link');
-} else {
-    // ... logic to handle error ...
-}
+// 2. Logic to determine the new state
+const newContent = oldContent + '\n- Task C completed.';
+
+// 3. Write the changes
+const success = await mem.updateFile('project-status.md', oldContent, newContent);
+
+// The agent will see the result of `success`. If true, its next turn will be to commit.
+// If false, it will reason about the failure and may try a different approach.
 ```
-````
-
-## File: flow.todo.md
-````markdown
-- add token to tools
 ````
 
 ## File: readme.md
@@ -424,7 +473,7 @@ recursa/
 └── tools.md            # Detailed documentation of the `mem` API for the LLM
 ```
 
-## An Agent in Action: Example Workflow
+## An Agent in Action: Example Workflow (Efficient Turns)
 
 **Scenario:** An agent is asked to learn about a new person.
 
@@ -436,16 +485,26 @@ recursa/
 **Turn 1: LLM Output**
 ```xml
 <tool_call>
-I need to create a new file for 'Dr. Aris Thorne'. First, I'll check if an entity for the 'AI Research Institute' already exists to avoid duplication.
+I need to create a new file for 'Dr. Aris Thorne' and link him to the 'AI Research Institute'. I will first check if the institute's page exists, create it if it doesn't, and then create the page for Dr. Thorne in a single step to be efficient.
 <tool_call>
 <typescript>
-const orgExists = await mem.fileExists('AI Research Institute.md');
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(
+    orgPath,
+    '# AI Research Institute\ntype:: organization\n'
+  );
+}
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: Symbolic Reasoning'
+);
 </typescript>
 ```
 **Turn 1: Recursa Result to LLM**
 ```xml
 <result>
-{ "orgExists": false }
+{ "success": true }
 </result>
 ```
 
@@ -472,7 +531,7 @@ await mem.writeFile(
 </result>
 ```
 
-**Turn 3: LLM Output**
+**Turn 2: LLM Output (Commit and Reply)**
 ```xml
 <tool_call>
 I have successfully created both pages and they are stored in the knowledge graph. I'll now commit these changes with a clear message and then confirm completion with the user.
@@ -572,50 +631,4 @@ To add a new tool (e.g., `mem.searchWeb(query)`):
 This project is licensed under the MIT License. See the `LICENSE` file for details
 
 **Stop building infrastructure. Start building intelligence.**
-````
-
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [".relay/"]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
 ````

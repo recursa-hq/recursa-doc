@@ -18,13 +18,15 @@ You're building an intelligent agent and have hit the memory wall. The industry'
 
 Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
 
-## The Recursa Philosophy: Git-Native Memory
+## The Recursa Philosophy: Core Features
 
 Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
 
-*   **Git-Native:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
+*   **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
 *   **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-*   **Think-Act-Commit Loop:** The agent reasons, generates code to modify its memory files, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+*   **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+*   **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
+*   **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
 
 ## How It Works: Architecture
 
@@ -54,98 +56,53 @@ graph TD
 
 1.  **Query via MCP:** Your chat client sends a message to the local Recursa server.
 2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM.
-3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet**. Recursa executes this code in a secure sandbox.
+3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
 4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
 5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
 
-## Project Structure
-
-Recursa is organized with a clean, production-ready structure to make it easy to navigate and contribute to.
-
-```
-recursa/
-├── .env                # Local environment variables (API keys, paths)
-├── package.json        # Project dependencies and scripts
-├── tsconfig.json       # TypeScript compiler configuration
-├── src/
-│   ├── api/            # Handles incoming requests (e.g., from your chat client)
-│   │   └── mcp.handler.ts
-│   ├── core/           # Core application logic
-│   │   ├── Sandbox.ts  # The secure sandbox for executing LLM-generated code
-│   │   └── MemAPI.ts   # Implementation of the `mem` object and its tools
-│   ├── services/       # Connectors to external services
-│   │   ├── Git.ts      # Wrappers for executing local Git commands
-│   │   └── Llm.ts      # Logic for communicating with the LLM API (OpenRouter)
-│   ├── types/          # Shared TypeScript type definitions
-│   └── server.ts       # Main application entry point that starts the server
-├── .gitignore
-├── readme.md           # You are here!
-└── tools.md            # Detailed documentation of the `mem` API for the LLM
-```
-
-## An Agent in Action: Example Workflow (Efficient Turns)
+## An Agent in Action: Example Workflow
 
 **Scenario:** An agent is asked to learn about a new person.
 
 **1. User Query:**
 "I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
 
-**2. Real-time Reasoning (Internal LLM <-> Recursa Dialogue):**
+**2. Turn 1: The agent communicates its intent and acts efficiently.**
+The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
 
-**Turn 1: LLM Output**
+**LLM Response (Turn 1):**
 ```xml
-<tool_call>
-I need to create a new file for 'Dr. Aris Thorne' and link him to the 'AI Research Institute'. I will first check if the institute's page exists, create it if it doesn't, and then create the page for Dr. Thorne in a single step to be efficient.
-<tool_call>
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
 <typescript>
+// Perform all logic in one block for maximum efficiency.
 const orgPath = 'AI Research Institute.md';
-if (!await mem.fileExists(orgPath)) {
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
   await mem.writeFile(
     orgPath,
     '# AI Research Institute\ntype:: organization\n'
   );
 }
+
 await mem.writeFile(
   'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: Symbolic Reasoning'
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
 );
 </typescript>
 ```
-**Turn 1: Recursa Result to LLM**
-```xml
-<result>
-{ "success": true }
-</result>
-```
+*Recursa executes the code and confirms success to the LLM.*
 
-**Turn 2: LLM Output**
-```xml
-<tool_call>
-The affiliation does not exist. I will create a new file for it, and then create the file for Dr. Thorne, linking to the new affiliation page.
-<tool_call>
-<typescript>
-await mem.writeFile(
-  'AI Research Institute.md',
-  '# AI Research Institute\ntype:: organization\n'
-);
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: Symbolic Reasoning'
-);
-</typescript>
-```
-**Turn 2: Recursa Result to LLM**
-```xml
-<result>
-{ "success": true }
-</result>
-```
+**3. Turn 2: The agent saves its work and replies to the user.**
+Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
 
-**Turn 2: LLM Output (Commit and Reply)**
+**LLM Response (Turn 2):**
 ```xml
-<tool_call>
-I have successfully created both pages and they are stored in the knowledge graph. I'll now commit these changes with a clear message and then confirm completion with the user.
-</tool_response>
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
 <typescript>
 await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
 </typescript>
@@ -153,18 +110,6 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
 </reply>
 ```
-
-## Recursa vs. The Alternatives: A Philosophical Divide
-
-| Feature                       | **Recursa (This Project)**                 | Traditional Self-Hosted (DB-based)      | Vector DB (RAG)           |
-| ----------------------------- | ------------------------------------------ | --------------------------------------- | ------------------------- |
-| **Data Model**                | **Plaintext (Git-native)**                 | Opaque Database (SQLite/Postgres)       | Opaque Vector Index       |
-| **Core Operation**            | **Symbolic Reasoning & Graph Generation**  | Vector Similarity Search                | Vector Similarity Search  |
-| **Dynamic Creation**          | ✅ **First-class Citizen**                 | ❌ Not designed for this                | ❌ Impossible             |
-| **Explainability**            | ✅ **Full Reasoning Trace (`git log`)**    | Opaque (similarity scores)              | Opaque (similarity scores) |
-| **DevOps Overhead**           | ✅ **Low (`npm start`)**                   | **High** (DBs, Docker, etc.)            | Low (if managed)          |
-| **Vendor Lock-in**            | ✅ **Impossible (It's your files)**        | High (database schema)                  | High (proprietary index)  |
-
 
 ## 🚀 Getting Started
 
@@ -200,7 +145,7 @@ OPENROUTER_API_KEY="sk-or-..."
 KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
 
 # The model you want to use from OpenRouter
-LLM_MODEL="openai/gpt-oss-20b"
+LLM_MODEL="anthropic/claude-3-sonnet-20240229"
 ```
 
 ### 3. Running the Server
@@ -225,19 +170,17 @@ Recursa is in active development. Our goal is to build the most transparent, pow
 
 Recursa is designed to be hacked on. Contributions are welcome!
 
-
-
 ### Adding New Tools
 
 To add a new tool (e.g., `mem.searchWeb(query)`):
 
-1.  Implement the function's logic in `src/sandbox.ts`.
-2.  Expose the new function on the `mem` object passed to the sandboxed environment.
-3.  Update `TOOLS.md` and the system prompt to document the new function and provide examples of how the LLM should use it.
+1.  Implement the function's logic in `src/core/MemAPI.ts`.
+2.  Expose the new function on the `mem` object in `src/core/Sandbox.ts`.
+3.  Update `tools.md` and `system-prompt.md` to document the new function and provide examples of how the LLM should use it.
 4.  Open a Pull Request!
 
 ## 📜 License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 **Stop building infrastructure. Start building intelligence.**
