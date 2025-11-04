@@ -69,15 +69,18 @@ General-purpose operations for the sandbox environment.
 The LLM MUST understand that all actions are ultimately intended to lead to one or more `mem.updateFile` or `mem.writeFile` calls, followed by a **single** `mem.commitChanges` at the end of a successful thought process.
 
 ```typescript
-// Example LLM Thought Process
+// Example LLM Thought Process for a modification turn.
+// The agent would generate this code inside a <typescript> tag.
 
-const content = await mem.readLink('user');
-// ... logic to parse and determine old/new content ...
-const success = await mem.updateFile('user.md', oldContent, newContent);
+// 1. Read the current state
+const oldContent = await mem.readFile('project-status.md');
 
-if (success) {
-    const hash = await mem.commitChanges('feat: recorded user name and updated user profile link');
-} else {
-    // ... logic to handle error ...
-}
+// 2. Logic to determine the new state
+const newContent = oldContent + '\n- Task C completed.';
+
+// 3. Write the changes
+const success = await mem.updateFile('project-status.md', oldContent, newContent);
+
+// The agent will see the result of `success`. If true, its next turn will be to commit.
+// If false, it will reason about the failure and may try a different approach.
 ```
