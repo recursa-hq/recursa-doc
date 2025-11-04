@@ -83,7 +83,7 @@ recursa/
 └── tools.md            # Detailed documentation of the `mem` API for the LLM
 ```
 
-## An Agent in Action: Example Workflow
+## An Agent in Action: Example Workflow (Efficient Turns)
 
 **Scenario:** An agent is asked to learn about a new person.
 
@@ -95,16 +95,26 @@ recursa/
 **Turn 1: LLM Output**
 ```xml
 <tool_call>
-I need to create a new file for 'Dr. Aris Thorne'. First, I'll check if an entity for the 'AI Research Institute' already exists to avoid duplication.
+I need to create a new file for 'Dr. Aris Thorne' and link him to the 'AI Research Institute'. I will first check if the institute's page exists, create it if it doesn't, and then create the page for Dr. Thorne in a single step to be efficient.
 <tool_call>
 <typescript>
-const orgExists = await mem.fileExists('AI Research Institute.md');
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(
+    orgPath,
+    '# AI Research Institute\ntype:: organization\n'
+  );
+}
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: Symbolic Reasoning'
+);
 </typescript>
 ```
 **Turn 1: Recursa Result to LLM**
 ```xml
 <result>
-{ "orgExists": false }
+{ "success": true }
 </result>
 ```
 
@@ -131,7 +141,7 @@ await mem.writeFile(
 </result>
 ```
 
-**Turn 3: LLM Output**
+**Turn 2: LLM Output (Commit and Reply)**
 ```xml
 <tool_call>
 I have successfully created both pages and they are stored in the knowledge graph. I'll now commit these changes with a clear message and then confirm completion with the user.
