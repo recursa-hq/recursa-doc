@@ -64,6 +64,43 @@ General-purpose operations for the sandbox environment.
 | **`mem.getGraphRoot`** | `(): Promise<string>` | `Promise<string>` | Returns the absolute path of the root directory of the knowledge graph (the `KNOWLEDGE_GRAPH_PATH` from the `.env`). |
 | **`mem.getMemoryUsage`** | `(): Promise<number>` | `Promise<number>` | Returns the total size of the knowledge graph directory in bytes. |
 
+---
+
+## Category 5: Token & Credential Management
+
+Secure storage and retrieval of API tokens, credentials, and secrets within the knowledge graph. Tokens are encrypted at rest and associated with metadata for easy organization and management.
+
+| Method | Signature | Returns | Description |
+| :--- | :--- | :--- | :--- |
+| **`mem.storeToken`** | `(name: string, token: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Stores a new API token or credential securely in the knowledge graph. Metadata is optional but recommended for tracking purposes. |
+| **`mem.getToken`** | `(name: string): Promise<{token: string, metadata: {name: string, service?: string, description?: string, createdAt: string, expiresAt?: string}}>` | `Promise<TokenData>` | Retrieves a stored token and its metadata by name. The token is decrypted and returned in plain text for use. |
+| **`mem.updateToken`** | `(name: string, token: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Updates an existing token with a new value and/or metadata. Maintains the same encryption and security guarantees. |
+| **`mem.deleteToken`** | `(name: string): Promise<boolean>` | `Promise<boolean>` | Permanently removes a token from secure storage. This operation cannot be undone. |
+| **`mem.listTokens`** | `(): Promise<{name: string, metadata: {service?: string, description?: string, createdAt: string, expiresAt?: string}}[]>` | `Promise<TokenSummary[]>` | Lists all stored tokens with their metadata (excluding the actual token values for security). Useful for auditing and management. |
+| **`mem.rotateToken`** | `(name: string, newToken: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Rotates a token by updating it with a new value. Used for refreshing API keys, OAuth tokens, or implementing security best practices. |
+
+### Token Storage Format
+
+Tokens are stored as encrypted blocks within the knowledge graph, typically in a dedicated `.tokens/` directory. Each token is stored as:
+
+```
+# Token: [name]
+- type:: credential
+- service:: [metadata.service]
+- description:: [metadata.description]
+- created:: [ISO timestamp]
+- expires:: [ISO timestamp or empty]
+- token:: [ENCRYPTED_TOKEN]
+```
+
+### Security Best Practices
+
+1. **Naming Convention:** Use descriptive names like `openai_api_key`, `github_pat`, `stripe_secret`, etc.
+2. **Metadata:** Always include `service` and `description` for easy identification
+3. **Rotation:** Use `mem.rotateToken` regularly for long-lived credentials
+4. **Expiration:** Include `expiresAt` metadata when tokens have a fixed lifetime
+5. **Cleanup:** Use `mem.deleteToken` when tokens are no longer needed
+
 ### Tool Execution Flow Philosophy
 
 The LLM MUST understand that all actions are ultimately intended to lead to one or more `mem.updateFile` or `mem.writeFile` calls, followed by a **single** `mem.commitChanges` at the end of a successful thought process.
