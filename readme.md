@@ -2,7 +2,7 @@
 
 **[Project Status: Active Development] [View System Prompt] [Report an Issue]**
 
-**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
+**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** of nested markdown/org-mode blocks as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
 
 Forget wrestling with databases or opaque cloud APIs. This is infrastructure-free, plaintext-first memory for agents that *create*.
 
@@ -23,8 +23,8 @@ Recursa is built on a different philosophy: **Your AI's memory should be a dynam
 Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
 
 *   **Git-Native:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
-*   **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-*   **Think-Act-Commit Loop:** The agent reasons, generates code to modify its memory files, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+*   **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in. It understands that knowledge lives in **nested blocks with properties**, not just flat files.
+*   **Think-Act-Commit Loop:** The agent reasons internally, generates TypeScript to modify its memory graph, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle validated against an org-mode AST.
 
 ## How It Works: Architecture
 
@@ -110,17 +110,25 @@ const orgExists = await mem.fileExists('AI Research Institute.md');
 
 **Turn 2: LLM Output**
 ```xml
-<tool_call>
-The affiliation does not exist. I will create a new file for it, and then create the file for Dr. Thorne, linking to the new affiliation page.
+<think>
+The affiliation does not exist. I will create a new file for it, and then create the file for Dr. Thorne, linking to the new affiliation page. I'll use Logseq/org-mode block syntax for both files.
+</think>
 <tool_call>
 <typescript>
-await mem.writeFile(
-  'AI Research Institute.md',
-  '# AI Research Institute\ntype:: organization\n'
-);
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    '- AI Research Institute\n  - type:: organization'
+  );
+}
+
+// The agent uses valid Logseq/org-mode syntax, treating blocks as first-class citizens.
 await mem.writeFile(
   'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: Symbolic Reasoning'
+  '- Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]'
 );
 </typescript>
 ```
@@ -142,6 +150,55 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 <reply>
 Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
 </reply>
+```
+
+## More Than Just CRUD: Advanced Workflows
+
+Recursa agents can perform complex operations beyond simple file creation.
+
+### Variant 1: Query-Driven Batch Update
+
+**User:** "Tag all people who work in symbolic reasoning as #priority-contact."
+
+**LLM Response:**
+```xml
+<think>
+Okay, I'll find all people associated with symbolic reasoning and add the #priority-contact tag.
+</think>
+<typescript>
+const results = await mem.queryGraph('(property field [[Symbolic Reasoning]])');
+for (const result of results) {
+  let content = await mem.readFile(result.filePath);
+  // Note: A real implementation might use a more robust AST parser.
+  // This is a simplified example for clarity.
+  const newContent = content.trim() + '\n  - tags:: #priority-contact';
+  await mem.updateFile(result.filePath, content, newContent);
+}
+</typescript>
+```
+
+### Variant 2: In-place Refactoring
+
+**User:** "Rename the 'field' property to 'specialty' everywhere."
+
+**LLM Response:**
+```xml
+<think>
+Sure, I'll refactor the property 'field' to 'specialty' across the entire knowledge base.
+</think>
+<typescript>
+const allFiles = await mem.listFiles();
+const mdFiles = allFiles.filter(f => f.endsWith('.md'));
+
+for (const file of mdFiles) {
+  const content = await mem.readFile(file);
+  // Using a simple regex for this example.
+  if (content.includes('field::')) {
+    const newContent = content.replace(/(\s+-\s+field::)/g, '$1specialty::');
+    await mem.updateFile(file, content, newContent);
+  }
+}
+</typescript>
 ```
 
 ## Recursa vs. The Alternatives: A Philosophical Divide
