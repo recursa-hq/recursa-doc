@@ -36,7 +36,7 @@ These tools leverage the Git repository tracking the knowledge graph, allowing t
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
 | **`mem.gitDiff`** | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>` | `Promise<string>` | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.** |
-| **`mem.gitLog`** | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed. |
+| **`mem.gitLog`** | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<{hash: string, message: string, date: string}[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed. |
 | **`mem.gitStagedFiles`** | `(): Promise<string[]>` | `Promise<string[]>` | Lists files that have been modified and are currently "staged" for the next commit (or the current working tree changes). Useful before a major operation. |
 | **`mem.commitChanges`** | `(message: string): Promise<string>` | `Promise<string>` | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash. |
 
@@ -48,7 +48,7 @@ These tools allow the agent to reason about the relationships and structure inhe
 
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
-| **`mem.queryGraph`** | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. *Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`* |
+| **`mem.queryGraph`** | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<{filePath: string, matches: string[]}[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. *Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`* |
 | **`mem.getBacklinks`** | `(filePath: string): Promise<string[]>` | `Promise<string[]>` | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage. |
 | **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>` | `Promise<string[]>` | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**. |
 | **`mem.searchGlobal`** | `(query: string): Promise<string[]>` | `Promise<string[]>` | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match. |
@@ -70,14 +70,36 @@ General-purpose operations for the sandbox environment.
 
 Secure storage and retrieval of API tokens, credentials, and secrets within the knowledge graph. Tokens are encrypted at rest and associated with metadata for easy organization and management.
 
+### Type Definitions
+
+```typescript
+interface TokenMetadata {
+  name: string;
+  service?: string;
+  description?: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+interface TokenData {
+  token: string;
+  metadata: TokenMetadata;
+}
+
+interface TokenSummary {
+  name: string;
+  metadata: TokenMetadata;
+}
+```
+
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
-| **`mem.storeToken`** | `(name: string, token: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Stores a new API token or credential securely in the knowledge graph. Metadata is optional but recommended for tracking purposes. |
-| **`mem.getToken`** | `(name: string): Promise<{token: string, metadata: {name: string, service?: string, description?: string, createdAt: string, expiresAt?: string}}>` | `Promise<TokenData>` | Retrieves a stored token and its metadata by name. The token is decrypted and returned in plain text for use. |
-| **`mem.updateToken`** | `(name: string, token: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Updates an existing token with a new value and/or metadata. Maintains the same encryption and security guarantees. |
+| **`mem.storeToken`** | `(name: string, token: string, metadata?: Omit<TokenMetadata, 'name' | 'createdAt'>): Promise<boolean>` | `Promise<boolean>` | Stores a new API token or credential securely in the knowledge graph. Metadata is optional but recommended for tracking purposes. |
+| **`mem.getToken`** | `(name: string): Promise<TokenData>` | `Promise<TokenData>` | Retrieves a stored token and its metadata by name. The token is decrypted and returned in plain text for use. |
+| **`mem.updateToken`** | `(name: string, token: string, metadata?: Omit<TokenMetadata, 'name' | 'createdAt'>): Promise<boolean>` | `Promise<boolean>` | Updates an existing token with a new value and/or metadata. Maintains the same encryption and security guarantees. |
 | **`mem.deleteToken`** | `(name: string): Promise<boolean>` | `Promise<boolean>` | Permanently removes a token from secure storage. This operation cannot be undone. |
-| **`mem.listTokens`** | `(): Promise<{name: string, metadata: {service?: string, description?: string, createdAt: string, expiresAt?: string}}[]>` | `Promise<TokenSummary[]>` | Lists all stored tokens with their metadata (excluding the actual token values for security). Useful for auditing and management. |
-| **`mem.rotateToken`** | `(name: string, newToken: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Rotates a token by updating it with a new value. Used for refreshing API keys, OAuth tokens, or implementing security best practices. |
+| **`mem.listTokens`** | `(): Promise<TokenSummary[]>` | `Promise<TokenSummary[]>` | Lists all stored tokens with their metadata (excluding the actual token values for security). Useful for auditing and management. |
+| **`mem.rotateToken`** | `(name: string, newToken: string, metadata?: Omit<TokenMetadata, 'name' | 'createdAt'>): Promise<boolean>` | `Promise<boolean>` | Rotates a token by updating it with a new value. Used for refreshing API keys, OAuth tokens, or implementing security best practices. |
 
 ### Token Storage Format
 
