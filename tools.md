@@ -36,7 +36,7 @@ These tools leverage the Git repository tracking the knowledge graph, allowing t
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
 | **`mem.gitDiff`** | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>` | `Promise<string>` | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.** |
-| **`mem.gitLog`** | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed. |
+| **`mem.gitLog`** | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<{hash: string, message: string, date: string}[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed. |
 | **`mem.gitStagedFiles`** | `(): Promise<string[]>` | `Promise<string[]>` | Lists files that have been modified and are currently "staged" for the next commit (or the current working tree changes). Useful before a major operation. |
 | **`mem.commitChanges`** | `(message: string): Promise<string>` | `Promise<string>` | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash. |
 
@@ -48,7 +48,7 @@ These tools allow the agent to reason about the relationships and structure inhe
 
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
-| **`mem.queryGraph`** | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. *Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`* |
+| **`mem.queryGraph`** | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<{filePath: string, matches: string[]}[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. *Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`* |
 | **`mem.getBacklinks`** | `(filePath: string): Promise<string[]>` | `Promise<string[]>` | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage. |
 | **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>` | `Promise<string[]>` | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**. |
 | **`mem.searchGlobal`** | `(query: string): Promise<string[]>` | `Promise<string[]>` | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match. |
@@ -66,40 +66,67 @@ General-purpose operations for the sandbox environment.
 
 ---
 
-## Category 5: Token & Credential Management
+## Category 5: Token Counting & Measurement
 
-Secure storage and retrieval of API tokens, credentials, and secrets within the knowledge graph. Tokens are encrypted at rest and associated with metadata for easy organization and management.
+Token counting and measurement tools to help agents understand token costs and manage context window usage. These tools use the o200k_base encoding (OpenAI's tokenizer) for accurate counting.
+
+### Type Definitions
+
+```typescript
+interface TokenCount {
+  total: number;
+  tokens: number;
+  characters: number;
+}
+
+interface FileTokenBreakdown {
+  filePath: string;
+  tokens: number;
+  characters: number;
+  blocks: number;
+}
+
+interface DirectoryTokenStats {
+  totalTokens: number;
+  totalFiles: number;
+  largestFile: {path: string; tokens: number};
+  averageTokensPerFile: number;
+}
+```
 
 | Method | Signature | Returns | Description |
 | :--- | :--- | :--- | :--- |
-| **`mem.storeToken`** | `(name: string, token: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Stores a new API token or credential securely in the knowledge graph. Metadata is optional but recommended for tracking purposes. |
-| **`mem.getToken`** | `(name: string): Promise<{token: string, metadata: {name: string, service?: string, description?: string, createdAt: string, expiresAt?: string}}>` | `Promise<TokenData>` | Retrieves a stored token and its metadata by name. The token is decrypted and returned in plain text for use. |
-| **`mem.updateToken`** | `(name: string, token: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Updates an existing token with a new value and/or metadata. Maintains the same encryption and security guarantees. |
-| **`mem.deleteToken`** | `(name: string): Promise<boolean>` | `Promise<boolean>` | Permanently removes a token from secure storage. This operation cannot be undone. |
-| **`mem.listTokens`** | `(): Promise<{name: string, metadata: {service?: string, description?: string, createdAt: string, expiresAt?: string}}[]>` | `Promise<TokenSummary[]>` | Lists all stored tokens with their metadata (excluding the actual token values for security). Useful for auditing and management. |
-| **`mem.rotateToken`** | `(name: string, newToken: string, metadata?: {service?: string, description?: string, expiresAt?: string}): Promise<boolean>` | `Promise<boolean>` | Rotates a token by updating it with a new value. Used for refreshing API keys, OAuth tokens, or implementing security best practices. |
+| **`mem.countFileTokens`** | `(filePath: string): Promise<TokenCount>` | `Promise<TokenCount>` | Counts the number of tokens in a single file using o200k_base encoding. Returns token count, character count, and total. |
+| **`mem.countDirectoryTokens`** | `(directoryPath?: string): Promise<number>` | `Promise<number>` | Counts the total number of tokens in all files within a directory (recursive). Useful for estimating context size. |
+| **`mem.getTokenBreakdown`** | `(filePath: string): Promise<FileTokenBreakdown>` | `Promise<FileTokenBreakdown>` | Provides detailed token breakdown including tokens per block/section for a file. Helps identify large content areas. |
+| **`mem.estimateReadCost`** | `(filePath: string): Promise<number>` | `Promise<number>` | Estimates the token cost to read and process a file in an LLM context. Useful for planning batch operations. |
+| **`mem.getFilesByTokenSize`** | `(directoryPath?: string, limit?: number): Promise<{filePath: string; tokens: number}[]>` | `Promise<{filePath: string; tokens: number}[]>` | Lists files in a directory sorted by token size (largest first). Helps identify large files that may need chunking. |
+| **`mem.getDirectoryTokenStats`** | `(directoryPath?: string): Promise<DirectoryTokenStats>` | `Promise<DirectoryTokenStats>` | Returns comprehensive token statistics for a directory including totals, averages, and largest file. |
 
-### Token Storage Format
+### Usage Examples
 
-Tokens are stored as encrypted blocks within the knowledge graph, typically in a dedicated `.tokens/` directory. Each token is stored as:
+```typescript
+// Check if a file fits within context window
+const count = await mem.countFileTokens('large-document.md');
+if (count.tokens > 32000) {
+  console.log('File too large, consider chunking');
+}
 
+// Find largest files before batch processing
+const largestFiles = await mem.getFilesByTokenSize('.', 10);
+console.log('Top 10 largest files:', largestFiles);
+
+// Get directory statistics for planning
+const stats = await mem.getDirectoryTokenStats('./pages');
+console.log(`Directory has ${stats.totalTokens} tokens across ${stats.totalFiles} files`);
 ```
-# Token: [name]
-- type:: credential
-- service:: [metadata.service]
-- description:: [metadata.description]
-- created:: [ISO timestamp]
-- expires:: [ISO timestamp or empty]
-- token:: [ENCRYPTED_TOKEN]
-```
 
-### Security Best Practices
+### Token Counting Best Practices
 
-1. **Naming Convention:** Use descriptive names like `openai_api_key`, `github_pat`, `stripe_secret`, etc.
-2. **Metadata:** Always include `service` and `description` for easy identification
-3. **Rotation:** Use `mem.rotateToken` regularly for long-lived credentials
-4. **Expiration:** Include `expiresAt` metadata when tokens have a fixed lifetime
-5. **Cleanup:** Use `mem.deleteToken` when tokens are no longer needed
+1. **Context Management:** Use `countFileTokens()` before reading large files to avoid exceeding context limits
+2. **Batch Planning:** Use `getFilesByTokenSize()` to identify files that need chunking before batch operations
+3. **Cost Estimation:** Use `estimateReadCost()` to predict token usage for planned operations
+4. **Optimization:** Monitor directory stats to optimize file organization and content chunking
 
 ### Tool Execution Flow Philosophy
 
