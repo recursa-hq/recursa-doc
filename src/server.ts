@@ -110,8 +110,9 @@ export const createApp = (
       {
         body: t.Object({
           query: t.String({
-            minLength: 1,
-            // Add a transform to trim the query, and an error for empty-after-trim
+            // Use a pattern to ensure at least one non-whitespace character.
+            // This is more robust than `minLength` after a transform.
+            pattern: '.*\\S.*',
             transform: (value: string) => value.trim(),
             error: 'Query must be a non-empty string.',
           }),

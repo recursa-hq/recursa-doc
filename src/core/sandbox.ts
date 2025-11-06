@@ -12,22 +12,17 @@ export const runInSandbox = async (
   code: string,
   memApi: MemAPI
 ): Promise<unknown> => {
-  // Create a deep copy of the memApi to avoid readonly property issues
-  const memApiCopy = { ...memApi };
-  
   const vm = new VM({
     timeout: 10000, // 10 seconds
-    sandbox: {
-      mem: memApiCopy,
-    },
     eval: false,
     wasm: false,
     fixAsync: true,
     // Deny access to all node builtins by default.
-    require: {
-      builtin: [],
-    },
+    require: { builtin: [] },
   } as VMOptions);
+
+  // Freeze the mem API into the VM's global context.
+  vm.freeze(memApi, 'mem');
 
   // Wrap the user code in an async IIFE to allow top-level await.
   const wrappedCode = `(async () => { ${code} })();`;

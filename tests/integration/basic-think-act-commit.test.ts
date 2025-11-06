@@ -70,8 +70,7 @@ describe('Basic Think-Act-Commit Integration Tests', () => {
       // Mock LLM response sequence
       const mockLLMQuery = createMockLLMQuery([
         // First response: Think and Act
-        `</think>
-I need to create a test file with some content.
+        `<think>I need to create a test file with some content.</think>
 <typescript>
 const fileName = 'simple-test.md';
 const content = '# Simple Test\n\nThis is a simple test file.';
@@ -138,8 +137,7 @@ Successfully created and committed the test file.
 
       const mockLLMQuery = createMockLLMQuery([
         // First response: Update file
-        `</think>
-I need to update the existing file with new content.
+        `<think>I need to update the existing file with new content.</think>
 <typescript>
 const fileName = 'update-test.md';
 const existingContent = await mem.readFile(fileName);
@@ -187,14 +185,12 @@ Successfully updated the file and committed the changes.
     it('should handle error recovery and continue with work', async () => {
       const mockLLMQuery = createMockLLMQuery([
         // First response with intentional error
-        `</think>
-I'll try to read a file that doesn't exist to test error handling.
+        `<think>I'll try to read a file that doesn't exist to test error handling.</think>
 <typescript>
 await mem.readFile('non-existent.md');
 </typescript>`,
         // Second response: Recovery
-        `</think>
-There was an error reading the file. I'll create it instead.
+        `<think>There was an error reading the file. I'll create it instead.</think>
 <typescript>
 await mem.writeFile('non-existent.md', '# Created After Error\n\nFile created after error.');
 </typescript>`,
@@ -239,8 +235,7 @@ Successfully recovered from error and created the file.
     it('should handle multiple file operations in sequence', async () => {
       const mockLLMQuery = createMockLLMQuery([
         // First response: Create multiple files
-        `</think>
-I'll create a directory structure with multiple files.
+        `<think>I'll create a directory structure with multiple files.</think>
 <typescript>
 // Create directory
 await mem.createDir('multi-test');
@@ -306,13 +301,11 @@ Successfully created multiple files in the directory structure.
 
       // First query: Create initial file
       const firstMockLLMQuery = createMockLLMQuery([
-        `</think>
-Creating the first file in the session.
+        `<think>Creating the first file in the session.</think>
 <typescript>
 await mem.writeFile('session-context.md', '# Session Test\n\nFirst file in this session.');
 </typescript>`,
-        `</think>
-First file created.
+        `<think>First file created.</think>
 <typescript>
 await mem.commitChanges('feat: add first session file');
 </typescript>`,
@@ -334,15 +327,13 @@ First file created and committed in the session.
 
       // Second query: Update the file
       const secondMockLLMQuery = createMockLLMQuery([
-        `</think>
-Adding to the existing file in the same session.
+        `<think>Adding to the existing file in the same session.</think>
 <typescript>
 const existingContent = await mem.readFile('session-context.md');
 const updatedContent = existingContent + '\n\n## Second Update\n\nAdded in the same session.';
 await mem.updateFile('session-context.md', existingContent, updatedContent);
 </typescript>`,
-        `</think>
-File updated in session.
+        `<think>File updated in session.</think>
 <typescript>
 await mem.commitChanges('feat: update file in same session');
 </typescript>`,

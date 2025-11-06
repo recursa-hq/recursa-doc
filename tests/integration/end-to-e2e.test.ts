@@ -62,7 +62,7 @@ describe('End-to-End Complete Flow Tests', () => {
 
       // Phase 1: Initialize project
       const initMockLLMQuery = createMockLLMQuery([
-        `I'll initialize a new project with basic structure.
+        `<think>I'll initialize a new project with basic structure.</think>
 <typescript>
 // Create project structure
 await mem.writeFile('package.json', JSON.stringify({
@@ -77,13 +77,12 @@ await mem.writeFile('index.js', 'console.log("Hello, World!");');
 await mem.createDir('src');
 await mem.writeFile('src/app.js', '// Application logic');
 </typescript>`,
-        `Project initialized. Now commit the initial setup.
+        `<think>Project initialized. Now commit the initial setup.</think>
 <typescript>
 await mem.commitChanges('feat: initialize project with basic structure');
 </typescript>`,
-        `<reply>
-Project initialized successfully with package.json, README, main entry point, and source directory.
-</reply>`,
+        `<think>Replying to user.</think>
+<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
       ]);
 
       const initResult = await handleUserQuery(
@@ -97,7 +96,7 @@ Project initialized successfully with package.json, README, main entry point, an
 
       // Phase 2: Add features
       const featureMockLLMQuery = createMockLLMQuery([
-        `I'll add features to the existing project.
+        `<think>I'll add features to the existing project.</think>
 <typescript>
 // Add feature files
 await mem.writeFile('src/utils.js', '// Utility functions\nexports.formatDate = (date) => date.toISOString();');
@@ -105,13 +104,12 @@ await mem.writeFile('src/config.js', '// Configuration\nmodule.exports = { env: 
 await mem.createDir('tests');
 await mem.writeFile('tests/utils.test.js', '// Test utilities\nconst { formatDate } = require('../src/utils.js');');
 </typescript>`,
-        `Features added. Commit the new functionality.
+        `<think>Features added. Commit the new functionality.</think>
 <typescript>
 await mem.commitChanges('feat: add utilities, config, and test structure');
 </typescript>`,
-        `<reply>
-Added utility functions, configuration, and test structure to the project.
-</reply>`,
+        `<think>Replying to user.</think>
+<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
       ]);
 
       const featureResult = await handleUserQuery(
@@ -125,7 +123,7 @@ Added utility functions, configuration, and test structure to the project.
 
       // Phase 3: Update existing files
       const updateMockLLMQuery = createMockLLMQuery([
-        `I'll update the main application to use the new utilities.
+        `<think>I'll update the main application to use the new utilities.</think>
 <typescript>
 // Update main file
 const indexContent = await mem.readFile('index.js');
@@ -140,13 +138,12 @@ const readmeContent = await mem.readFile('README.md');
 const updatedReadme = readmeContent + '\n\n## Usage\n\nRun with: npm start';
 await mem.updateFile('README.md', readmeContent, updatedReadme);
 </typescript>`,
-        `Main application updated. Commit the improvements.
+        `<think>Main application updated. Commit the improvements.</think>
 <typescript>
 await mem.commitChanges('feat: integrate utilities and update documentation');
 </typescript>`,
-        `<reply>
-Updated the main application to use utilities and improved documentation.
-</reply>`,
+        `<think>Replying to user.</think>
+<reply>Updated the main application to use utilities and improved documentation.</reply>`,
       ]);
 
       const updateResult = await handleUserQuery(
@@ -209,7 +206,7 @@ Updated the main application to use utilities and improved documentation.
       };
 
       const complexMockLLMQuery = createMockLLMQuery([
-        `I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.
+        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
 <typescript>
 // Create multiple related files
 await mem.writeFile('docs/intro.md', '# Introduction\n\nProject introduction.');
@@ -226,7 +223,7 @@ await mem.writeFile('docs/obsolete.md', '# Obsolete\n\nThis will be deleted.');
 const docsFiles = await mem.listFiles('docs');
 console.log('Files created:', docsFiles);
 </typescript>`,
-        `Now I'll perform file operations: rename and delete.
+        `<think>Now I'll perform file operations: rename and delete.</think>
 <typescript>
 // Rename temp.md to overview.md
 await mem.rename('docs/temp.md', 'docs/overview.md');
@@ -243,7 +240,7 @@ await mem.updateFile('docs/intro.md', introContent, updatedIntro);
 const stagedFiles = await mem.gitStagedFiles();
 console.log('Staged files:', stagedFiles);
 </typescript>`,
-        `File operations complete. Now commit and verify git operations.
+        `<think>File operations complete. Now commit and verify git operations.</think>
 <typescript>
 await mem.commitChanges('feat: reorganize documentation structure');
 
@@ -254,7 +251,8 @@ const gitLog = await mem.gitLog('docs/', 5);
 console.log('Git diff for intro.md:', gitDiff);
 console.log('Git log for docs/:', gitLog);
 </typescript>`,
-        `<reply>
+        `<think>Replying to user.</think>
+<reply>
 Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
 </reply>`,
       ]);
@@ -320,7 +318,7 @@ Successfully performed complex file operations including creating multiple docum
       };
 
       const errorRecoveryMockLLMQuery = createMockLLMQuery([
-        `I'll attempt various operations to test error handling and recovery.
+        `<think>I'll attempt various operations to test error handling and recovery.</think>
 <typescript>
 // This should fail - file doesn't exist
 try {
@@ -342,7 +340,7 @@ await mem.writeFile('non-existent-config.json', JSON.stringify({
   version: '1.0.0'
 }, null, 2));
 </typescript>`,
-        `Now I'll test additional error scenarios.
+        `<think>Now I'll test additional error scenarios.</think>
 <typescript>
 // Try to update a file that doesn't exist
 try {
@@ -360,11 +358,12 @@ try {
   console.log('Delete error caught:', error.message);
 }
 </typescript>`,
-        `Error recovery completed. Now commit all successful operations.
+        `<think>Error recovery completed. Now commit all successful operations.</think>
 <typescript>
 await mem.commitChanges('feat: demonstrate error handling and recovery');
 </typescript>`,
-        `<reply>
+        `<think>Replying to user.</think>
+<reply>
 Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
 </reply>`,
       ]);

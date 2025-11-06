@@ -71,14 +71,14 @@ describe('Workflow Integration Tests', () => {
       // Mock LLM response sequence with proper XML format
       const mockLLMQuery = createMockLLMQuery([
         // First response: Think and Act
-        `I'll create a simple test file to verify the workflow.
+        `<think>I'll create a simple test file to verify the workflow.</think>
 <typescript>
 const fileName = 'workflow-test.md';
 const content = '# Workflow Test\n\nThis is a test file for the workflow integration.';
 await mem.writeFile(fileName, content);
 </typescript>`,
         // Second response: Commit and Reply
-        `File created successfully. Now commit the changes.
+        `<think>File created successfully. Now commit the changes.</think>
 <typescript>
 await mem.commitChanges('feat: add workflow test file');
 </typescript>
@@ -123,7 +123,7 @@ Successfully created and committed the workflow test file.
       // Mock LLM response sequence
       const mockLLMQuery = createMockLLMQuery([
         // First response: Create directory and files
-        `I'll create a directory structure with multiple files.
+        `<think>I'll create a directory structure with multiple files.</think>
 <typescript>
 // Create directory
 await mem.createDir('project');
@@ -138,7 +138,7 @@ const files = await mem.listFiles('project');
 console.log('Files created:', files);
 </typescript>`,
         // Second response: Commit and Reply
-        `All files created successfully. Now commit the project structure.
+        `<think>All files created successfully. Now commit the project structure.</think>
 <typescript>
 await mem.commitChanges('feat: create project structure with multiple files');
 </typescript>
@@ -204,7 +204,7 @@ Successfully created a complete project structure with README, main file, and co
       // Mock LLM response for modification
       const mockLLMQuery = createMockLLMQuery([
         // First response: Modify the file
-        `I'll modify the existing file by adding new content.
+        `<think>I'll modify the existing file by adding new content.</think>
 <typescript>
 const fileName = 'modify-test.md';
 const existingContent = await mem.readFile(fileName);
@@ -212,7 +212,7 @@ const newContent = existingContent + '\n\n## New Section\n\nThis content was add
 await mem.updateFile(fileName, existingContent, newContent);
 </typescript>`,
         // Second response: Commit and Reply
-        `File modified successfully. Now commit the changes.
+        `<think>File modified successfully. Now commit the changes.</think>
 <typescript>
 await mem.commitChanges('feat: modify file with new section');
 </typescript>
@@ -262,19 +262,19 @@ Successfully modified the file by adding a new section.
       // Mock LLM response sequence demonstrating the complete loop
       const mockLLMQuery = createMockLLMQuery([
         // Think phase
-        `I need to create a comprehensive example that demonstrates the complete Think-Act-Commit loop.
+        `<think>I need to create a comprehensive example that demonstrates the complete Think-Act-Commit loop.</think>
 <typescript>
 // Create a detailed example file
 await mem.writeFile('loop-example.md', '# Complete Loop Example\n\nThis demonstrates the full workflow.');
 await mem.writeFile('loop-example.md', await mem.readFile('loop-example.md') + '\n\n## Steps\n\n1. Think\n2. Act\n3. Commit');
 </typescript>`,
         // Commit phase
-        `Example created successfully. Now commit the demonstration.
+        `<think>Example created successfully. Now commit the demonstration.</think>
 <typescript>
 await mem.commitChanges('feat: demonstrate complete Think-Act-Commit loop');
 </typescript>`,
         // Final reply
-        `Complete workflow demonstrated successfully.
+        `<think>Complete workflow demonstrated successfully.</think>
 <reply>
 I've successfully demonstrated the complete Think-Act-Commit loop by creating an example file and committing the changes.
 </reply>`,
