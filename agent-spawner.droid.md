@@ -35,7 +35,7 @@
 2. `tmux capture-pane -t $SESSION -p` to watch real work.
 3. Fail/idle >20 min → mark `FAILED`, kill, clean worktree & branch, retry once.
 4. Keep 3–5 agents alive; spawn while ready tasks exist.
-5. When audit ready (all `DONE`), spawn:
+5. When audit ready (all `DONE`), spawn multiple non isolated:
    ```bash
    droid exec --skip-permissions-unsafe "
    1. Merge every job-* branch.
