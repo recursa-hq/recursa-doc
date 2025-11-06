@@ -3,6 +3,58 @@ import { config } from './config';
 import { handleUserQuery } from './core/loop';
 import { logger } from './lib/logger';
 import { randomUUID } from 'crypto';
+import type { StatusUpdate } from './types';
+
+// Define store interface for timing
+interface RequestStore {
+  startTime?: number;
+}
+
+// Store active SSE connections by run ID
+const sseConnections = new Map<string, Set<(data: string) => void>>();
+
+// Helper function to broadcast status updates to connected clients
+const broadcastStatusUpdate = (update: StatusUpdate) => {
+  const connections = sseConnections.get(update.runId);
+  if (connections) {
+    const data = `data: ${JSON.stringify(update)}\n\n`;
+    connections.forEach((send) => send(data));
+  }
+};
+
+// Helper function to register a new SSE connection
+const registerSSEConnection = (
+  runId: string,
+  sendFn: (data: string) => void
+) => {
+  if (!sseConnections.has(runId)) {
+    sseConnections.set(runId, new Set());
+  }
+  sseConnections.get(runId)!.add(sendFn);
+
+  // Send initial connection message
+  const initialMessage: StatusUpdate = {
+    type: 'think',
+    runId,
+    timestamp: Date.now(),
+    content: 'Connection established',
+  };
+  sendFn(`data: ${JSON.stringify(initialMessage)}\n\n`);
+};
+
+// Helper function to unregister SSE connection
+const unregisterSSEConnection = (
+  runId: string,
+  sendFn: (data: string) => void
+) => {
+  const connections = sseConnections.get(runId);
+  if (connections) {
+    connections.delete(sendFn);
+    if (connections.size === 0) {
+      sseConnections.delete(runId);
+    }
+  }
+};
 
 export const createApp = (
   handleQuery: typeof handleUserQuery,
@@ -14,7 +66,7 @@ export const createApp = (
       request.headers.set('X-Request-ID', randomUUID());
     })
     .onBeforeHandle(({ request, store }) => {
-      store.startTime = Date.now();
+      (store as RequestStore).startTime = Date.now();
       logger.info('Request received', {
         reqId: request.headers.get('X-Request-ID'),
         method: request.method,
@@ -22,7 +74,7 @@ export const createApp = (
       });
     })
     .onAfterHandle(({ request, store }) => {
-      const duration = Date.now() - (store.startTime as number);
+      const duration = Date.now() - ((store as RequestStore).startTime || 0);
       logger.info('Request completed', {
         reqId: request.headers.get('X-Request-ID'),
         method: request.method,
@@ -32,7 +84,7 @@ export const createApp = (
     })
     // --- Error Handling ---
     .onError(({ code, error, set, request }) => {
-      logger.error('An error occurred', error, {
+      logger.error('An error occurred', error as Error, {
         reqId: request.headers.get('X-Request-ID'),
         code,
       });
@@ -41,14 +93,116 @@ export const createApp = (
     })
     // --- Routes ---
     .get('/', () => ({ status: 'ok', message: 'Recursa server is running' }))
+    // SSE endpoint for real-time status updates
+    .get('/events/:runId', async ({ params, set }) => {
+      const { runId } = params;
+
+      // Set SSE headers
+      set.headers = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control',
+      };
+
+      // Create a streaming response
+      const stream = new ReadableStream({
+        start(controller) {
+          const sendFn = (data: string) => {
+            try {
+              controller.enqueue(new TextEncoder().encode(data));
+            } catch (error) {
+              logger.error('Failed to send SSE data', error as Error, {
+                runId,
+              });
+            }
+          };
+
+          // Register the connection
+          registerSSEConnection(runId, sendFn);
+
+          // Handle connection close
+          return () => {
+            unregisterSSEConnection(runId, sendFn);
+            controller.close();
+          };
+        },
+        cancel() {
+          unregisterSSEConnection(runId, () => {});
+        },
+      });
+
+      return new Response(stream);
+    })
     .post(
       '/mcp',
       async ({ body }) => {
         const { query, sessionId } = body;
-        // NOTE: For a simple non-streaming implementation, we await the final result.
-        // A production implementation should use WebSockets or SSE to stream back <think> messages.
-        const finalReply = await handleQuery(query, appConfig, sessionId);
-        return { reply: finalReply };
+        const runId = randomUUID();
+
+        logger.info('Starting MCP request', {
+          runId,
+          sessionId,
+          queryLength: query.length,
+        });
+
+        // Create a promise that will resolve with the final response
+        let finalReply: string;
+        let hasError = false;
+
+        try {
+          // Set up the status update callback to broadcast via SSE
+          const onStatusUpdate = (update: StatusUpdate) => {
+            logger.debug('Broadcasting status update', {
+              runId,
+              type: update.type,
+            });
+            broadcastStatusUpdate(update);
+          };
+
+          // Execute the query with streaming support
+          finalReply = await handleQuery(
+            query,
+            appConfig,
+            sessionId,
+            undefined,
+            onStatusUpdate
+          );
+        } catch (error) {
+          hasError = true;
+          logger.error('Error handling MCP request', error as Error, { runId });
+
+          // Broadcast error via SSE
+          const errorUpdate: StatusUpdate = {
+            type: 'error',
+            runId,
+            timestamp: Date.now(),
+            content:
+              error instanceof Error ? error.message : 'Unknown error occurred',
+          };
+          broadcastStatusUpdate(errorUpdate);
+
+          finalReply = 'An error occurred while processing your request.';
+        }
+
+        // Send completion status
+        const completionUpdate: StatusUpdate = {
+          type: 'complete',
+          runId,
+          timestamp: Date.now(),
+          content: hasError
+            ? 'Request completed with errors'
+            : 'Request completed successfully',
+          data: { reply: finalReply, hasError },
+        };
+        broadcastStatusUpdate(completionUpdate);
+
+        return {
+          runId,
+          reply: finalReply,
+          streamingEndpoint: `/events/${runId}`,
+        };
       },
       {
         body: t.Object({
@@ -66,7 +220,9 @@ if (import.meta.main) {
   const app = createApp(handleUserQuery, config);
 
   app.listen(config.port, () => {
-    logger.info(`🧠 Recursa server listening on http://localhost:${config.port}`);
+    logger.info(
+      `🧠 Recursa server listening on http://localhost:${config.port}`
+    );
   });
 
   // --- Graceful Shutdown ---

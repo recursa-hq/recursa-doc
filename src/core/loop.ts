@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config';
-import type { ExecutionContext, ChatMessage } from '../types';
+import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
 import { logger } from '../lib/logger';
 import { queryLLMWithRetries as defaultQueryLLM } from './llm';
 import { parseLLMResponse } from './parser';
@@ -24,24 +24,24 @@ const getSystemPrompt = (): ChatMessage => {
   try {
     // Resolve the path to 'docs/system-prompt.md' from the project root.
     const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
-    
+
     // Read the file content synchronously.
     const systemPromptContent = fs.readFileSync(promptPath, 'utf-8');
-    
+
     // Create the ChatMessage object and store it in `systemPromptMessage`.
     systemPromptMessage = {
       role: 'system',
       content: systemPromptContent.trim(),
     };
-    
+
     logger.info('System prompt loaded successfully', { path: promptPath });
     return systemPromptMessage;
   } catch (error) {
     // If file read fails, log a critical error and exit, as the agent cannot run without it.
-    logger.error('Failed to load system prompt file', error as Error, { 
-      path: path.resolve(process.cwd(), 'docs/system-prompt.md')
+    logger.error('Failed to load system prompt file', error as Error, {
+      path: path.resolve(process.cwd(), 'docs/system-prompt.md'),
     });
-    
+
     // Exit the process with a non-zero code to indicate failure
     process.exit(1);
   }
@@ -52,12 +52,17 @@ export const handleUserQuery = async (
   config: AppConfig,
   sessionId?: string,
   // Allow overriding the LLM query function (with its retry logic) for testing purposes
-  queryLLM: typeof defaultQueryLLM = defaultQueryLLM
+  queryLLM: typeof defaultQueryLLM = defaultQueryLLM,
+  // Optional callback for real-time status updates
+  onStatusUpdate?: (update: StatusUpdate) => void
 ): Promise<string> => {
   // 1. **Initialization**
   const runId = randomUUID();
   const currentSessionId = sessionId || randomUUID();
-  logger.info('Starting user query handling', { runId, sessionId: currentSessionId });
+  logger.info('Starting user query handling', {
+    runId,
+    sessionId: currentSessionId,
+  });
 
   const memAPI = createMemAPI(config);
 
@@ -72,6 +77,7 @@ export const handleUserQuery = async (
     memAPI,
     config,
     runId,
+    onStatusUpdate,
   };
 
   // 2. **Execution Loop**
@@ -80,24 +86,56 @@ export const handleUserQuery = async (
     logger.info(`Starting turn ${turn + 1}`, { runId, turn: turn + 1 });
 
     // **Call LLM**
-    const llmResponseStr = await queryLLM(context.history, config);
+    const llmResponseStr = (await queryLLM(context.history, config)) as string;
     context.history.push({ role: 'assistant', content: llmResponseStr });
 
     // **Parse**
     const parsedResponse = parseLLMResponse(llmResponseStr);
-    if (!parsedResponse.think && !parsedResponse.typescript && !parsedResponse.reply) {
-      logger.error('Failed to parse LLM response', undefined, { runId, llmResponseStr });
+    if (
+      !parsedResponse.think &&
+      !parsedResponse.typescript &&
+      !parsedResponse.reply
+    ) {
+      logger.error('Failed to parse LLM response', undefined, {
+        runId,
+        llmResponseStr: llmResponseStr as string,
+      });
       return 'Error: Could not understand the response from the AI.';
     }
 
     // **Think**
     if (parsedResponse.think) {
-      logger.info('Agent is thinking', { runId, thought: parsedResponse.think });
-      // TODO: In a real app, this would be sent to the client via SSE or WebSocket.
+      logger.info('Agent is thinking', {
+        runId,
+        thought: parsedResponse.think,
+      });
+
+      // Send real-time status update via callback if available
+      if (onStatusUpdate) {
+        const thinkUpdate: StatusUpdate = {
+          type: 'think',
+          runId,
+          timestamp: Date.now(),
+          content: parsedResponse.think,
+        };
+        onStatusUpdate(thinkUpdate);
+      }
     }
 
     // **Act**
     if (parsedResponse.typescript) {
+      // Send action status update via callback if available
+      if (onStatusUpdate) {
+        const actUpdate: StatusUpdate = {
+          type: 'act',
+          runId,
+          timestamp: Date.now(),
+          content: 'Executing code...',
+          data: { code: parsedResponse.typescript },
+        };
+        onStatusUpdate(actUpdate);
+      }
+
       try {
         const executionResult = await runInSandbox(
           parsedResponse.typescript,
@@ -107,9 +145,32 @@ export const handleUserQuery = async (
           executionResult
         )}`;
         context.history.push({ role: 'user', content: feedback });
+
+        // Send success status update
+        if (onStatusUpdate) {
+          const successUpdate: StatusUpdate = {
+            type: 'act',
+            runId,
+            timestamp: Date.now(),
+            content: 'Code executed successfully',
+            data: { result: executionResult },
+          };
+          onStatusUpdate(successUpdate);
+        }
       } catch (e) {
-         const feedback = `[Execution Error]: ${(e as Error).message}`;
-         context.history.push({ role: 'user', content: feedback });
+        const feedback = `[Execution Error]: ${(e as Error).message}`;
+        context.history.push({ role: 'user', content: feedback });
+
+        // Send error status update
+        if (onStatusUpdate) {
+          const errorUpdate: StatusUpdate = {
+            type: 'error',
+            runId,
+            timestamp: Date.now(),
+            content: `Code execution failed: ${(e as Error).message}`,
+          };
+          onStatusUpdate(errorUpdate);
+        }
       }
     }
 

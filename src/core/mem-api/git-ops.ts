@@ -30,8 +30,7 @@ export const gitLog =
   };
 
 export const gitStagedFiles =
-  (git: SimpleGit) =>
-  async (): Promise<string[]> => {
+  (git: SimpleGit) => async (): Promise<string[]> => {
     // Cheatsheet for implementation:
     // 1. Get status with `await git.status()`.
     // 2. The result object contains arrays like `staged`, `modified`, `created`.

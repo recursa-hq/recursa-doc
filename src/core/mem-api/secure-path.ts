@@ -8,7 +8,10 @@ import path from 'path';
  * @returns The resolved, secure absolute path.
  * @throws If a path traversal attempt is detected.
  */
-export const resolveSecurePath = (graphRoot: string, userPath: string): string => {
+export const resolveSecurePath = (
+  graphRoot: string,
+  userPath: string
+): string => {
   const resolvedPath = path.resolve(graphRoot, userPath);
   if (!resolvedPath.startsWith(graphRoot)) {
     throw new Error('Security Error: Path traversal attempt detected.');

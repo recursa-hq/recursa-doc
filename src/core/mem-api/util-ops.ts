@@ -22,8 +22,7 @@ const countTokensForContent = (content: string): number => {
 // Note: HOFs returning the final mem API functions.
 
 export const getGraphRoot =
-  (graphRoot: string) =>
-  async (): Promise<string> => {
+  (graphRoot: string) => async (): Promise<string> => {
     return graphRoot;
   };
 

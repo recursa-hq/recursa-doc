@@ -11,10 +11,7 @@ import type { ParsedLLMResponse } from '../types';
  */
 export const parseLLMResponse = (response: string): ParsedLLMResponse => {
   const extractTagContent = (tagName: string): string | undefined => {
-    const regex = new RegExp(
-      `<${tagName}>([\\s\\S]*?)<\\/${tagName}>`,
-      'i'
-    );
+    const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
     const match = response.match(regex);
     // If a match is found, return the captured group (the content), trimmed.
     return match ? match[1].trim() : undefined;

@@ -1,4 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -102,17 +109,14 @@ describe('MemAPI Integration Tests', () => {
     // await mem.writeFile('b.txt', 'b');
     // await mem.createDir('subdir');
     // await mem.writeFile('subdir/c.txt', 'c');
-
     // TODO: List files at the root and assert the contents.
     // The order might not be guaranteed, so use `expect.arrayContaining`.
     // const rootFiles = await mem.listFiles();
     // expect(rootFiles).toEqual(expect.arrayContaining(['a.txt', 'b.txt', 'subdir']));
     // expect(rootFiles.length).toBe(3);
-
     // TODO: List files in the subdirectory and assert the contents.
     // const subdirFiles = await mem.listFiles('subdir');
     // expect(subdirFiles).toEqual(['c.txt']);
-
     // TODO: List files in an empty directory and assert it's an empty array.
     // await mem.createDir('empty');
     // const emptyFiles = await mem.listFiles('empty');

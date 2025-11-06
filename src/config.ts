@@ -32,12 +32,8 @@ export const loadAndValidateConfig = (): AppConfig => {
     process.exit(1);
   }
 
-  const {
-    OPENROUTER_API_KEY,
-    KNOWLEDGE_GRAPH_PATH,
-    LLM_MODEL,
-    PORT,
-  } = parseResult.data;
+  const { OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH, LLM_MODEL, PORT } =
+    parseResult.data;
 
   // Perform runtime checks
   let resolvedPath = KNOWLEDGE_GRAPH_PATH;

@@ -15,7 +15,7 @@ class HttpError extends Error {
 }
 
 const withRetry =
-  <T extends (...args: any[]) => Promise<any>>(queryFn: T) =>
+  <T extends (...args: unknown[]) => Promise<unknown>>(queryFn: T) =>
   async (...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> => {
     const maxAttempts = 3;
     const initialDelay = 1000;
@@ -24,12 +24,16 @@ const withRetry =
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        return await queryFn(...args);
+        return (await queryFn(...args)) as Awaited<ReturnType<T>>;
       } catch (error) {
         lastError = error as Error;
-        
+
         // Don't retry on non-retryable errors (4xx status codes)
-        if (error instanceof HttpError && error.statusCode >= 400 && error.statusCode < 500) {
+        if (
+          error instanceof HttpError &&
+          error.statusCode >= 400 &&
+          error.statusCode < 500
+        ) {
           throw error;
         }
 
@@ -40,10 +44,12 @@ const withRetry =
 
         // Calculate exponential backoff delay
         const delay = initialDelay * Math.pow(backoffFactor, attempt);
-        console.warn(`Retry attempt ${attempt + 1}/${maxAttempts} after ${delay}ms delay. Error: ${lastError.message}`);
-        
+        console.warn(
+          `Retry attempt ${attempt + 1}/${maxAttempts} after ${delay}ms delay. Error: ${lastError.message}`
+        );
+
         // Wait for the delay
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 
@@ -70,7 +76,7 @@ export const queryLLM = async (
     const response = await fetch(openRouterUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.openRouterApiKey}`,
+        Authorization: `Bearer ${config.openRouterApiKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': `http://localhost:${config.port}`,
         'X-Title': 'Recursa',
@@ -82,12 +88,14 @@ export const queryLLM = async (
     if (!response.ok) {
       let errorDetails = 'Unknown error';
       try {
-        const errorData = await response.json() as any;
+        const errorData = (await response.json()) as {
+          error?: { message?: string };
+        };
         errorDetails = errorData.error?.message || JSON.stringify(errorData);
       } catch {
         errorDetails = await response.text();
       }
-      
+
       throw new HttpError(
         `OpenRouter API error: ${response.status} ${response.statusText}`,
         response.status,
@@ -96,7 +104,13 @@ export const queryLLM = async (
     }
 
     // Parse JSON response
-    const data = await response.json() as any;
+    const data = (await response.json()) as {
+      choices: Array<{
+        message: {
+          content: string;
+        };
+      }>;
+    };
 
     // Extract and validate content
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
@@ -114,10 +128,14 @@ export const queryLLM = async (
     if (error instanceof HttpError) {
       throw error;
     }
-    
+
     // Wrap other errors
-    throw new Error(`Failed to query OpenRouter API: ${(error as Error).message}`);
+    throw new Error(
+      `Failed to query OpenRouter API: ${(error as Error).message}`
+    );
   }
 };
 
-export const queryLLMWithRetries = withRetry(queryLLM);
+export const queryLLMWithRetries = withRetry(
+  queryLLM as (...args: unknown[]) => Promise<unknown>
+);

@@ -43,6 +43,15 @@ export type McpRequest = {
   sessionId?: string;
 };
 
+// Real-time status update types
+export type StatusUpdate = {
+  type: 'think' | 'act' | 'error' | 'complete';
+  runId: string;
+  timestamp: number;
+  content?: string;
+  data?: Record<string, unknown>;
+};
+
 // The execution context passed through the agent loop.
 export type ExecutionContext = {
   // The complete conversation history for this session.
@@ -53,6 +62,8 @@ export type ExecutionContext = {
   config: import('./config').AppConfig;
   // A unique ID for this execution run.
   runId: string;
+  // Optional callback for real-time status updates
+  onStatusUpdate?: (update: StatusUpdate) => void;
 };
 
 // --- MemAPI Interface (Matches tools.md) ---
