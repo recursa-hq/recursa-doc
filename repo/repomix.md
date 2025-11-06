@@ -2,14 +2,12 @@
 ```
 docs/
   readme.md
+  rules.md
   system-prompt.md
   tools.md
 .gitignore
-agent-spawner.claude.md
-flow.todo.md
 relay.config.json
 repomix.config.json
-rules.md
 ```
 
 # Files
@@ -202,6 +200,18 @@ To add a new tool (e.g., `mem.searchWeb(query)`):
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 **Stop building infrastructure. Start building intelligence.**
+````
+
+## File: docs/rules.md
+````markdown
+codebase compliance rules;
+
+1. No OOP, only HOFs
+2. Use bun.sh and e2e type safe TypeScript
+3. No unknown or any type
+4. [e2e|integration|unit]/[domain].test.ts files & dirs
+5. Bun tests, real implementation (no mocks), isolated tests
+6. **DRY Principle**: Sub-agents MUST inspect and build upon existing work in other worktrees before implementing new features. Always review what other agents have implemented to avoid code duplication and ensure consistency across the codebase.
 ````
 
 ## File: docs/system-prompt.md
@@ -404,54 +414,6 @@ General-purpose operations for the sandbox environment.
 | **`mem.getTokenCountForPaths`**| `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` |`Promise<PathTokenCount[]>`| A more efficient way to get token counts for multiple files in a single call. |
 ````
 
-## File: agent-spawner.claude.md
-````markdown
-You are AgentSpawner. Your sole mission is to get this project shipped. Operate in a strict loop: Plan → Execute → Audit → Ship.
-
-**Spawn Policy**: Only spawn isolated agents when changes may disrupt another agent. For simple, localized changes, execute directly.
-
-### 1. Plan
-- **Bootstrap**: If `tasks.md` is missing, create it. Scan all `*.md` files in docs to plan project or action items and generate a task list.
-- **Prioritize**: Read `tasks.md`. Determine task dependencies (`depends-on: id`) or assume parallel execution based on file order.
-
-### 2. Execute
-- **Spawn**: For each ready task, create an isolated environment and launch a worker agent.
-  ```bash
-  export JOB_ID="job-$(uuidgen | cut -d- -f1)"
-  git worktree add worktrees/$JOB_ID -b $JOB_ID
-  tmux new-session -d -s $JOB_ID \
-    claude --dangerously-skip-permissions "First, read all relevant project *.md files (readme.md, rules.md) to fully understand project goals and constraints. Then, accomplish this task: '$TASK_TEXT'. Commit and push branch $JOB_ID when done."
-  ```
-- **Manage**: Mark task as `CLAIMED` in `tasks.md`. Monitor all active tmux sessions every 15 seconds.
-  - On `SUCCESS`: Mark `DONE`.
-  - On `FAIL` or 20 minutes idle: Mark `FAILED`, kill the session, clean the worktree, and retry once.
-
-### 3. Audit
-- When all tasks are `DONE`, spawn the final auditor agent in its own `audit` branch.
-  ```bash
-  claude --dangerously-skip-permissions "
-  First, read all project *.md files to confirm the final acceptance criteria. Then:
-  1. Lint the entire codebase and auto-fix all issues according to project standards.
-  2. Run the complete test suite; ensure 100% pass.
-  3. Commit all fixes and push the audit branch.
-  4. Reply with a single word: SUCCESS or FAIL.
-  "
-  ```
-
-### 4. Ship
-- On `SUCCESS` from the auditor:
-  - Fast-forward merge all `job-*` branches and the `audit` branch into `main`.
-  - Tag the new `HEAD` of `main` as `v1.0-shipped`.
-  - Print `MISSION COMPLETE` and exit.
-- If the audit `FAILs`, report the failure and await instructions.
-````
-
-## File: .gitignore
-````
-# relay state
-# /.relay/
-````
-
 ## File: relay.config.json
 ````json
 {
@@ -485,14 +447,14 @@ You are AgentSpawner. Your sole mission is to get this project shipped. Operate 
 }
 ````
 
-## File: rules.md
-````markdown
-1. No OOP, only HOFs (higher-order functions)
-2. Use bun.sh (runtime & package manager)
-3. No unknown or any type (explicit typing only)
-4. [e2e|integration|unit]/[domain].test.ts (test structure)
-5. Bun tests, real implementation (no mocks), isolated tests
-6. Codebase must be e2e typesafe TypeScript (no dynamic/unknown types)
+## File: .gitignore
+````
+# relay state
+# /.relay/
+
+# worktrees
+worktrees/*/node_modules/
+worktrees/*/.git/
 ````
 
 ## File: repomix.config.json
@@ -530,7 +492,12 @@ You are AgentSpawner. Your sole mission is to get this project shipped. Operate 
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
-    "customPatterns": [".relay/"]
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md"
+    ]
   },
   "security": {
     "enableSecurityCheck": true
@@ -539,15 +506,4 @@ You are AgentSpawner. Your sole mission is to get this project shipped. Operate 
     "encoding": "o200k_base"
   }
 }
-````
-
-## File: flow.todo.md
-````markdown
-- add grep to tool
-- show system result variants examples in readme.md
-- the managed markdowns should be in valid orgmode syntax and also there is orgmode validator, so update readme.md
-- think should be abstracted away from technical because it direcly viewed by end users
-- need checkpoint system
-- no <tool_call>, only <think>
-- add token to tools
 ````
