@@ -1,9 +1,4 @@
-import type {
-  Resource,
-  Tool,
-  CallToolRequest,
-  CallToolResult,
-} from '@modelcontextprotocol/sdk/types.js';
+import type { Resource } from '@modelcontextprotocol/sdk/types.js';
 
 export interface MCPInitializeRequest {
   protocolVersion: string;

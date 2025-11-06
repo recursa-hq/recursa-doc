@@ -8,13 +8,13 @@ import type { MemAPI } from '../types/mem.js';
 
 export const createSandbox = (memApi: MemAPI, options?: SandboxOptions) => {
   const timeout = options?.timeout || 30000;
-  const allowedGlobals = options?.allowedGlobals || [
+  const _allowedGlobals = options?.allowedGlobals || [
     'console',
     'JSON',
     'Math',
     'Date',
   ];
-  const forbiddenGlobals = options?.forbiddenGlobals || [
+  const _forbiddenGlobals = options?.forbiddenGlobals || [
     'require',
     'import',
     'eval',
@@ -31,12 +31,15 @@ export const createSandbox = (memApi: MemAPI, options?: SandboxOptions) => {
     mem: memApi,
     console: {
       log: (...args: unknown[]) => {
+        // eslint-disable-next-line no-console
         console.log('[Sandbox]', ...args);
       },
       error: (...args: unknown[]) => {
+        // eslint-disable-next-line no-console
         console.error('[Sandbox Error]', ...args);
       },
       warn: (...args: unknown[]) => {
+        // eslint-disable-next-line no-console
         console.warn('[Sandbox Warn]', ...args);
       },
     },
@@ -169,7 +172,18 @@ export const createSandbox = (memApi: MemAPI, options?: SandboxOptions) => {
   };
 };
 
-export const sanitizeCode = (code: SandboxCode, options?: SandboxOptions): SandboxCode => {
+export const runInSandbox = async (
+  code: string,
+  memApi: MemAPI
+): Promise<unknown> => {
+  const sandbox = createSandbox(memApi);
+  return sandbox.execute(code);
+};
+
+export const sanitizeCode = (
+  code: SandboxCode,
+  options?: SandboxOptions
+): SandboxCode => {
   let sanitized = code;
   const forbiddenGlobals = options?.forbiddenGlobals || [
     'require',

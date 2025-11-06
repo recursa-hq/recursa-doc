@@ -151,7 +151,7 @@ export const createMCPHandler = (
     },
   ];
 
-  server.setRequestHandler('initialize', async (_request) => {
+  server.setRequestHandler({ method: 'initialize' }, async (_request) => {
     return {
       protocolVersion: '2024-11-05',
       capabilities: {
@@ -169,7 +169,7 @@ export const createMCPHandler = (
     };
   });
 
-  server.setRequestHandler('tools/list', async () => {
+  server.setRequestHandler({ method: 'tools/list' }, async () => {
     return {
       tools,
     };

@@ -13,7 +13,7 @@ import os from 'os';
 import simpleGit from 'simple-git';
 import { createApp } from '../../src/server';
 import type { AppConfig } from '../../src/config';
-import type { StatusUpdate, ChatMessage } from '../../src/types';
+import type { ChatMessage } from '../../src/types';
 
 describe('MCP Server Complete End-to-End Tests', () => {
   let tempDir: string;
@@ -436,7 +436,7 @@ Second file created and linked to the first.
         ],
       ];
 
-      const requestCount = 0;
+      const _requestCount = 0;
       const mockQueryLLM = mock(
         async (history: ChatMessage[], _config: AppConfig) => {
           const sessionId = history[0]?.content?.includes('second') ? 1 : 0;
@@ -548,7 +548,7 @@ Concurrent test completed successfully.
       const responses = await Promise.all(concurrentRequests);
 
       // Verify all requests were successful
-      responses.forEach((response, index) => {
+      responses.forEach((response, _index) => {
         expect(response.status).toBe(200);
       });
 

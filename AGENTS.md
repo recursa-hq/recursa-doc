@@ -41,7 +41,7 @@
 2. `tmux capture-pane -t $SESSION -p` to watch real work.
 3. Fail/idle >20 min → mark `FAILED`, kill, clean worktree & branch, retry once.
 4. Keep 3–5 agents alive; spawn while ready tasks exist.
-5. When audit ready (all `DONE`), spawn multiple tmux sessions without isolated worktree:
+5. When audit ready (all `DONE`), spawn multiple tmux sessions agents without isolated worktree, make sure they work at different scope areas:
    ```bash
    droid exec --skip-permissions-unsafe "first, understand docs md files, then do ;
    1. Merge every job-* branch.
