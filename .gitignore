@@ -1,2 +1,6 @@
 # relay state
 # /.relay/
+
+# worktrees
+worktrees/*/node_modules/
+worktrees/*/.git/
