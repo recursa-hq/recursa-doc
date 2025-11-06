@@ -31,7 +31,12 @@
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
-    "customPatterns": [".relay/"]
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md"
+    ]
   },
   "security": {
     "enableSecurityCheck": true
