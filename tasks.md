@@ -33,7 +33,7 @@
 ### Task 5: Complete Server Response Streaming
 - **id**: task-5
 - **description**: Implement proper streaming responses in src/server.ts for real-time agent communication instead of simple non-streaming implementation
-- **status**: CLAIMED
+- **status**: DONE
 - **job-id**: job-8cc473eb
 - **depends-on**: [task-4]
 
@@ -72,8 +72,8 @@
 ### Task 10: Code Style & Linting
 - **id**: task-10
 - **description**: Run linting and formatting tools to ensure code compliance with project standards (no OOP, HOFs only, DRY principles)
-- **status**: PENDING
-- **job-id**: 
+- **status**: CLAIMED
+- **job-id**: job-1fda3c2f
 - **depends-on**: [task-9]
 
 ## Final Audit Task
