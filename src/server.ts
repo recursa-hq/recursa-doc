@@ -107,7 +107,6 @@ const startServer = async (): Promise<void> => {
     console.log('Server ready. Connected to stdin/stdout.');
 
     await server.connect(transport);
-    await server.run();
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to start server:', error);
