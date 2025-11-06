@@ -3,7 +3,7 @@ import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
 import { logger } from '../lib/logger';
 import { queryLLMWithRetries as defaultQueryLLM } from './llm';
 import { parseLLMResponse } from './parser';
-import { runInSandbox } from './sandbox';
+import { runInSandbox } from './Sandbox';
 import { createMemAPI } from './mem-api';
 import { randomUUID } from 'crypto';
 import fs from 'fs';

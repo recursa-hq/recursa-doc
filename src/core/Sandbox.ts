@@ -169,10 +169,22 @@ export const createSandbox = (memApi: MemAPI, options?: SandboxOptions) => {
   };
 };
 
-export const sanitizeCode = (code: SandboxCode): SandboxCode => {
+export const sanitizeCode = (code: SandboxCode, options?: SandboxOptions): SandboxCode => {
   let sanitized = code;
+  const forbiddenGlobals = options?.forbiddenGlobals || [
+    'require',
+    'import',
+    'eval',
+    'Function',
+    'process',
+    'Buffer',
+    'global',
+    'globalThis',
+    'window',
+    'document',
+  ];
 
-  forbiddenGlobals.forEach((global) => {
+  forbiddenGlobals.forEach((global: string) => {
     const pattern = new RegExp(`\\b${global}\\b`, 'g');
     sanitized = sanitized.replace(pattern, '[FORBIDDEN]');
   });
