@@ -1,13 +1,37 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  renameSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { MemAPI, GitCommit, GraphQueryResult, TokenCount, FileTokenBreakdown, DirectoryTokenStats } from '../types/mem.js';
-import { getGitLog, getGitDiff, getStagedFiles, commitChanges as gitCommit } from '../services/Git.js';
+import type {
+  MemAPI,
+  GitCommit,
+  GraphQueryResult,
+  TokenCount,
+  FileTokenBreakdown,
+  DirectoryTokenStats,
+} from '../types/mem.js';
+import {
+  getGitLog,
+  getGitDiff,
+  getStagedFiles,
+  commitChanges as gitCommit,
+} from '../services/Git.js';
 
 const countTokens = (text: string): number => {
   return Math.ceil(text.length / 4);
 };
 
-export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?: string }): MemAPI => {
+export const createMemAPI = (
+  knowledgeGraphPath: string,
+  gitOptions?: { baseDir?: string }
+): MemAPI => {
   const resolvePath = (filePath: string): string => {
     return resolve(knowledgeGraphPath, filePath);
   };
@@ -22,7 +46,10 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const writeFile = async (filePath: string, content: string): Promise<boolean> => {
+  const writeFile = async (
+    filePath: string,
+    content: string
+  ): Promise<boolean> => {
     try {
       const resolvedPath = resolvePath(filePath);
       const dir = dirname(resolvedPath);
@@ -36,7 +63,11 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const updateFile = async (filePath: string, oldContent: string, newContent: string): Promise<boolean> => {
+  const updateFile = async (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ): Promise<boolean> => {
     try {
       const resolvedPath = resolvePath(filePath);
       const currentContent = readFileSync(resolvedPath, 'utf-8');
@@ -101,7 +132,9 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
 
   const listFiles = async (directoryPath?: string): Promise<string[]> => {
     try {
-      const targetPath = directoryPath ? resolvePath(directoryPath) : knowledgeGraphPath;
+      const targetPath = directoryPath
+        ? resolvePath(directoryPath)
+        : knowledgeGraphPath;
       if (!existsSync(targetPath)) {
         return [];
       }
@@ -112,7 +145,11 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const gitDiff = async (filePath: string, fromCommit?: string, toCommit?: string): Promise<string> => {
+  const gitDiff = async (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ): Promise<string> => {
     try {
       return getGitDiff(filePath, fromCommit, toCommit, gitOptions);
     } catch (error) {
@@ -120,15 +157,18 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const gitLog = async (filePath: string, maxCommits = 5): Promise<GitCommit[]> => {
+  const gitLog = async (
+    filePath: string,
+    maxCommits = 5
+  ): Promise<GitCommit[]> => {
     try {
       const resolvedPath = resolvePath(filePath);
       const gitPath = join(knowledgeGraphPath, resolvedPath);
       const logs = getGitLog(resolvedPath, maxCommits, gitOptions);
-      return logs.map(log => ({
+      return logs.map((log) => ({
         hash: log.hash,
         message: log.message,
-        date: log.date
+        date: log.date,
       }));
     } catch (error) {
       throw new Error(`Failed to get git log: ${error}`);
@@ -185,12 +225,14 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
           }
 
           if (query.includes('outgoing-link-content')) {
-            const contentMatch = query.match(/outgoing-link-content\s+"([^"]+)"/);
+            const contentMatch = query.match(
+              /outgoing-link-content\s+"([^"]+)"/
+            );
             if (contentMatch) {
               const searchText = contentMatch[1];
               const linkRegex = /\[\[([^\]]+)\]\]/g;
               const links = content.match(linkRegex);
-              if (links && links.some(link => content.includes(searchText))) {
+              if (links && links.some((link) => content.includes(searchText))) {
                 matches.push(`Contains link and content: ${searchText}`);
               }
             }
@@ -206,7 +248,7 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
           if (matches.length > 0) {
             results.push({
               filePath: file,
-              matches
+              matches,
             });
           }
         }
@@ -246,7 +288,7 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
       const content = readFileSync(resolvedPath, 'utf-8');
       const linkPattern = /\[\[([^\]]+)\]\]/g;
       const matches = content.matchAll(linkPattern);
-      const links = Array.from(matches, m => m[1]);
+      const links = Array.from(matches, (m) => m[1]);
       return Array.from(new Set(links));
     } catch (error) {
       throw new Error(`Failed to get outgoing links: ${filePath}`);
@@ -304,16 +346,20 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
       return {
         total: tokens,
         tokens,
-        characters: content.length
+        characters: content.length,
       };
     } catch (error) {
       throw new Error(`Failed to count tokens: ${filePath}`);
     }
   };
 
-  const countDirectoryTokens = async (directoryPath?: string): Promise<number> => {
+  const countDirectoryTokens = async (
+    directoryPath?: string
+  ): Promise<number> => {
     try {
-      const targetPath = directoryPath ? resolvePath(directoryPath) : knowledgeGraphPath;
+      const targetPath = directoryPath
+        ? resolvePath(directoryPath)
+        : knowledgeGraphPath;
       let totalTokens = 0;
 
       const files = readdirSync(targetPath, { recursive: true });
@@ -332,18 +378,22 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const getTokenBreakdown = async (filePath: string): Promise<FileTokenBreakdown> => {
+  const getTokenBreakdown = async (
+    filePath: string
+  ): Promise<FileTokenBreakdown> => {
     try {
       const resolvedPath = resolvePath(filePath);
       const content = readFileSync(resolvedPath, 'utf-8');
       const tokens = countTokens(content);
-      const blocks = content.split('\n').filter(line => line.trim().startsWith('-')).length;
+      const blocks = content
+        .split('\n')
+        .filter((line) => line.trim().startsWith('-')).length;
 
       return {
         filePath,
         tokens,
         characters: content.length,
-        blocks
+        blocks,
       };
     } catch (error) {
       throw new Error(`Failed to get token breakdown: ${filePath}`);
@@ -360,11 +410,16 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const getFilesByTokenSize = async (directoryPath?: string, limit = 10): Promise<Array<{filePath: string; tokens: number}>> => {
+  const getFilesByTokenSize = async (
+    directoryPath?: string,
+    limit = 10
+  ): Promise<Array<{ filePath: string; tokens: number }>> => {
     try {
-      const targetPath = directoryPath ? resolvePath(directoryPath) : knowledgeGraphPath;
+      const targetPath = directoryPath
+        ? resolvePath(directoryPath)
+        : knowledgeGraphPath;
       const files = readdirSync(targetPath, { recursive: true });
-      const filesWithTokens: Array<{filePath: string; tokens: number}> = [];
+      const filesWithTokens: Array<{ filePath: string; tokens: number }> = [];
 
       for (const file of files) {
         const fullPath = join(targetPath, file);
@@ -372,7 +427,7 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
           const content = readFileSync(fullPath, 'utf-8');
           filesWithTokens.push({
             filePath: file,
-            tokens: countTokens(content)
+            tokens: countTokens(content),
           });
         }
       }
@@ -385,9 +440,13 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     }
   };
 
-  const getDirectoryTokenStats = async (directoryPath?: string): Promise<DirectoryTokenStats> => {
+  const getDirectoryTokenStats = async (
+    directoryPath?: string
+  ): Promise<DirectoryTokenStats> => {
     try {
-      const targetPath = directoryPath ? resolvePath(directoryPath) : knowledgeGraphPath;
+      const targetPath = directoryPath
+        ? resolvePath(directoryPath)
+        : knowledgeGraphPath;
       const files = readdirSync(targetPath, { recursive: true });
       let totalTokens = 0;
       let totalFiles = 0;
@@ -411,7 +470,8 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
         totalTokens,
         totalFiles,
         largestFile,
-        averageTokensPerFile: totalFiles > 0 ? Math.floor(totalTokens / totalFiles) : 0
+        averageTokensPerFile:
+          totalFiles > 0 ? Math.floor(totalTokens / totalFiles) : 0,
       };
     } catch (error) {
       throw new Error(`Failed to get directory token stats: ${directoryPath}`);
@@ -442,6 +502,6 @@ export const createMemAPI = (knowledgeGraphPath: string, gitOptions?: { baseDir?
     getTokenBreakdown,
     estimateReadCost,
     getFilesByTokenSize,
-    getDirectoryTokenStats
+    getDirectoryTokenStats,
   };
 };

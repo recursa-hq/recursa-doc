@@ -4,26 +4,29 @@ import { createSandbox } from '../core/Sandbox.js';
 import type { MemAPI } from '../types/mem.js';
 import type { MCPTool, MCPResource } from '../types/mcp.js';
 
-export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => {
+export const createMCPHandler = (
+  memApi: MemAPI,
+  knowledgeGraphPath: string
+) => {
   const server = new Server(
     {
       name: 'recursa-server',
-      version: '0.1.0'
+      version: '0.1.0',
     },
     {
       capabilities: {
         tools: {
-          listChanged: true
+          listChanged: true,
         },
         resources: {
-          listChanged: true
-        }
-      }
+          listChanged: true,
+        },
+      },
     }
   );
 
   const sandbox = createSandbox(memApi, {
-    timeout: 30000
+    timeout: 30000,
   });
 
   const tools: MCPTool[] = [
@@ -35,11 +38,11 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           code: {
             type: 'string',
-            description: 'TypeScript code to execute'
-          }
+            description: 'TypeScript code to execute',
+          },
         },
-        required: ['code']
-      }
+        required: ['code'],
+      },
     },
     {
       name: 'read_file',
@@ -49,11 +52,11 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           filePath: {
             type: 'string',
-            description: 'Path to the file to read'
-          }
+            description: 'Path to the file to read',
+          },
         },
-        required: ['filePath']
-      }
+        required: ['filePath'],
+      },
     },
     {
       name: 'write_file',
@@ -63,15 +66,15 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           filePath: {
             type: 'string',
-            description: 'Path to the file to write'
+            description: 'Path to the file to write',
           },
           content: {
             type: 'string',
-            description: 'Content to write to the file'
-          }
+            description: 'Content to write to the file',
+          },
         },
-        required: ['filePath', 'content']
-      }
+        required: ['filePath', 'content'],
+      },
     },
     {
       name: 'update_file',
@@ -81,19 +84,19 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           filePath: {
             type: 'string',
-            description: 'Path to the file to update'
+            description: 'Path to the file to update',
           },
           oldContent: {
             type: 'string',
-            description: 'Content to replace'
+            description: 'Content to replace',
           },
           newContent: {
             type: 'string',
-            description: 'New content'
-          }
+            description: 'New content',
+          },
         },
-        required: ['filePath', 'oldContent', 'newContent']
-      }
+        required: ['filePath', 'oldContent', 'newContent'],
+      },
     },
     {
       name: 'commit_changes',
@@ -103,11 +106,11 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           message: {
             type: 'string',
-            description: 'Commit message'
-          }
+            description: 'Commit message',
+          },
         },
-        required: ['message']
-      }
+        required: ['message'],
+      },
     },
     {
       name: 'query_graph',
@@ -117,11 +120,11 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           query: {
             type: 'string',
-            description: 'Graph query string'
-          }
+            description: 'Graph query string',
+          },
         },
-        required: ['query']
-      }
+        required: ['query'],
+      },
     },
     {
       name: 'search_global',
@@ -131,12 +134,12 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         properties: {
           query: {
             type: 'string',
-            description: 'Search query'
-          }
+            description: 'Search query',
+          },
         },
-        required: ['query']
-      }
-    }
+        required: ['query'],
+      },
+    },
   ];
 
   const resources: MCPResource[] = [
@@ -144,8 +147,8 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
       uri: `file://${knowledgeGraphPath}`,
       name: 'Knowledge Graph Root',
       mimeType: 'text/directory',
-      description: 'Root directory of the knowledge graph'
-    }
+      description: 'Root directory of the knowledge graph',
+    },
   ];
 
   server.setRequestHandler('initialize', async (request) => {
@@ -153,27 +156,30 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
       protocolVersion: '2024-11-05',
       capabilities: {
         tools: {
-          listChanged: true
+          listChanged: true,
         },
         resources: {
-          listChanged: true
-        }
+          listChanged: true,
+        },
       },
       serverInfo: {
         name: 'recursa-server',
-        version: '0.1.0'
-      }
+        version: '0.1.0',
+      },
     };
   });
 
   server.setRequestHandler('tools/list', async () => {
     return {
-      tools
+      tools,
     };
   });
 
   server.setRequestHandler('tools/call', async (request) => {
-    const { name, arguments: args } = request.params as { name: string; arguments: Record<string, unknown> };
+    const { name, arguments: args } = request.params as {
+      name: string;
+      arguments: Record<string, unknown>;
+    };
 
     try {
       switch (name) {
@@ -184,9 +190,9 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result)
-              }
-            ]
+                text: JSON.stringify(result),
+              },
+            ],
           };
         }
 
@@ -197,9 +203,9 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
             content: [
               {
                 type: 'text',
-                text: content
-              }
-            ]
+                text: content,
+              },
+            ],
           };
         }
 
@@ -211,9 +217,9 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success })
-              }
-            ]
+                text: JSON.stringify({ success }),
+              },
+            ],
           };
         }
 
@@ -221,14 +227,18 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
           const filePath = String(args.filePath);
           const oldContent = String(args.oldContent);
           const newContent = String(args.newContent);
-          const success = await memApi.updateFile(filePath, oldContent, newContent);
+          const success = await memApi.updateFile(
+            filePath,
+            oldContent,
+            newContent
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success })
-              }
-            ]
+                text: JSON.stringify({ success }),
+              },
+            ],
           };
         }
 
@@ -239,9 +249,9 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ hash })
-              }
-            ]
+                text: JSON.stringify({ hash }),
+              },
+            ],
           };
         }
 
@@ -252,9 +262,9 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(results)
-              }
-            ]
+                text: JSON.stringify(results),
+              },
+            ],
           };
         }
 
@@ -265,9 +275,9 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(results)
-              }
-            ]
+                text: JSON.stringify(results),
+              },
+            ],
           };
         }
 
@@ -279,22 +289,24 @@ export const createMCPHandler = (memApi: MemAPI, knowledgeGraphPath: string) => 
         content: [
           {
             type: 'text',
-            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
-          }
+            text: JSON.stringify({
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          },
         ],
-        isError: true
+        isError: true,
       };
     }
   });
 
   server.setRequestHandler('resources/list', async () => {
     return {
-      resources
+      resources,
     };
   });
 
   return {
     server,
-    transport: new StdioServerTransport()
+    transport: new StdioServerTransport(),
   };
 };

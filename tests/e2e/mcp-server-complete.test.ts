@@ -48,10 +48,13 @@ describe('MCP Server Complete End-to-End Tests', () => {
     await git.init();
     await git.addConfig('user.name', 'E2E Test User');
     await git.addConfig('user.email', 'e2e-test@example.com');
-    
+
     // Create a .gitignore file first
-    await fs.writeFile(path.join(tempDir, '.gitignore'), '*.log\nnode_modules/\n.env');
-    
+    await fs.writeFile(
+      path.join(tempDir, '.gitignore'),
+      '*.log\nnode_modules/\n.env'
+    );
+
     await git.add('.gitignore');
     await git.commit('Initial commit');
   });
@@ -434,7 +437,7 @@ Second file created and linked to the first.
         ],
       ];
 
-      let requestCount = 0;
+      const requestCount = 0;
       const mockQueryLLM = mock(
         async (history: ChatMessage[], config: AppConfig) => {
           const sessionId = history[0]?.content?.includes('second') ? 1 : 0;

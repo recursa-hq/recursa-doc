@@ -1,5 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { LLMRequest, LLMResponse, LLMConfig, StreamingCallback } from '../types/llm.js';
+import type {
+  LLMRequest,
+  LLMResponse,
+  LLMConfig,
+  StreamingCallback,
+} from '../types/llm.js';
 
 export const createLLMClient = (config: LLMConfig): LLMConfig => {
   if (!config.apiKey) {
@@ -20,7 +25,7 @@ export const generateCompletion = async (
 ): Promise<LLMResponse> => {
   const client = new Anthropic({
     apiKey: config.apiKey,
-    baseURL: config.baseUrl || 'https://openrouter.ai/api/v1'
+    baseURL: config.baseUrl || 'https://openrouter.ai/api/v1',
   });
 
   try {
@@ -28,11 +33,11 @@ export const generateCompletion = async (
       model: request.model,
       max_tokens: request.maxTokens || config.maxTokens || 4096,
       temperature: request.temperature || config.temperature || 0.7,
-      messages: request.messages.map(msg => ({
+      messages: request.messages.map((msg) => ({
         role: msg.role,
-        content: msg.content
+        content: msg.content,
       })),
-      stream: Boolean(streamingCallback)
+      stream: Boolean(streamingCallback),
     });
 
     if (streamingCallback) {
@@ -43,7 +48,7 @@ export const generateCompletion = async (
       }
       return {
         content: '',
-        model: request.model
+        model: request.model,
       };
     }
 
@@ -53,11 +58,13 @@ export const generateCompletion = async (
       return {
         content: content.text,
         model: request.model,
-        usage: usage ? {
-          promptTokens: usage.input_tokens,
-          completionTokens: usage.output_tokens,
-          totalTokens: usage.input_tokens + usage.output_tokens
-        } : undefined
+        usage: usage
+          ? {
+              promptTokens: usage.input_tokens,
+              completionTokens: usage.output_tokens,
+              totalTokens: usage.input_tokens + usage.output_tokens,
+            }
+          : undefined,
       };
     }
 
@@ -75,7 +82,9 @@ export const streamCompletion = async (
   return generateCompletion(config, request, streamingCallback);
 };
 
-export const validateLLMConfig = (config: Partial<LLMConfig>): config is LLMConfig => {
+export const validateLLMConfig = (
+  config: Partial<LLMConfig>
+): config is LLMConfig => {
   if (!config.apiKey || typeof config.apiKey !== 'string') {
     throw new Error('Invalid API key');
   }
