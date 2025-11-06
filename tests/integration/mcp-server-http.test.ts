@@ -395,8 +395,8 @@ describe('MCP Server HTTP Integration Tests', () => {
         })
       );
 
-      // Should still work as Elysia can parse JSON without explicit content type
-      expect(response.status).toBe(200);
+      // Elysia's parser is strict and will reject this.
+      expect(response.status).toBe(422);
     });
 
     it('should handle requests without content type header', async () => {
@@ -407,8 +407,8 @@ describe('MCP Server HTTP Integration Tests', () => {
         })
       );
 
-      // Should still work as Elysia can infer the content type
-      expect(response.status).toBe(200);
+      // Elysia's parser is strict and will reject this without a Content-Type header.
+      expect(response.status).toBe(422);
     });
   });
 });

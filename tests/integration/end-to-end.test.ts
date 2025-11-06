@@ -63,18 +63,14 @@ describe('End-to-End HTTP Integration Tests', () => {
       // Mock the LLM query function
       const mockLLMQuery = createMockLLMQuery([
         // First response: Think and Act
-        `</think>
-I'll create a simple test file via the HTTP API.
-</think>
+        `<think>I'll create a simple test file via the HTTP API.</think>
 <typescript>
 const fileName = 'api-test.md';
 const content = '# API Test\n\nThis file was created via the HTTP API endpoint.';
 await mem.writeFile(fileName, content);
 </typescript>`,
         // Second response: Commit and Reply
-        `<think>
-File created successfully. Now I need to commit and respond.
-</think>
+        `<think>File created successfully. Now I need to commit and respond.</think>
 <typescript>
 await mem.commitChanges('feat: add API test file');
 </typescript>
@@ -121,9 +117,7 @@ I've successfully created a test file through the HTTP API and committed the cha
 
       const mockLLMQuery = createMockLLMQuery([
         // First response with thinking
-        `</think>
-I'll demonstrate the streaming capabilities by creating multiple files and showing progress.
-</think>
+        `<think>I'll demonstrate the streaming capabilities by creating multiple files and showing progress.</think>
 <typescript>
 // Create multiple files to demonstrate progress
 const files = [
@@ -187,9 +181,7 @@ I've successfully created three files to demonstrate the streaming progress func
 
       // First query: Create a project structure
       const firstMockLLMQuery = createMockLLMQuery([
-        `</think>
-I'll create a project structure with README, main file, and configuration.
-</think>
+        `<think>I'll create a project structure with README, main file, and configuration.</think>
 <typescript>
 // Create project structure
 await mem.writeFile('README.md', '# My Project\n\nThis is a test project.');
@@ -198,13 +190,11 @@ await mem.writeFile('config.json', '{"name": "test-project", "version": "1.0.0"}
 await mem.createDir('src');
 await mem.writeFile('src/utils.ts', '// Utility functions');
 </typescript>`,
-        `</think>
-Project structure created. Now commit the initial setup.
-</think>
+        `<think>Project structure created. Now commit the initial setup.</think>
 <typescript>
 await mem.commitChanges('feat: initialize project structure');
 </typescript>`,
-        `<reply>
+        `<think>Replying to user.</think><reply>
 I've created a complete project structure with README, main file, configuration, and a source directory with utilities.
 </reply>`,
       ]);
@@ -220,9 +210,7 @@ I've created a complete project structure with README, main file, configuration,
 
       // Second query: Add more features to the existing project
       const secondMockLLMQuery = createMockLLMQuery([
-        `</think>
-I'll enhance the existing project by adding tests and documentation.
-</think>
+        `<think>I'll enhance the existing project by adding tests and documentation.</think>
 <typescript>
 // Add tests and documentation
 await mem.createDir('tests');
@@ -235,9 +223,11 @@ await mem.updateFile(
   readmeContent + '\n\n## Testing\n\nRun tests with \`npm test\`.'
 );
 </typescript>`,
-        `<think>
-Enhanced project with tests and documentation. Commit the additions.
-`,
+        `<think>Enhanced project with tests and documentation. Commit the additions.</think>
+<typescript>
+await mem.commitChanges('feat: enhance project with tests and docs');
+</typescript>
+<reply>Enhanced project with tests and documentation.</reply>`,
       ]);
 
       const secondResult = await handleUserQuery(

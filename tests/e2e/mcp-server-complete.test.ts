@@ -485,16 +485,27 @@ Second file created and linked to the first.
         ],
       ];
 
-      const _requestCount = 0;
       const mockQueryLLM = mock(
         async (history: ChatMessage[], _config: AppConfig) => {
-          const sessionId = history[0]?.content?.includes('second') ? 1 : 0;
-          // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
-          const responseCount = historyArray.filter(
+
+          // Determine which request we're on by counting non-feedback user messages.
+          const userQueries = historyArray.filter(
+            (m) => m.role === 'user' && !m.content.startsWith('[Execution')
+          ).length;
+          const requestIndex = userQueries - 1;
+
+          // Determine which turn we're on for the current request.
+          const assistantResponses = historyArray.filter(
             (m) => m.role === 'assistant'
           ).length;
-          return mockLLMResponses[sessionId][responseCount];
+          const turnIndex = assistantResponses - requestIndex * 2;
+
+          if (requestIndex < 0 || turnIndex < 0) {
+            throw new Error('Mock LLM logic failed to determine request/turn.');
+          }
+
+          return mockLLMResponses[requestIndex][turnIndex];
         }
       );
 

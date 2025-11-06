@@ -45,19 +45,23 @@ export const loadAndValidateConfig = (): AppConfig => {
     );
   }
 
-  try {
-    const stats = fs.statSync(resolvedPath);
-    if (!stats.isDirectory()) {
-      throw new Error('is not a directory.');
+  // In test environments, the path is created dynamically by the test runner,
+  // so we should skip this check. `bun test` automatically sets NODE_ENV=test.
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      const stats = fs.statSync(resolvedPath);
+      if (!stats.isDirectory()) {
+        throw new Error('is not a directory.');
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `❌ Error with KNOWLEDGE_GRAPH_PATH "${resolvedPath}": ${
+          (error as Error).message
+        }`
+      );
+      process.exit(1);
     }
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `❌ Error with KNOWLEDGE_GRAPH_PATH "${resolvedPath}": ${
-        (error as Error).message
-      }`
-    );
-    process.exit(1);
   }
 
   return Object.freeze({
