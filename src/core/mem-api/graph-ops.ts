@@ -1,20 +1,72 @@
 import type { QueryResult } from '../../types';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { resolveSecurePath } from './secure-path';
+
+// A private utility to recursively walk the graph directory.
+// This promotes DRY by centralizing the file traversal logic used by
+// queryGraph, getBacklinks, and searchGlobal.
+async function* walk(dir: string): AsyncGenerator<string> {
+  for await (const d of await fs.opendir(dir)) {
+    const entry = path.join(dir, d.name);
+    if (d.isDirectory()) {
+      yield* walk(entry);
+    } else if (d.isFile()) {
+      yield entry;
+    }
+  }
+}
 
 // Note: These are complex and will require file system access and parsing logic.
 
-// TODO: Implement queryGraph
-// export const queryGraph = (graphRoot: string) => async (query: string): Promise<QueryResult[]> => { ... }
-// - This needs a parser for the query syntax described in tools.md.
-// - It will involve reading multiple files and checking their content.
+export const queryGraph =
+  (graphRoot: string) =>
+  async (query: string): Promise<QueryResult[]> => {
+    // Cheatsheet for implementation:
+    // 1. This is a complex function requiring a mini-parser for the query language.
+    // 2. Parse the query string into a structured format (e.g., an AST).
+    // 3. Use the local `walk` utility to iterate over all files in graphRoot.
+    // 4. For each file, check if it matches the query AST.
+    //    - `(property key:: value)`: Read file, find line with `key:: value`.
+    //    - `(outgoing-link [[Page]])`: Read file, find `[[Page]]`.
+    //    - `(AND ...)`: All sub-queries must match.
+    // 5. Aggregate results into the `QueryResult[]` format.
+    throw new Error('Not implemented');
+  };
 
-// TODO: Implement getBacklinks
-// export const getBacklinks = (graphRoot: string) => async (filePath: string): Promise<string[]> => { ... }
-// - Search all .md files for `[[fileName]]`.
+export const getBacklinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    // Cheatsheet for implementation:
+    // 1. Normalize the `filePath` to its base name (e.g., 'My Page.md' -> 'My Page').
+    // 2. Construct the link pattern, e.g., `[[My Page]]`.
+    // 3. Use the local `walk` utility to iterate through all `.md` files in graphRoot.
+    // 4. For each file, read its content and check if it contains the link pattern.
+    // 5. If it does, add that file's path to the results array.
+    // 6. Return the array of file paths.
+    throw new Error('Not implemented');
+  };
 
-// TODO: Implement getOutgoingLinks
-// export const getOutgoingLinks = (graphRoot: string) => async (filePath: string): Promise<string[]> => { ... }
-// - Read the given file and parse all `[[...]]` links.
+export const getOutgoingLinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    // Cheatsheet for implementation:
+    // 1. Use `resolveSecurePath` to get the full, validated path for `filePath`.
+    // 2. Read the file content.
+    // 3. Use a regex like `/\[\[(.*?)\]\]/g` to find all wikilinks.
+    // 4. Extract the content from each match.
+    // 5. Return an array of unique link names.
+    throw new Error('Not implemented');
+  };
 
-// TODO: Implement searchGlobal
-// export const searchGlobal = (graphRoot: string) => async (query: string): Promise<string[]> => { ... }
-// - A simple text search across all files. Could use `grep` or a JS implementation.
+export const searchGlobal =
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    // Cheatsheet for implementation:
+    // 1. Use the local `walk` utility to iterate through all text-based files in graphRoot.
+    // 2. For each file, read its content.
+    // 3. Perform a case-insensitive search for the `query` string.
+    // 4. If a match is found, add the file path to the results.
+    // 5. Return the array of matching file paths.
+    throw new Error('Not implemented');
+  };

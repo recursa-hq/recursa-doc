@@ -35,7 +35,8 @@
       ".relay/",
       "agent-spawner.claude.md",
       "agent-spawner.droid.md",
-      "AGENTS.md"
+      "AGENTS.md",
+      "repo"
     ]
   },
   "security": {
