@@ -1,5 +1,13 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  InitializeRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { createSandbox } from '../core/Sandbox.js';
 import type { MemAPI } from '../types/mem.js';
 import type { MCPTool, MCPResource } from '../types/mcp.js';
@@ -151,7 +159,7 @@ export const createMCPHandler = (
     },
   ];
 
-  server.setRequestHandler({ method: 'initialize' }, async (_request) => {
+  server.setRequestHandler(InitializeRequestSchema, async (_request) => {
     return {
       protocolVersion: '2024-11-05',
       capabilities: {
@@ -169,13 +177,13 @@ export const createMCPHandler = (
     };
   });
 
-  server.setRequestHandler({ method: 'tools/list' }, async () => {
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
       tools,
     };
   });
 
-  server.setRequestHandler('tools/call', async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params as {
       name: string;
       arguments: Record<string, unknown>;
@@ -299,7 +307,7 @@ export const createMCPHandler = (
     }
   });
 
-  server.setRequestHandler('resources/list', async () => {
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
     return {
       resources,
     };
