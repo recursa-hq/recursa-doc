@@ -159,7 +159,7 @@ Updated the main application to use utilities and improved documentation.
       expect(updateResult).toContain('Updated the main application');
 
       // Verify complete project state
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
 
       // Check all expected files exist
       const expectedFiles = [
@@ -278,7 +278,7 @@ Successfully performed complex file operations including creating multiple docum
       expect(types.has('act')).toBe(true);
 
       // Verify final file state
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
 
       // Files that should exist
       const existingFiles = [
@@ -386,7 +386,7 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
       expect(errorUpdates.length).toBeGreaterThan(0);
 
       // Verify files that should exist after recovery
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const configExists = await mem.fileExists('non-existent-config.json');
       expect(configExists).toBe(true);
 

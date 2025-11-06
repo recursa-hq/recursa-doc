@@ -1,5 +1,5 @@
 import { VM, type VMOptions } from 'vm2';
-import type { MemAPI } from '../types';
+import type { MemAPI } from '../types/mem';
 import { logger } from '../lib/logger';
 
 /**

@@ -1,10 +1,10 @@
-import type { QueryResult } from '../../types';
+import type { GraphQueryResult } from '../../types';
 
 // Note: These are complex and will require file system access and parsing logic.
 
 export const queryGraph =
   (_graphRoot: string) =>
-  async (_query: string): Promise<QueryResult[]> => {
+  async (_query: string): Promise<GraphQueryResult[]> => {
     // Cheatsheet for implementation:
     // 1. This is a complex function requiring a mini-parser for the query language.
     // 2. Parse the query string into a structured format (e.g., an AST).

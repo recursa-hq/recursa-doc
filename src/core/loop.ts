@@ -3,7 +3,7 @@ import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
 import { logger } from '../lib/logger';
 import { queryLLMWithRetries as defaultQueryLLM } from './llm';
 import { parseLLMResponse } from './parser';
-import { runInSandbox } from './Sandbox';
+import { runInSandbox } from './sandbox';
 import { createMemAPI } from './mem-api';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
@@ -64,7 +64,7 @@ export const handleUserQuery = async (
     sessionId: currentSessionId,
   });
 
-  const memAPI = createMemAPI(config.knowledgeGraphPath);
+  const memAPI = createMemAPI(config);
 
   // Initialize or retrieve session history
   if (!sessionHistories[currentSessionId]) {
@@ -157,7 +157,11 @@ export const handleUserQuery = async (
           parsedResponse.typescript,
           context.memAPI
         );
-        logger.info('Code executed successfully', { runId, result: executionResult });
+        logger.info('Code executed successfully', {
+          runId,
+          // Safely serialize result for logging
+          result: JSON.stringify(executionResult, null, 2),
+        });
         const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(
           executionResult
         )}`;

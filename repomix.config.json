@@ -27,14 +27,14 @@
       "includeLogsCount": 50
     }
   },
-  "include": ["agent-spawner.droid.md"],
+  "include": [],
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
     "customPatterns": [
       ".relay/",
       "agent-spawner.claude.md",
-      // "agent-spawner.droid.md",
+      "agent-spawner.droid.md",
       "AGENTS.md",
       "repo"
     ]

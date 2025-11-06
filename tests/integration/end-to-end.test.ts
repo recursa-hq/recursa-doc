@@ -13,7 +13,6 @@ import os from 'os';
 import simpleGit from 'simple-git';
 import { handleUserQuery } from '../../src/core/loop';
 import { createMemAPI } from '../../src/core/mem-api';
-import { Elysia } from 'elysia';
 import type { AppConfig } from '../../src/config';
 
 describe('End-to-End HTTP Integration Tests', () => {
@@ -84,55 +83,33 @@ I've successfully created a test file through the HTTP API and committed the cha
 </reply>`,
       ]);
 
-      // Mock the server's LLM query function
-      const _mockHandleUserQuery = mock(handleUserQuery);
+      // This test focuses on the handleUserQuery function directly,
+      // simulating an end-to-end agent workflow without the HTTP server layer.
+      const result = await handleUserQuery(
+        'Create a test file via HTTP API',
+        mockConfig,
+        'test-session-456',
+        mockLLMQuery
+      );
 
-      // Make HTTP request to the server
-      const requestBody = {
-        query: 'Create a test file via HTTP API',
-        sessionId: 'test-session-456',
-      };
+      expect(result).toBe(
+        "I've successfully created a test file through the HTTP API and committed the changes."
+      );
 
-      try {
-        const _response = await fetch(`http://localhost:${testPort}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        });
+      // Verify the file was created
+      const mem = createMemAPI(mockConfig as AppConfig);
+      const fileExists = await mem.fileExists('api-test.md');
+      expect(fileExists).toBe(true);
 
-        // This would normally work, but since we're testing in isolation,
-        // we'll test the function directly instead
-        const result = await handleUserQuery(
-          'Create a test file via HTTP API',
-          mockConfig,
-          'test-session-456',
-          mockLLMQuery
-        );
+      const fileContent = await mem.readFile('api-test.md');
+      expect(fileContent).toContain('# API Test');
+      expect(fileContent).toContain('HTTP API endpoint');
 
-        expect(result).toBe(
-          "I've successfully created a test file through the HTTP API and committed the changes."
-        );
-
-        // Verify the file was created
-        const mem = createMemAPI(mockConfig);
-        const fileExists = await mem.fileExists('api-test.md');
-        expect(fileExists).toBe(true);
-
-        const fileContent = await mem.readFile('api-test.md');
-        expect(fileContent).toContain('# API Test');
-        expect(fileContent).toContain('HTTP API endpoint');
-
-        // Verify git commit
-        const git = simpleGit(tempDir);
-        const log = await git.log();
-        expect(log.all.length).toBe(1);
-        expect(log.all[0].message).toBe('feat: add API test file');
-      } finally {
-        // Restore original function
-        originalModule.handleUserQuery = originalHandleUserQuery;
-      }
+      // Verify git commit
+      const git = simpleGit(tempDir);
+      const log = await git.log();
+      expect(log.all.length).toBe(1);
+      expect(log.all[0].message).toBe('feat: add API test file');
     });
 
     it('should handle streaming responses with status updates', async () => {
@@ -198,7 +175,7 @@ I've successfully created three files to demonstrate the streaming progress func
       expect(runIds.length).toBe(1); // All updates should have same runId
 
       // Verify files were created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       for (let i = 1; i <= 3; i++) {
         const fileExists = await mem.fileExists(`progress${i}.md`);
         expect(fileExists).toBe(true);
