@@ -1,4 +1,4 @@
-import { VM } from 'vm2';
+import { VM, type VMOptions } from 'vm2';
 import type { MemAPI } from '../types';
 import { logger } from '../lib/logger';
 
@@ -11,7 +11,7 @@ import { logger } from '../lib/logger';
 export const runInSandbox = async (
   code: string,
   memApi: MemAPI
-): Promise<any> => {
+): Promise<unknown> => {
   const vm = new VM({
     timeout: 10000, // 10 seconds
     sandbox: {
@@ -24,7 +24,7 @@ export const runInSandbox = async (
     require: {
       builtin: [],
     },
-  });
+  } as VMOptions);
 
   // Wrap the user code in an async IIFE to allow top-level await.
   const wrappedCode = `(async () => { ${code} })();`;

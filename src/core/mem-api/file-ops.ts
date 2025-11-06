@@ -29,7 +29,11 @@ export const writeFile =
 
 export const updateFile =
   (graphRoot: string) =>
-  async (filePath: string, oldContent: string, newContent: string): Promise<boolean> => {
+  async (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ): Promise<boolean> => {
     // Cheatsheet for implementation (must be atomic-like):
     // 1. Use resolveSecurePath to get the full, validated path.
     // 2. Read the current file content.

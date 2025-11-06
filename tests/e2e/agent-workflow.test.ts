@@ -1,4 +1,11 @@
-import { describe, it, expect, afterAll, beforeAll, beforeEach } from 'bun:test';
+import {
+  describe,
+  it,
+  expect,
+  afterAll,
+  beforeAll,
+  beforeEach,
+} from 'bun:test';
 import { handleUserQuery } from '../../src/core/loop';
 import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
@@ -22,7 +29,9 @@ const createMockQueryLLM = (responses: string[]) => {
     // If called more times than there are responses, it should throw an error.
     const response = responses[callCount];
     if (!response) {
-      throw new Error(`Mock LLM called more times than expected (${callCount}).`);
+      throw new Error(
+        `Mock LLM called more times than expected (${callCount}).`
+      );
     }
     callCount++;
     return response;
