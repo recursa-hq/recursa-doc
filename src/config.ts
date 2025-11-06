@@ -3,15 +3,16 @@ import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
 
-// TODO: Define a Zod schema for environment variables for robust validation.
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
   KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
-  LLM_MODEL: z.string().default('anthropic/claude-3-sonnet-20240229'),
+  LLM_MODEL: z
+    .string()
+    .default('anthropic/claude-3-haiku-20240307') // Sensible default for cost/speed
+    .optional(),
   PORT: z.coerce.number().int().positive().default(3000),
 });
 
-// TODO: Define the final, typed configuration object.
 export type AppConfig = {
   openRouterApiKey: string;
   knowledgeGraphPath: string;
@@ -19,15 +20,56 @@ export type AppConfig = {
   port: number;
 };
 
-// TODO: Create a function to load, parse, and validate environment variables.
-// export const loadAndValidateConfig = (): AppConfig => { ... }
-// - Use `configSchema.safeParse(process.env)` to validate.
-// - If validation fails, log the errors and exit the process.
-// - After parsing, perform runtime checks:
-//   - Ensure KNOWLEDGE_GRAPH_PATH is an absolute path. If not, resolve it.
-//   - Ensure the path exists and is a directory. If not, throw a clear error.
-// - Return a frozen, typed config object mapping the env vars to friendlier names.
-//   (e.g., OPENROUTER_API_KEY -> openRouterApiKey)
+export const loadAndValidateConfig = (): AppConfig => {
+  const parseResult = configSchema.safeParse(process.env);
 
-// Example of final export:
-// export const config: AppConfig = loadAndValidateConfig();
+  if (!parseResult.success) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '❌ Invalid environment variables:',
+      parseResult.error.flatten().fieldErrors
+    );
+    process.exit(1);
+  }
+
+  const {
+    OPENROUTER_API_KEY,
+    KNOWLEDGE_GRAPH_PATH,
+    LLM_MODEL,
+    PORT,
+  } = parseResult.data;
+
+  // Perform runtime checks
+  let resolvedPath = KNOWLEDGE_GRAPH_PATH;
+  if (!path.isAbsolute(resolvedPath)) {
+    resolvedPath = path.resolve(process.cwd(), resolvedPath);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `KNOWLEDGE_GRAPH_PATH is not absolute. Resolved to: ${resolvedPath}`
+    );
+  }
+
+  try {
+    const stats = fs.statSync(resolvedPath);
+    if (!stats.isDirectory()) {
+      throw new Error('is not a directory.');
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `❌ Error with KNOWLEDGE_GRAPH_PATH "${resolvedPath}": ${
+        (error as Error).message
+      }`
+    );
+    process.exit(1);
+  }
+
+  return Object.freeze({
+    openRouterApiKey: OPENROUTER_API_KEY,
+    knowledgeGraphPath: resolvedPath,
+    llmModel: LLM_MODEL!,
+    port: PORT,
+  });
+};
+
+export const config: AppConfig = loadAndValidateConfig();

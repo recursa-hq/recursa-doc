@@ -1,25 +1,44 @@
 import { VM } from 'vm2';
 import type { MemAPI } from '../types';
-// import { logger } from '../lib/logger';
+import { logger } from '../lib/logger';
 
-// TODO: Create a function to execute LLM-generated TypeScript in a secure sandbox.
-// export const runInSandbox = async (code: string, memApi: MemAPI): Promise<any> => { ... }
-// - Instantiate a new VM from `vm2`.
-// - **Security**: Configure the VM to be as restrictive as possible.
-//   - `wasm: false` - Disable WebAssembly.
-//   - `eval: false` - Disable `eval` within the sandbox.
-//   - `fixAsync: true` - Ensures `async` operations are handled correctly.
-//   - `timeout: 10000` - Set a 10-second timeout to prevent infinite loops.
-//   - `sandbox`: The global scope. It should ONLY contain the `mem` object.
-//   - `builtin`: Whitelist only necessary built-ins (e.g., 'crypto' for randomUUID if needed),
-//     but default to an empty array `[]` to deny access to `fs`, `child_process`, etc.
-//
-// - The `code` should be wrapped in an `async` IIFE (Immediately Invoked Function Expression)
-//   to allow the use of top-level `await` for `mem` calls.
-//   Example wrapper: `(async () => { ${code} })();`
-//
-// - Use a try-catch block to handle errors from the sandboxed code.
-//   - Log errors using the structured logger for observability.
-//   - Re-throw a sanitized error or return an error object to the agent loop.
-//
-// - Capture and return the result of the execution.
+/**
+ * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
+ * @param code The TypeScript code snippet to execute.
+ * @param memApi The MemAPI instance to expose to the sandboxed code.
+ * @returns The result of the code execution.
+ */
+export const runInSandbox = async (
+  code: string,
+  memApi: MemAPI
+): Promise<any> => {
+  const vm = new VM({
+    timeout: 10000, // 10 seconds
+    sandbox: {
+      mem: memApi,
+    },
+    eval: false,
+    wasm: false,
+    fixAsync: true,
+    // Deny access to all node builtins by default.
+    require: {
+      builtin: [],
+    },
+  });
+
+  // Wrap the user code in an async IIFE to allow top-level await.
+  const wrappedCode = `(async () => { ${code} })();`;
+
+  try {
+    logger.debug('Executing code in sandbox', { code: wrappedCode });
+    const result = await vm.run(wrappedCode);
+    logger.debug('Sandbox execution successful', { result });
+    return result;
+  } catch (error) {
+    logger.error('Error executing sandboxed code', error as Error, {
+      code,
+    });
+    // Re-throw a sanitized error to the agent loop
+    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
+  }
+};
