@@ -1,13 +1,19 @@
 import { VM } from 'vm2';
-import type { SandboxOptions, SandboxResult, SandboxCode } from '../types/sandbox.js';
+import type {
+  SandboxOptions,
+  SandboxResult,
+  SandboxCode,
+} from '../types/sandbox.js';
 import type { MemAPI } from '../types/mem.js';
 
-export const createSandbox = (
-  memApi: MemAPI,
-  options?: SandboxOptions
-) => {
+export const createSandbox = (memApi: MemAPI, options?: SandboxOptions) => {
   const timeout = options?.timeout || 30000;
-  const allowedGlobals = options?.allowedGlobals || ['console', 'JSON', 'Math', 'Date'];
+  const allowedGlobals = options?.allowedGlobals || [
+    'console',
+    'JSON',
+    'Math',
+    'Date',
+  ];
   const forbiddenGlobals = options?.forbiddenGlobals || [
     'require',
     'import',
@@ -18,7 +24,7 @@ export const createSandbox = (
     'global',
     'globalThis',
     'window',
-    'document'
+    'document',
   ];
 
   const createExecutionContext = (): Record<string, unknown> => ({
@@ -32,7 +38,7 @@ export const createSandbox = (
       },
       warn: (...args: unknown[]) => {
         console.warn('[Sandbox Warn]', ...args);
-      }
+      },
     },
     JSON,
     Math,
@@ -47,7 +53,7 @@ export const createSandbox = (
     Map,
     Set,
     URL,
-    URLSearchParams
+    URLSearchParams,
   });
 
   const validateCode = (code: SandboxCode): void => {
@@ -72,7 +78,7 @@ export const createSandbox = (
       /child_process/,
       /fs\.read/,
       /fs\.write/,
-      /fs\.exec/
+      /fs\.exec/,
     ];
 
     for (const pattern of forbiddenPatterns) {
@@ -90,7 +96,7 @@ export const createSandbox = (
       timeout,
       sandbox: createExecutionContext(),
       eval: false,
-      wasm: false
+      wasm: false,
     });
 
     try {
@@ -108,21 +114,21 @@ export const createSandbox = (
         return {
           success: true,
           result: resolved,
-          executionTime
+          executionTime,
         };
       }
 
       return {
         success: true,
         result,
-        executionTime
+        executionTime,
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        executionTime
+        executionTime,
       };
     }
   };
@@ -135,7 +141,7 @@ export const createSandbox = (
       timeout,
       sandbox: createExecutionContext(),
       eval: false,
-      wasm: false
+      wasm: false,
     });
 
     try {
@@ -145,28 +151,28 @@ export const createSandbox = (
       return {
         success: true,
         result,
-        executionTime
+        executionTime,
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        executionTime
+        executionTime,
       };
     }
   };
 
   return {
     execute: executeCode,
-    executeSync: executeCodeSync
+    executeSync: executeCodeSync,
   };
 };
 
 export const sanitizeCode = (code: SandboxCode): SandboxCode => {
   let sanitized = code;
 
-  forbiddenGlobals.forEach(global => {
+  forbiddenGlobals.forEach((global) => {
     const pattern = new RegExp(`\\b${global}\\b`, 'g');
     sanitized = sanitized.replace(pattern, '[FORBIDDEN]');
   });

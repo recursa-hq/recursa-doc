@@ -21,4 +21,11 @@ export interface GitStatus {
   untracked: string[];
 }
 
-export type GitCommand = 'init' | 'add' | 'commit' | 'status' | 'log' | 'diff' | 'branch';
+export type GitCommand =
+  | 'init'
+  | 'add'
+  | 'commit'
+  | 'status'
+  | 'log'
+  | 'diff'
+  | 'branch';

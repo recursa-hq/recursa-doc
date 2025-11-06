@@ -58,10 +58,13 @@ describe('Agent End-to-End Workflow', () => {
     await git.init();
     await git.addConfig('user.name', 'Test User');
     await git.addConfig('user.email', 'test@example.com');
-    
+
     // Create a .gitignore file first
-    await fs.writeFile(path.join(testGraphPath, '.gitignore'), '*.log\nnode_modules/\n.env');
-    
+    await fs.writeFile(
+      path.join(testGraphPath, '.gitignore'),
+      '*.log\nnode_modules/\n.env'
+    );
+
     await git.add('.gitignore');
     await git.commit('Initial commit');
   });
@@ -93,11 +96,18 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     // Call the main loop with the user query and the mocked LLM function.
     const query =
       'I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation.';
-    const finalReply = await handleUserQuery(query, testConfig, undefined, mockQueryLLM);
+    const finalReply = await handleUserQuery(
+      query,
+      testConfig,
+      undefined,
+      mockQueryLLM
+    );
 
     // 3. ASSERT
     // Assert the final user-facing reply is correct.
-    expect(finalReply).toBe("Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.");
+    expect(finalReply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
 
     // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
     const thornePath = path.join(testGraphPath, 'Dr. Aris Thorne.md');
@@ -113,6 +123,8 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     // Verify the git commit. Use `simple-git` to check the log of the test repo.
     const git = simpleGit(testGraphPath);
     const log = await git.log({ maxCount: 1 });
-    expect(log.latest?.message).toBe('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
   });
 });
