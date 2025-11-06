@@ -3,7 +3,7 @@ import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
 import { logger } from '../lib/logger';
 import { queryLLMWithRetries as defaultQueryLLM } from './llm';
 import { parseLLMResponse } from './parser';
-import { runInSandbox } from './sandbox';
+import { runInSandbox } from './Sandbox';
 import { createMemAPI } from './mem-api';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
@@ -58,19 +58,20 @@ export const handleUserQuery = async (
 ): Promise<string> => {
   // 1. **Initialization**
   const runId = randomUUID();
-  const currentSessionId = sessionId || randomUUID();
+  const currentSessionId = sessionId || runId;
   logger.info('Starting user query handling', {
     runId,
     sessionId: currentSessionId,
   });
 
-  const memAPI = createMemAPI(config);
+  const memAPI = createMemAPI(config.knowledgeGraphPath);
 
-  let history = sessionHistories[currentSessionId];
-  if (!history) {
-    history = [getSystemPrompt()];
-    sessionHistories[currentSessionId] = history;
+  // Initialize or retrieve session history
+  if (!sessionHistories[currentSessionId]) {
+    sessionHistories[currentSessionId] = [getSystemPrompt()];
   }
+  
+  const history = sessionHistories[currentSessionId];
   history.push({ role: 'user', content: query });
 
   const context: ExecutionContext = {
@@ -92,6 +93,17 @@ export const handleUserQuery = async (
 
     // **Parse**
     const parsedResponse = parseLLMResponse(llmResponseStr);
+    
+    // Debug logging to see what was parsed
+    logger.info('Parsed LLM response', {
+      runId,
+      parsed: {
+        think: !!parsedResponse.think,
+        typescript: !!parsedResponse.typescript,
+        reply: !!parsedResponse.reply,
+      },
+    });
+    
     if (
       !parsedResponse.think &&
       !parsedResponse.typescript &&
@@ -125,6 +137,8 @@ export const handleUserQuery = async (
 
     // **Act**
     if (parsedResponse.typescript) {
+      logger.info('Executing TypeScript code', { runId });
+      
       // Send action status update via callback if available
       if (onStatusUpdate) {
         const actUpdate: StatusUpdate = {
@@ -138,10 +152,12 @@ export const handleUserQuery = async (
       }
 
       try {
+        logger.info('Running code in sandbox', { runId });
         const executionResult = await runInSandbox(
           parsedResponse.typescript,
           context.memAPI
         );
+        logger.info('Code executed successfully', { runId, result: executionResult });
         const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(
           executionResult
         )}`;
@@ -159,6 +175,7 @@ export const handleUserQuery = async (
           onStatusUpdate(successUpdate);
         }
       } catch (e) {
+        logger.error('Code execution failed', e as Error, { runId });
         const feedback = `[Execution Error]: ${(e as Error).message}`;
         context.history.push({ role: 'user', content: feedback });
 
