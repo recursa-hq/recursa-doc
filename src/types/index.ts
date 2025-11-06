@@ -3,6 +3,7 @@ export * from './git.js';
 export * from './sandbox.js';
 export * from './mcp.js';
 export * from './llm.js';
+export * from './loop.js';
 
 export interface RecursaConfig {
   knowledgeGraphPath: string;

@@ -14,7 +14,7 @@ export const parseLLMResponse = (response: string): ParsedLLMResponse => {
     const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
     const match = response.match(regex);
     // If a match is found, return the captured group (the content), trimmed.
-    return match ? match[1].trim() : undefined;
+    return match && match[1] ? match[1].trim() : undefined;
   };
 
   // Parse structured tags
@@ -46,7 +46,7 @@ export const parseLLMResponse = (response: string): ParsedLLMResponse => {
       if (lastLineIndex > 0 && lastLineIndex < response.length - 1) {
         reply = response.substring(lastLineIndex + 1).trim();
       } else if (nonTagLines.length === 1) {
-        reply = nonTagLines[0].trim();
+          reply = nonTagLines[0]!.trim();
       }
     }
   }

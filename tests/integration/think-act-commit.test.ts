@@ -116,7 +116,7 @@ I've successfully created a new test document and committed the changes to your 
       expect(actUpdates.length).toBeGreaterThan(0);
 
       // Verify file was actually created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const fileExists = await mem.fileExists('test-file.md');
       expect(fileExists).toBe(true);
 
@@ -133,7 +133,7 @@ I've successfully created a new test document and committed the changes to your 
 
     it('should handle file updates in the loop', async () => {
       // Create initial file
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       await mem.writeFile(
         'existing.md',
         '# Original Content\n\nOriginal content here.'
@@ -236,7 +236,7 @@ I encountered an error but recovered by creating the new file. Changes have been
       expect(errorUpdates.length).toBeGreaterThan(0);
 
       // Verify file was eventually created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const fileExists = await mem.fileExists('non-existent-file.md');
       expect(fileExists).toBe(true);
     });
@@ -287,7 +287,7 @@ I've created a new directory structure with three files and committed all the ch
       );
 
       // Verify directory and files were created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const dirExists = await mem.fileExists('test-directory');
       expect(dirExists).toBe(true);
 
@@ -356,7 +356,7 @@ I've successfully created and updated multiple files, committed them with a prop
       );
 
       // Verify files exist and have correct content
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const projectContent = await mem.readFile('project.md');
       expect(projectContent).toContain('# My Project');
       expect(projectContent).toContain('In progress.');
@@ -439,7 +439,7 @@ File updated in the same session context.
       expect(secondResult).toBe('File updated in the same session context.');
 
       // Verify file has both updates
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const finalContent = await mem.readFile('session-test.md');
       expect(finalContent).toContain('First file in session');
       expect(finalContent).toContain('Second Update');

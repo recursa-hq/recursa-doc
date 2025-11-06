@@ -112,7 +112,7 @@ Successfully created and committed the test file.
       expect(actUpdates.length).toBeGreaterThan(0);
 
       // Verify file was actually created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const fileExists = await mem.fileExists('simple-test.md');
       expect(fileExists).toBe(true);
 
@@ -129,7 +129,7 @@ Successfully created and committed the test file.
 
     it('should handle file updates and commits', async () => {
       // Create initial file
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       await mem.writeFile(
         'update-test.md',
         '# Original Title\n\nOriginal content.'
@@ -228,7 +228,7 @@ Successfully recovered from error and created the file.
       expect(errorUpdates.length).toBeGreaterThan(0);
 
       // Verify file was created after recovery
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const fileExists = await mem.fileExists('non-existent.md');
       expect(fileExists).toBe(true);
 
@@ -280,7 +280,7 @@ Successfully created multiple files in the directory structure.
       );
 
       // Verify directory and files were created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const dirExists = await mem.fileExists('multi-test');
       expect(dirExists).toBe(true);
 
@@ -361,7 +361,7 @@ File updated in the same session context.
       expect(secondResult).toBe('File updated in the same session context.');
 
       // Verify file has both updates
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const finalContent = await mem.readFile('session-context.md');
       expect(finalContent).toContain('First file in this session');
       expect(finalContent).toContain('Second Update');

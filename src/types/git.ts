@@ -2,12 +2,12 @@ export interface GitOptions {
   baseDir?: string;
 }
 
-export interface GitCommitHistory {
+// Structure for a single Git log entry.
+export type LogEntry = {
   hash: string;
   message: string;
   date: string;
-  author: string;
-}
+};
 
 export interface GitDiffResult {
   additions: number;

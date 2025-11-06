@@ -44,14 +44,14 @@ export const createMemAPI = (config: AppConfig): MemAPI => {
     getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
     searchGlobal: graphOps.searchGlobal(graphRoot),
 
-    // State Management
-    saveCheckpoint: stateOps.saveCheckpoint(git),
-    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git),
-    discardChanges: stateOps.discardChanges(git),
+    // State Management & Checkpoints
+    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
+    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
+    discardChanges: stateOps.discardChanges(git), // Implemented
 
-    // Utility
+    // Utility & Diagnostics
     getGraphRoot: utilOps.getGraphRoot(graphRoot),
-    getTokenCount: utilOps.getTokenCount(graphRoot),
-    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot),
+    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
+    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
   };
 };

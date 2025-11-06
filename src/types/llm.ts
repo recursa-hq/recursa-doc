@@ -1,10 +1,16 @@
-export interface LLMMessage {
+export type ParsedLLMResponse = {
+  think?: string;
+  typescript?: string;
+  reply?: string;
+};
+
+export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
-}
+};
 
 export interface LLMRequest {
-  messages: LLMMessage[];
+  messages: ChatMessage[];
   model: string;
   maxTokens?: number;
   temperature?: number;

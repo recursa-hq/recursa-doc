@@ -12,9 +12,7 @@ import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
 import { createApp } from '../../src/server';
-import { handleUserQuery } from '../../src/core/loop';
 import type { AppConfig } from '../../src/config';
-import type { StatusUpdate } from '../../src/types';
 
 describe('MCP Server HTTP Integration Tests', () => {
   let tempDir: string;
@@ -36,8 +34,8 @@ describe('MCP Server HTTP Integration Tests', () => {
     };
 
     // Create a mock handleUserQuery function for testing
-    const mockHandleUserQuery = mock(
-      async (query: string, config: AppConfig, sessionId?: string) => {
+    const mockHandleUserQuery = mock(async (query: string) => {
+      // config: AppConfig, sessionId?: string
         return `Mock response for query: ${query}`;
       }
     );

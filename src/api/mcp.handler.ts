@@ -1,5 +1,4 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
@@ -8,7 +7,7 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { createSandbox } from '../core/Sandbox.js';
+import { runInSandbox } from '../core/sandbox.js';
 import type { MemAPI } from '../types/mem.js';
 import type { MCPTool, MCPResource } from '../types/mcp.js';
 
@@ -32,10 +31,6 @@ export const createMCPHandler = (
       },
     }
   );
-
-  const sandbox = createSandbox(memApi, {
-    timeout: 30000,
-  });
 
   const tools: MCPTool[] = [
     {
@@ -193,7 +188,7 @@ export const createMCPHandler = (
       switch (name) {
         case 'execute_code': {
           const code = String(args.code);
-          const result = await sandbox.execute(code);
+          const result = await runInSandbox(code, memApi);
           return {
             content: [
               {

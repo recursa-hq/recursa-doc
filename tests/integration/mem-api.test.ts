@@ -18,8 +18,12 @@ describe('MemAPI Integration Tests', () => {
   let tempDir: string;
   let mem: MemAPI;
 
-  const mockConfig: Pick<AppConfig, 'knowledgeGraphPath'> = {
-    knowledgeGraphPath: '', // This will be set in beforeAll
+  // Provide a full mock config
+  const mockConfig: AppConfig = {
+    knowledgeGraphPath: '', // This will be set in beforeAll,
+    openRouterApiKey: 'test-key',
+    llmModel: 'test-model',
+    port: 3000,
   };
 
   beforeAll(async () => {
@@ -36,7 +40,7 @@ describe('MemAPI Integration Tests', () => {
     await git.init();
     await git.addConfig('user.name', 'Test User');
     await git.addConfig('user.email', 'test@example.com');
-    // Create the mem API instance for this test
+    // Create the mem API instance for this test, it's now AppConfig
     mem = createMemAPI(mockConfig as AppConfig);
   });
 

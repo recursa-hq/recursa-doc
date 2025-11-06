@@ -1,38 +1,25 @@
-export interface TokenCount {
-  total: number;
-  tokens: number;
-  characters: number;
-}
+import type { LogEntry } from './git';
 
-export interface FileTokenBreakdown {
-  filePath: string;
-  tokens: number;
-  characters: number;
-  blocks: number;
-}
+// --- Knowledge Graph & Git ---
 
-export interface DirectoryTokenStats {
-  totalTokens: number;
-  totalFiles: number;
-  largestFile: {
-    path: string;
-    tokens: number;
-  };
-  averageTokensPerFile: number;
-}
-
-export interface GitCommit {
-  hash: string;
-  message: string;
-  date: string;
-}
-
-export interface GraphQueryResult {
+// Structure for a graph query result.
+export type GraphQueryResult = {
   filePath: string;
   matches: string[];
-}
+};
 
-export interface MemAPI {
+// Structure for token count results for multiple paths.
+export type PathTokenCount = {
+  path: string;
+  tokenCount: number;
+};
+
+// --- MemAPI Interface (Matches tools.md) ---
+
+// This is the "cheatsheet" for what's available in the sandbox.
+// It must be kept in sync with the tools documentation.
+export type MemAPI = {
+  // Core File I/O
   readFile: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, content: string) => Promise<boolean>;
   updateFile: (
@@ -46,32 +33,29 @@ export interface MemAPI {
   createDir: (directoryPath: string) => Promise<boolean>;
   listFiles: (directoryPath?: string) => Promise<string[]>;
 
+  // Git-Native Operations
   gitDiff: (
     filePath: string,
     fromCommit?: string,
     toCommit?: string
   ) => Promise<string>;
-  gitLog: (filePath: string, maxCommits?: number) => Promise<GitCommit[]>;
+  gitLog: (filePath: string, maxCommits?: number) => Promise<LogEntry[]>;
   gitStagedFiles: () => Promise<string[]>;
   commitChanges: (message: string) => Promise<string>;
 
+  // Intelligent Graph Operations
   queryGraph: (query: string) => Promise<GraphQueryResult[]>;
   getBacklinks: (filePath: string) => Promise<string[]>;
   getOutgoingLinks: (filePath: string) => Promise<string[]>;
   searchGlobal: (query: string) => Promise<string[]>;
 
-  getGraphRoot: () => Promise<string>;
-  getMemoryUsage: () => Promise<number>;
+  // State Management
+  saveCheckpoint: () => Promise<boolean>;
+  revertToLastCheckpoint: () => Promise<boolean>;
+  discardChanges: () => Promise<boolean>;
 
-  countFileTokens: (filePath: string) => Promise<TokenCount>;
-  countDirectoryTokens: (directoryPath?: string) => Promise<number>;
-  getTokenBreakdown: (filePath: string) => Promise<FileTokenBreakdown>;
-  estimateReadCost: (filePath: string) => Promise<number>;
-  getFilesByTokenSize: (
-    directoryPath?: string,
-    limit?: number
-  ) => Promise<Array<{ filePath: string; tokens: number }>>;
-  getDirectoryTokenStats: (
-    directoryPath?: string
-  ) => Promise<DirectoryTokenStats>;
-}
+  // Utility
+  getGraphRoot: () => Promise<string>;
+  getTokenCount: (filePath: string) => Promise<number>;
+  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
+};

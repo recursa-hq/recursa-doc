@@ -13,6 +13,7 @@ import os from 'os';
 import simpleGit from 'simple-git';
 import { createApp } from '../../src/server';
 import type { AppConfig } from '../../src/config';
+import { handleUserQuery } from '../../src/core/loop';
 import type { ChatMessage } from '../../src/types';
 
 describe('MCP Server Complete End-to-End Tests', () => {
@@ -96,8 +97,17 @@ I've successfully created a new entry for Test Person in your knowledge base.
         }
       );
 
-      // Create app with mocked LLM
-      app = createApp(mockQueryLLM, mockConfig);
+      // Create a version of handleUserQuery that uses our mocked LLM
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       // Make the MCP request
       const requestBody = {
@@ -175,7 +185,17 @@ I've created entries for both Test Organization and John Doe, with proper linkin
         }
       );
 
-      app = createApp(mockQueryLLM, mockConfig);
+      // Create a version of handleUserQuery that uses our mocked LLM
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       const requestBody = {
         query:
@@ -257,8 +277,17 @@ The status test operation has been completed successfully.
         }
       );
 
-      // Create app that captures status updates
-      app = createApp(mockQueryLLM, mockConfig);
+      // Create a version of handleUserQuery that uses our mocked LLM
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       // Make the MCP request
       const requestBody = {
@@ -330,7 +359,17 @@ The status test operation has been completed successfully.
         }
       );
 
-      app = createApp(mockQueryLLM, mockConfig);
+      // Create a version of handleUserQuery that uses our mocked LLM
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       const requestBody = {
         query: 'This should trigger an error',
@@ -383,7 +422,17 @@ There was an error executing the code. Please check the syntax and try again.
         }
       );
 
-      app = createApp(mockQueryLLM, mockConfig);
+      // Create a version of handleUserQuery that uses our mocked LLM
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       const requestBody = {
         query: 'Execute some invalid code',
@@ -449,7 +498,16 @@ Second file created and linked to the first.
         }
       );
 
-      app = createApp(mockQueryLLM, mockConfig);
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       // First request
       const firstResponse = await app.handle(
@@ -526,7 +584,17 @@ Concurrent test completed successfully.
         }
       );
 
-      app = createApp(mockQueryLLM, mockConfig);
+      // Create a version of handleUserQuery that uses our mocked LLM
+      const mockedHandleUserQuery = (
+        query: string,
+        config: AppConfig,
+        sessionId?: string
+      ) => {
+        return handleUserQuery(query, config, sessionId, mockQueryLLM);
+      };
+
+      // Create app with the mocked handler
+      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
 
       // Create 5 concurrent requests
       const concurrentRequests = Array.from({ length: 5 }, (_, i) =>
@@ -564,7 +632,7 @@ Concurrent test completed successfully.
     it('should strictly validate request schemas and return appropriate errors', async () => {
       app = createApp(
         mock(async () => 'mock response'),
-        mockConfig
+        mockConfig as AppConfig
       );
 
       // Test various invalid request formats
@@ -612,7 +680,7 @@ Concurrent test completed successfully.
     it('should handle malformed JSON requests gracefully', async () => {
       app = createApp(
         mock(async () => 'mock response'),
-        mockConfig
+        mockConfig as AppConfig
       );
 
       const malformedRequests = [

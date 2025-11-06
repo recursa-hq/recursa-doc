@@ -102,7 +102,7 @@ Successfully created and committed the workflow test file.
       );
 
       // Verify file was actually created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const fileExists = await mem.fileExists('workflow-test.md');
       expect(fileExists).toBe(true);
 
@@ -162,7 +162,7 @@ Successfully created a complete project structure with README, main file, and co
       );
 
       // Verify directory and files were created
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const dirExists = await mem.fileExists('project');
       expect(dirExists).toBe(true);
 
@@ -194,7 +194,7 @@ Successfully created a complete project structure with README, main file, and co
 
     it('should handle file modification workflow', async () => {
       // Create initial file first
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       await mem.writeFile(
         'modify-test.md',
         '# Original Title\n\nOriginal content here.'
@@ -295,7 +295,7 @@ I've successfully demonstrated the complete Think-Act-Commit loop by creating an
       );
 
       // Verify the workflow was completed
-      const mem = createMemAPI(mockConfig);
+      const mem = createMemAPI(mockConfig as AppConfig);
       const fileExists = await mem.fileExists('loop-example.md');
       expect(fileExists).toBe(true);
 
