@@ -21,18 +21,30 @@ const getSystemPrompt = (): ChatMessage => {
     return systemPromptMessage;
   }
 
-  // Cheatsheet for implementation:
-  // 1. Resolve the path to 'docs/system-prompt.md' from the project root.
-  //    `const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');`
-  // 2. Read the file content synchronously. `fs.readFileSync(promptPath, 'utf-8');`
-  // 3. Create the ChatMessage object and store it in `systemPromptMessage`.
-  // 4. If file read fails, log a critical error and exit, as the agent cannot run without it.
-  // 5. For now, using a hardcoded abridged version as a fallback during development.
-  systemPromptMessage = {
-    role: 'system',
-    content: `You are Recursa, a Git-Native AI agent. Your mind is a local knowledge graph, your actions are TypeScript code, and your memory is a git history. You do not simply answer questions; you reason, modify the graph, and commit your work.`, // Abridged for brevity
-  };
-  return systemPromptMessage;
+  try {
+    // Resolve the path to 'docs/system-prompt.md' from the project root.
+    const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
+    
+    // Read the file content synchronously.
+    const systemPromptContent = fs.readFileSync(promptPath, 'utf-8');
+    
+    // Create the ChatMessage object and store it in `systemPromptMessage`.
+    systemPromptMessage = {
+      role: 'system',
+      content: systemPromptContent.trim(),
+    };
+    
+    logger.info('System prompt loaded successfully', { path: promptPath });
+    return systemPromptMessage;
+  } catch (error) {
+    // If file read fails, log a critical error and exit, as the agent cannot run without it.
+    logger.error('Failed to load system prompt file', error as Error, { 
+      path: path.resolve(process.cwd(), 'docs/system-prompt.md')
+    });
+    
+    // Exit the process with a non-zero code to indicate failure
+    process.exit(1);
+  }
 };
 
 export const handleUserQuery = async (
@@ -74,7 +86,7 @@ export const handleUserQuery = async (
     // **Parse**
     const parsedResponse = parseLLMResponse(llmResponseStr);
     if (!parsedResponse.think && !parsedResponse.typescript && !parsedResponse.reply) {
-      logger.error('Failed to parse LLM response', { runId, llmResponseStr });
+      logger.error('Failed to parse LLM response', undefined, { runId, llmResponseStr });
       return 'Error: Could not understand the response from the AI.';
     }
 
