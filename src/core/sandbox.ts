@@ -12,10 +12,13 @@ export const runInSandbox = async (
   code: string,
   memApi: MemAPI
 ): Promise<unknown> => {
+  // Create a deep copy of the memApi to avoid readonly property issues
+  const memApiCopy = { ...memApi };
+  
   const vm = new VM({
     timeout: 10000, // 10 seconds
     sandbox: {
-      mem: memApi,
+      mem: memApiCopy,
     },
     eval: false,
     wasm: false,
