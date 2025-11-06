@@ -5,12 +5,675 @@ docs/
   rules.md
   system-prompt.md
   tools.md
+repo/
+  flow.todo.md
+src/
+  core/
+    mem-api/
+      file-ops.ts
+      git-ops.ts
+      graph-ops.ts
+      index.ts
+      state-ops.ts
+      util-ops.ts
+    llm.ts
+    loop.ts
+    parser.ts
+    sandbox.ts
+  lib/
+    logger.ts
+  config.ts
+  server.ts
+  types.ts
+tests/
+  e2e/
+    agent-workflow.test.ts
+  integration/
+    mem-api.test.ts
+  unit/
+    parser.test.ts
+.dockerignore
+.env.example
+.eslintrc.json
 .gitignore
+.prettierrc.json
+Dockerfile
+package.json
 relay.config.json
 repomix.config.json
+tsconfig.json
 ```
 
 # Files
+
+## File: src/core/mem-api/file-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+
+// Note: Each function here is a HOF that takes dependencies (like graphRoot)
+// and returns the actual function to be exposed on the mem API.
+
+// A crucial utility to prevent path traversal attacks.
+// The LLM should never be able to access files outside the knowledge graph.
+const resolveSecurePath = (graphRoot: string, userPath: string): string => {
+  const resolvedPath = path.resolve(graphRoot, userPath);
+  if (!resolvedPath.startsWith(graphRoot)) {
+    throw new Error('Security Error: Path traversal attempt detected.');
+  }
+  return resolvedPath;
+};
+
+// TODO: Implement readFile
+// export const readFile = (graphRoot: string) => async (filePath: string): Promise<string> => {
+//   const securePath = resolveSecurePath(graphRoot, filePath); ...
+// }
+
+// TODO: Implement writeFile
+// - Ensure `path.dirname` is used with `fs.mkdir({ recursive: true })`
+//   to create parent directories.
+// export const writeFile = (graphRoot: string) => async (filePath:string, content: string): Promise<boolean> => { ... }
+
+// TODO: Implement updateFile
+// - This should be atomic: read, replace, then write.
+// export const updateFile = (graphRoot: string) => async (filePath: string, oldContent: string, newContent: string): Promise<boolean> => { ... }
+
+// TODO: Implement deleteFile, rename, fileExists, createDir, listFiles
+// - All must use `resolveSecurePath`.
+````
+
+## File: src/core/mem-api/git-ops.ts
+````typescript
+import type { SimpleGit } from 'simple-git';
+import type { LogEntry } from '../../types';
+
+// Note: These functions take a pre-configured simple-git instance.
+
+// TODO: Implement gitDiff
+// export const gitDiff = (git: SimpleGit) => async (filePath: string, fromCommit?: string, toCommit?: string): Promise<string> => { ... }
+
+// TODO: Implement gitLog
+// export const gitLog = (git: SimpleGit) => async (filePath: string, maxCommits: number = 5): Promise<LogEntry[]> => { ... }
+
+// TODO: Implement gitStagedFiles
+// export const gitStagedFiles = (git: SimpleGit) => async (): Promise<string[]> => { ... }
+
+// TODO: Implement commitChanges
+// export const commitChanges = (git: SimpleGit) => async (message: string): Promise<string> => { ... }
+````
+
+## File: src/core/mem-api/graph-ops.ts
+````typescript
+import type { QueryResult } from '../../types';
+
+// Note: These are complex and will require file system access and parsing logic.
+
+// TODO: Implement queryGraph
+// export const queryGraph = (graphRoot: string) => async (query: string): Promise<QueryResult[]> => { ... }
+// - This needs a parser for the query syntax described in tools.md.
+// - It will involve reading multiple files and checking their content.
+
+// TODO: Implement getBacklinks
+// export const getBacklinks = (graphRoot: string) => async (filePath: string): Promise<string[]> => { ... }
+// - Search all .md files for `[[fileName]]`.
+
+// TODO: Implement getOutgoingLinks
+// export const getOutgoingLinks = (graphRoot: string) => async (filePath: string): Promise<string[]> => { ... }
+// - Read the given file and parse all `[[...]]` links.
+
+// TODO: Implement searchGlobal
+// export const searchGlobal = (graphRoot: string) => async (query: string): Promise<string[]> => { ... }
+// - A simple text search across all files. Could use `grep` or a JS implementation.
+````
+
+## File: src/core/mem-api/index.ts
+````typescript
+import type { MemAPI } from '../../types';
+import type { AppConfig } from '../../config';
+import simpleGit from 'simple-git';
+
+// import * as fileOps from './file-ops';
+// import * as gitOps from './git-ops';
+// import * as graphOps from './graph-ops';
+// import * as stateOps from './state-ops';
+// import * as utilOps from './util-ops';
+
+// TODO: Create a HOF that takes the AppConfig (especially KNOWLEDGE_GRAPH_PATH)
+// and returns the complete, fully-functional MemAPI object.
+// export const createMemAPI = (config: AppConfig): MemAPI => { ... }
+// - Initialize simple-git with the knowledge graph path.
+// - Each function in the returned MemAPI object will be a partially applied HOF,
+//   pre-configured with necessary context (like the graph path or git instance).
+// - This is the core of the HOF pattern for this module.
+````
+
+## File: src/core/mem-api/state-ops.ts
+````typescript
+import type { SimpleGit } from 'simple-git';
+
+// Note: These functions map to specific git commands for state management.
+
+// TODO: Implement saveCheckpoint
+// export const saveCheckpoint = (git: SimpleGit) => async (): Promise<boolean> => { ... }
+// - This should stage all changes (`git add .`) and then create a stash (`git stash push`).
+
+// TODO: Implement revertToLastCheckpoint
+// export const revertToLastCheckpoint = (git: SimpleGit) => async (): Promise<boolean> => { ... }
+// - This should apply the most recent stash (`git stash pop`).
+
+// TODO: Implement discardChanges
+// export const discardChanges = (git: SimpleGit) => async (): Promise<boolean> => { ... }
+// - This should perform a hard reset (`git reset --hard`) and clean untracked files (`git clean -fd`).
+````
+
+## File: src/core/mem-api/util-ops.ts
+````typescript
+import type { PathTokenCount } from '../../types';
+// Potentially import a tokenizer library like 'tiktoken'
+
+// Note: HOFs returning the final mem API functions.
+
+// TODO: Implement getGraphRoot
+// export const getGraphRoot = (graphRoot: string) => async (): Promise<string> => { ... }
+// - Simply returns the graphRoot path it was configured with.
+
+// TODO: Implement getTokenCount
+// export const getTokenCount = (graphRoot: string) => async (filePath: string): Promise<number> => { ... }
+// - Read file content and use a tokenizer to count tokens.
+
+// TODO: Implement getTokenCountForPaths
+// export const getTokenCountForPaths = (graphRoot: string) => async (paths: string[]): Promise<PathTokenCount[]> => { ... }
+// - Efficiently read multiple files and return their token counts.
+````
+
+## File: src/core/llm.ts
+````typescript
+import type { AppConfig } from '../config';
+
+// TODO: Create a function to call the OpenRouter API.
+// export const queryLLM = async (prompt: string, config: AppConfig): Promise<string> => { ... }
+// - It should construct a request to the OpenRouter completions endpoint.
+// - It should include the system prompt and the user query in the payload.
+// - Use the model and API key from the config.
+// - Handle API errors gracefully.
+// - Return the string content of the LLM's response.
+// - Use native `fetch`.
+````
+
+## File: src/core/loop.ts
+````typescript
+import type { AppConfig } from '../config';
+import type { ExecutionContext, ChatMessage } from '../types';
+// import { logger } from '../lib/logger';
+// import { queryLLM } from './llm';
+// import { parseLLMResponse } from './parser';
+// import { runInSandbox } from './sandbox';
+// import { createMemAPI } from './mem-api';
+
+// TODO: Define the main Think-Act-Commit loop handler. This is the orchestrator.
+// export const handleUserQuery = async (query: string, config: AppConfig, sessionId?: string) => { ... }
+// - This function manages the entire lifecycle of a user request.
+
+// 1. **Initialization**
+//    - Generate a unique `runId` for this request for logging/tracing.
+//    - Create the `memAPI` instance using `createMemAPI(config)`.
+//    - Retrieve or initialize the conversation `history` for the given `sessionId`.
+//      - The history should always start with the system prompt.
+//    - Add the current user `query` to the history.
+//    - Create the `ExecutionContext` object.
+
+// 2. **Execution Loop**
+//    - Use a `for` loop with a maximum number of turns (e.g., 10) to prevent infinite loops.
+//    - **Call LLM**: `const llmResponseStr = await queryLLM(context.history, config);`
+//    - Add the LLM's raw response to the history.
+//    - **Parse**: `const parsedResponse = parseLLMResponse(llmResponseStr);`
+//      - If parsing fails, return an error to the user.
+//    - **Think**: If `parsedResponse.think` exists, send this status update to the client (e.g., via a callback or event emitter).
+//    - **Act**: If `parsedResponse.typescript` exists:
+//      - `const executionResult = await runInSandbox(parsedResponse.typescript, context.memAPI);`
+//      - Create a summary of the result (e.g., "Code executed successfully." or "Error: ...")
+//        and add it as a new 'user' message to the history to give the LLM feedback for the next turn.
+//    - **Reply**: If `parsedResponse.reply` exists, this is the final turn.
+//      - Break the loop and return `parsedResponse.reply` to the user.
+
+// 3. **Termination**
+//    - If the loop finishes without a `<reply>`, return a default message like "The agent finished its work without providing a final response."
+//    - Store the updated conversation history for the `sessionId`.
+````
+
+## File: src/core/parser.ts
+````typescript
+import { XMLParser } from 'fast-xml-parser';
+import type { ParsedLLMResponse } from '../types';
+
+// TODO: Create a function to parse the LLM's XML-like response string.
+// export const parseLLMResponse = (response: string): ParsedLLMResponse => { ... }
+// - It should handle the specific XML structure (<think>, <typescript>, <reply>).
+// - It needs to be robust to variations in whitespace and formatting.
+// - Use fast-xml-parser with appropriate options.
+// - Return a ParsedLLMResponse object.
+````
+
+## File: src/core/sandbox.ts
+````typescript
+import { VM } from 'vm2';
+import type { MemAPI } from '../types';
+// import { logger } from '../lib/logger';
+
+// TODO: Create a function to execute LLM-generated TypeScript in a secure sandbox.
+// export const runInSandbox = async (code: string, memApi: MemAPI): Promise<any> => { ... }
+// - Instantiate a new VM from `vm2`.
+// - **Security**: Configure the VM to be as restrictive as possible.
+//   - `wasm: false` - Disable WebAssembly.
+//   - `eval: false` - Disable `eval` within the sandbox.
+//   - `fixAsync: true` - Ensures `async` operations are handled correctly.
+//   - `timeout: 10000` - Set a 10-second timeout to prevent infinite loops.
+//   - `sandbox`: The global scope. It should ONLY contain the `mem` object.
+//   - `builtin`: Whitelist only necessary built-ins (e.g., 'crypto' for randomUUID if needed),
+//     but default to an empty array `[]` to deny access to `fs`, `child_process`, etc.
+//
+// - The `code` should be wrapped in an `async` IIFE (Immediately Invoked Function Expression)
+//   to allow the use of top-level `await` for `mem` calls.
+//   Example wrapper: `(async () => { ${code} })();`
+//
+// - Use a try-catch block to handle errors from the sandboxed code.
+//   - Log errors using the structured logger for observability.
+//   - Re-throw a sanitized error or return an error object to the agent loop.
+//
+// - Capture and return the result of the execution.
+````
+
+## File: src/lib/logger.ts
+````typescript
+// TODO: Implement a simple, structured logger.
+// - It could use a library like `pino` or just `console` with formatting.
+// - It should support different log levels (info, warn, error, debug).
+// - Log entries should ideally be JSON for easier parsing by log collectors.
+// - It should be a singleton or a set of HOFs to ensure consistent logging across the app.
+
+// Example interface:
+type Logger = {
+  info: (message: string, context?: Record<string, unknown>) => void;
+  warn: (message: string, context?: Record<string, unknown>) => void;
+  error: (message: string, error?: Error, context?: Record<string, unknown>) => void;
+  debug: (message: string, context?: Record<string, unknown>) => void;
+};
+
+// export const createLogger = (): Logger => ({ ... });
+// export const logger = createLogger();
+````
+
+## File: src/config.ts
+````typescript
+import 'dotenv/config';
+import { z } from 'zod';
+import path from 'path';
+import fs from 'fs';
+
+// TODO: Define a Zod schema for environment variables for robust validation.
+const configSchema = z.object({
+  OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
+  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  LLM_MODEL: z.string().default('anthropic/claude-3-sonnet-20240229'),
+  PORT: z.coerce.number().int().positive().default(3000),
+});
+
+// TODO: Define the final, typed configuration object.
+export type AppConfig = {
+  openRouterApiKey: string;
+  knowledgeGraphPath: string;
+  llmModel: string;
+  port: number;
+};
+
+// TODO: Create a function to load, parse, and validate environment variables.
+// export const loadAndValidateConfig = (): AppConfig => { ... }
+// - Use `configSchema.safeParse(process.env)` to validate.
+// - If validation fails, log the errors and exit the process.
+// - After parsing, perform runtime checks:
+//   - Ensure KNOWLEDGE_GRAPH_PATH is an absolute path. If not, resolve it.
+//   - Ensure the path exists and is a directory. If not, throw a clear error.
+// - Return a frozen, typed config object mapping the env vars to friendlier names.
+//   (e.g., OPENROUTER_API_KEY -> openRouterApiKey)
+
+// Example of final export:
+// export const config: AppConfig = loadAndValidateConfig();
+````
+
+## File: src/types.ts
+````typescript
+// --- LLM & Agent Interaction ---
+
+// The structured data parsed from the LLM's XML-like response.
+export type ParsedLLMResponse = {
+  think?: string;
+  typescript?: string;
+  reply?: string;
+};
+
+// Represents a single message in the conversation history with the LLM.
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
+// --- Knowledge Graph & Git ---
+
+// Structure for a single Git log entry.
+export type LogEntry = {
+  hash: string;
+  message: string;
+  date: string;
+};
+
+// Structure for a graph query result.
+export type QueryResult = {
+  filePath: string;
+  matches: string[];
+};
+
+// Structure for token count results for multiple paths.
+export type PathTokenCount = {
+  path: string;
+  tokenCount: number;
+};
+
+// --- API & Server ---
+
+// The expected JSON body for incoming requests to the MCP server.
+export type McpRequest = {
+  query: string;
+  // Optional: A session ID to maintain conversation context between requests.
+  sessionId?: string;
+};
+
+// The execution context passed through the agent loop.
+export type ExecutionContext = {
+  // The complete conversation history for this session.
+  history: ChatMessage[];
+  // The API implementation available to the sandbox.
+  memAPI: MemAPI;
+  // The application configuration.
+  config: import('./config').AppConfig;
+  // A unique ID for this execution run.
+  runId: string;
+};
+
+// --- MemAPI Interface (Matches tools.md) ---
+
+// This is the "cheatsheet" for what's available in the sandbox.
+// It must be kept in sync with the tools documentation.
+export type MemAPI = {
+  // Core File I/O
+  readFile: (filePath: string) => Promise<string>;
+  writeFile: (filePath: string, content: string) => Promise<boolean>;
+  updateFile: (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ) => Promise<boolean>;
+  deleteFile: (filePath: string) => Promise<boolean>;
+  rename: (oldPath: string, newPath: string) => Promise<boolean>;
+  fileExists: (filePath: string) => Promise<boolean>;
+  createDir: (directoryPath: string) => Promise<boolean>;
+  listFiles: (directoryPath?: string) => Promise<string[]>;
+
+  // Git-Native Operations
+  gitDiff: (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ) => Promise<string>;
+  gitLog: (filePath: string, maxCommits?: number) => Promise<LogEntry[]>;
+  gitStagedFiles: () => Promise<string[]>;
+  commitChanges: (message: string) => Promise<string>;
+
+  // Intelligent Graph Operations
+  queryGraph: (query: string) => Promise<QueryResult[]>;
+  getBacklinks: (filePath: string) => Promise<string[]>;
+  getOutgoingLinks: (filePath: string) => Promise<string[]>;
+  searchGlobal: (query: string) => Promise<string[]>;
+
+  // State Management
+  saveCheckpoint: () => Promise<boolean>;
+  revertToLastCheckpoint: () => Promise<boolean>;
+  discardChanges: () => Promise<boolean>;
+
+  // Utility
+  getGraphRoot: () => Promise<string>;
+  getTokenCount: (filePath: string) => Promise<number>;
+  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
+};
+````
+
+## File: tests/e2e/agent-workflow.test.ts
+````typescript
+import { describe, it, expect } from 'bun:test';
+// import { handleUserQuery } from '../../src/core/loop';
+
+// TODO: Write end-to-end tests that simulate a full user interaction.
+describe('Agent End-to-End Workflow', () => {
+  // NOTE: Per the rules ("no mocks"), these tests are challenging.
+  // The strategy should be to test the loop logic with pre-defined,
+  // static LLM responses to ensure the orchestration works as expected
+  // without hitting a live API.
+
+  it('should correctly handle the Dr. Aris Thorne example from the docs', async () => {
+    // 1. Setup a test environment with a temporary knowledge graph.
+    // 2. Mock the LLM client to return the first XML response from the docs on the first call.
+    // 3. Mock the LLM client to return the second (commit) XML on the second call.
+    // 4. Call `handleUserQuery` with the initial prompt.
+    // 5. Assert that the correct files ('Dr. Aris Thorne.md', etc.) were created.
+    // 6. Assert that `git commit` was called with the correct message.
+    // 7. Assert that the final reply matches the one from the docs.
+  });
+});
+````
+
+## File: tests/integration/mem-api.test.ts
+````typescript
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import simpleGit from 'simple-git';
+// import { createMemAPI } from '../../src/core/mem-api';
+// import { AppConfig } from '../../src/config';
+
+// TODO: Write integration tests for the MemAPI against a real temporary directory.
+describe('MemAPI Integration Tests', () => {
+  let tempDir: string;
+  // let mem: MemAPI;
+
+  // TODO: Set up a temporary test directory before all tests.
+  beforeAll(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
+  });
+
+  // TODO: Initialize a fresh git repo in the temp dir before each test.
+  beforeEach(async () => {
+    // Clear the directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+    // Init git
+    const git = simpleGit(tempDir);
+    await git.init();
+    await git.addConfig('user.name', 'Test User');
+    await git.addConfig('user.email', 'test@example.com');
+    // Create the mem API instance for this test
+    // mem = createMemAPI({ knowledgeGraphPath: tempDir, ...mockConfig });
+  });
+
+  // TODO: Clean up the temporary directory after all tests.
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  // TODO: Write a test for writeFile and readFile.
+  it('should write and read a file', async () => {
+    // await mem.writeFile('test.md', 'hello');
+    // const content = await mem.readFile('test.md');
+    // expect(content).toBe('hello');
+  });
+
+  // TODO: Add a test to prevent path traversal.
+  it('should throw an error for path traversal attempts', async () => {
+    // await expect(mem.readFile('../../../etc/passwd')).rejects.toThrow();
+  });
+
+  // TODO: Write a test for commitChanges and gitLog.
+  it('should commit a change and log it', async () => {
+    // await mem.writeFile('a.md', 'content');
+    // const commitHash = await mem.commitChanges('feat: add a.md');
+    // expect(commitHash).toBeString();
+    // const log = await mem.gitLog('a.md');
+    // expect(log[0].message).toBe('feat: add a.md');
+  });
+});
+````
+
+## File: tests/unit/parser.test.ts
+````typescript
+import { describe, it, expect } from 'bun:test';
+// import { parseLLMResponse } from '../../src/core/parser';
+
+// TODO: Write unit tests for the XML parser function.
+describe('LLM Response Parser', () => {
+  // TODO: Test case for a valid response with all tags.
+  it('should parse a full, valid response', () => {
+    // const xml = `<think>...</think><typescript>...</typescript><reply>...</reply>`;
+    // const result = parseLLMResponse(xml);
+    // expect(result).toEqual({ think: '...', typescript: '...', reply: '...' });
+  });
+
+  // TODO: Test case for a response with only think and typescript.
+  it('should parse a partial response (think/act)', () => {
+    // ...
+  });
+
+  // TODO: Test case for a response with messy formatting.
+  it('should handle extra whitespace and newlines', () => {
+    // ...
+  });
+
+  // TODO: Test case for a response with missing tags.
+  it('should return an object with undefined for missing tags', () => {
+    // ...
+  });
+});
+````
+
+## File: .dockerignore
+````
+# Git
+.git
+.gitignore
+
+# Node
+node_modules
+
+# Local Environment
+.env
+.env.*
+! .env.example
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Logs and temp files
+npm-debug.log*
+yarn-debug.log*
+*.log
+
+# Docker
+Dockerfile
+.dockerignore
+````
+
+## File: .eslintrc.json
+````json
+{
+  "parser": "@typescript-eslint/parser",
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:prettier/recommended"
+  ],
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "env": {
+    "es6": true,
+    "node": true
+  },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      { "argsIgnorePattern": "^_" }
+    ],
+    "no-console": "warn"
+  }
+}
+````
+
+## File: .prettierrc.json
+````json
+{
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 80,
+  "tabWidth": 2,
+  "endOfLine": "lf"
+}
+````
+
+## File: Dockerfile
+````dockerfile
+# ---- Base Stage ----
+# Use the official Bun image as a base.
+# It includes all the necessary tooling.
+FROM oven/bun:1 as base
+WORKDIR /usr/src/app
+
+# ---- Dependencies Stage ----
+# Install dependencies. This layer is cached to speed up subsequent builds
+# if dependencies haven't changed.
+FROM base as deps
+COPY package.json bun.lockb* ./
+RUN bun install --frozen-lockfile
+
+# ---- Build Stage ----
+# Copy source code and build the application.
+FROM base as build
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY . .
+# NOTE: If you were compiling to JS, a build step would go here.
+# For Bun, we can run TS directly. We can also add a typecheck here.
+RUN bun run typecheck
+
+# ---- Production Stage ----
+# Create a smaller final image.
+# We only copy the necessary files to run the application.
+FROM oven/bun:1-slim as production
+WORKDIR /usr/src/app
+
+# Copy production dependencies and source code
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY --from=build /usr/src/app/src ./src
+COPY --from=build /usr/src/app/package.json ./package.json
+COPY .env.example ./.env.example
+
+# Expose the port the app runs on
+EXPOSE 3000
+
+# The command to run the application
+CMD ["bun", "run", "src/server.ts"]
+````
 
 ## File: docs/readme.md
 ````markdown
@@ -200,18 +863,6 @@ To add a new tool (e.g., `mem.searchWeb(query)`):
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 **Stop building infrastructure. Start building intelligence.**
-````
-
-## File: docs/rules.md
-````markdown
-codebase compliance rules;
-
-1. No OOP, only HOFs
-2. Use bun.sh and e2e type safe TypeScript
-3. No unknown or any type
-4. [e2e|integration|unit]/[domain].test.ts files & dirs
-5. Bun tests, real implementation (no mocks), isolated tests
-6. **DRY Principle**: Sub-agents MUST inspect and build upon existing work in other worktrees before implementing new features. Always review what other agents have implemented to avoid code duplication and ensure consistency across the codebase.
 ````
 
 ## File: docs/system-prompt.md
@@ -414,6 +1065,151 @@ General-purpose operations for the sandbox environment.
 | **`mem.getTokenCountForPaths`**| `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` |`Promise<PathTokenCount[]>`| A more efficient way to get token counts for multiple files in a single call. |
 ````
 
+## File: repo/flow.todo.md
+````markdown
+=== DOING
+
+understand everything in docs, then initialize the project by prepare detailed boilerplate across structure. each files should contain only concise // TODO: comments, type signatures, and detailed import statements to serve as a "cheatsheet" for the next AI developer.
+
+again. to save your token cost , do not write complete code per todo, only cheatsheet like method name, params, return type.
+
+all should HOF no OOP
+
+make sure the work is enough to produce production ready blueprint
+````
+
+## File: docs/rules.md
+````markdown
+codebase compliance rules;
+
+1. No OOP, only HOFs
+2. Use bun.sh and e2e type safe TypeScript
+3. No unknown or any type
+4. [e2e|integration|unit]/[domain].test.ts files & dirs
+5. Bun tests, real implementation (no mocks), isolated tests
+6. **DRY Principle**: Sub-agents MUST inspect and build upon existing work in other worktrees before implementing new features. Always review what other agents have implemented to avoid code duplication and ensure consistency across the codebase.
+````
+
+## File: src/server.ts
+````typescript
+import { Elysia, t } from 'elysia';
+// import { config } from './config';
+// import { handleUserQuery } from './core/loop';
+// import { logger } from './lib/logger';
+
+// TODO: Create the main application instance using a HOF pattern for dependency injection.
+// export const createApp = (
+//   handleQuery: typeof handleUserQuery,
+//   appConfig: typeof config
+// ) => {
+//   const app = new Elysia();
+
+//   // --- Middleware ---
+//   // TODO: Add a request logger middleware.
+//   // - Should log method, path, and a request ID.
+
+//   // --- Error Handling ---
+//   // TODO: Implement a global error handler.
+//   // - It should catch any unhandled errors, log them, and return a
+//   //   standardized JSON error response (e.g., { error: 'Internal Server Error' }).
+//   // - Distinguish between expected errors (e.g., validation) and unexpected ones.
+
+//   // --- Routes ---
+//   // TODO: Define a health check endpoint.
+//   app.get('/', () => ({ status: 'ok', message: 'Recursa server is running' }));
+
+//   // TODO: Define the main MCP endpoint.
+//   app.post(
+//     '/mcp',
+//     async ({ body }) => {
+//       const { query, sessionId } = body;
+//       // Note: This should ideally stream back <think> messages.
+//       // For a simple non-streaming implementation, we just await the final result.
+//       const finalReply = await handleQuery(query, appConfig, sessionId);
+//       return { reply: finalReply };
+//     },
+//     {
+//       // TODO: Add request body validation using Elysia's `t`.
+//       body: t.Object({
+//         query: t.String({ minLength: 1 }),
+//         sessionId: t.Optional(t.String()),
+//       }),
+//     }
+//   );
+
+//   return app;
+// };
+
+// TODO: In the main execution block, start the server and handle graceful shutdown.
+// const app = createApp(handleUserQuery, config);
+// app.listen(config.port, () => {
+//   logger.info(`🧠 Recursa server listening on http://localhost:${config.port}`);
+// });
+
+// // TODO: Implement graceful shutdown on SIGINT and SIGTERM.
+// process.on('SIGINT', () => {
+//   logger.info('SIGINT received. Shutting down gracefully.');
+//   app.stop();
+//   process.exit(0);
+// });
+````
+
+## File: .env.example
+````
+# Your OpenRouter API Key
+OPENROUTER_API_KEY="sk-or-..."
+
+# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
+KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# The model you want to use from OpenRouter
+LLM_MODEL="anthropic/claude-3-sonnet-20240229"
+
+# Optional: Port for the Recursa server
+PORT=3000
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa",
+  "version": "0.1.0",
+  "description": "The Git-Native Memory Layer for Local-First LLMs",
+  "main": "src/server.ts",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "test": "bun test",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "elysia": "^1.0.0",
+    "fast-xml-parser": "^4.3.6",
+    "simple-git": "^3.24.0",
+    "vm2": "^3.9.19",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.10.0",
+    "@typescript-eslint/parser": "^7.10.0",
+    "bun-types": "latest",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
+}
+````
+
 ## File: relay.config.json
 ````json
 {
@@ -447,12 +1243,73 @@ General-purpose operations for the sandbox environment.
 }
 ````
 
+## File: tsconfig.json
+````json
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["ESNext"],
+    "moduleResolution": "node",
+    "rootDir": "src",
+    "outDir": "dist",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["bun-types"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
+````
+
 ## File: .gitignore
 ````
-# relay state
-# /.relay/
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
 
-# worktrees
+# Testing
+/coverage
+
+# Production
+/build
+/dist
+
+# Misc
+.DS_Store
+*.pem
+
+# Debugging
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs
+.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+
+# Relay
+.relay/
+
+# Worktrees (from original)
 worktrees/*/node_modules/
 worktrees/*/.git/
 ````
