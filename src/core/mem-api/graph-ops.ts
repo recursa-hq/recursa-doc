@@ -1,27 +1,12 @@
 import type { QueryResult } from '../../types';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { resolveSecurePath } from './secure-path';
-
-// A private utility to recursively walk the graph directory.
-// This promotes DRY by centralizing the file traversal logic used by
-// queryGraph, getBacklinks, and searchGlobal.
-async function* walk(dir: string): AsyncGenerator<string> {
-  for await (const d of await fs.opendir(dir)) {
-    const entry = path.join(dir, d.name);
-    if (d.isDirectory()) {
-      yield* walk(entry);
-    } else if (d.isFile()) {
-      yield entry;
-    }
-  }
-}
 
 // Note: These are complex and will require file system access and parsing logic.
 
 export const queryGraph =
-  (graphRoot: string) =>
-  async (query: string): Promise<QueryResult[]> => {
+  (_graphRoot: string) =>
+  async (_query: string): Promise<QueryResult[]> => {
     // Cheatsheet for implementation:
     // 1. This is a complex function requiring a mini-parser for the query language.
     // 2. Parse the query string into a structured format (e.g., an AST).
@@ -35,8 +20,8 @@ export const queryGraph =
   };
 
 export const getBacklinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
+  (_graphRoot: string) =>
+  async (_filePath: string): Promise<string[]> => {
     // Cheatsheet for implementation:
     // 1. Normalize the `filePath` to its base name (e.g., 'My Page.md' -> 'My Page').
     // 2. Construct the link pattern, e.g., `[[My Page]]`.
@@ -48,8 +33,8 @@ export const getBacklinks =
   };
 
 export const getOutgoingLinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
+  (_graphRoot: string) =>
+  async (_filePath: string): Promise<string[]> => {
     // Cheatsheet for implementation:
     // 1. Use `resolveSecurePath` to get the full, validated path for `filePath`.
     // 2. Read the file content.
@@ -60,8 +45,8 @@ export const getOutgoingLinks =
   };
 
 export const searchGlobal =
-  (graphRoot: string) =>
-  async (query: string): Promise<string[]> => {
+  (_graphRoot: string) =>
+  async (_query: string): Promise<string[]> => {
     // Cheatsheet for implementation:
     // 1. Use the local `walk` utility to iterate through all text-based files in graphRoot.
     // 2. For each file, read its content.

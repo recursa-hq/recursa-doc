@@ -8,23 +8,34 @@ import { resolveSecurePath } from './secure-path';
 export const readFile =
   (graphRoot: string) =>
   async (filePath: string): Promise<string> => {
-    // Cheatsheet for implementation:
-    // 1. Use resolveSecurePath to get the full, validated path.
-    // 2. Read the file content using fs.readFile with 'utf-8' encoding.
-    // 3. Handle potential errors (e.g., file not found) gracefully.
-    throw new Error('Not implemented');
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    try {
+      return await fs.readFile(fullPath, 'utf-8');
+    } catch (error) {
+      throw new Error(
+        `Failed to read file ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const writeFile =
   (graphRoot: string) =>
   async (filePath: string, content: string): Promise<boolean> => {
-    // Cheatsheet for implementation:
-    // 1. Use resolveSecurePath to get the full, validated path.
-    // 2. Get the directory of the path using `path.dirname()`.
-    // 3. Create parent directories recursively using `fs.mkdir(dir, { recursive: true })`.
-    // 4. Write the file using `fs.writeFile()`.
-    // 5. Return true on success.
-    throw new Error('Not implemented');
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const dir = path.dirname(fullPath);
+
+    try {
+      // Create parent directories recursively
+      await fs.mkdir(dir, { recursive: true });
+
+      // Write the file
+      await fs.writeFile(fullPath, content, 'utf-8');
+      return true;
+    } catch (error) {
+      throw new Error(
+        `Failed to write file ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const updateFile =
@@ -34,63 +45,109 @@ export const updateFile =
     oldContent: string,
     newContent: string
   ): Promise<boolean> => {
-    // Cheatsheet for implementation (must be atomic-like):
-    // 1. Use resolveSecurePath to get the full, validated path.
-    // 2. Read the current file content.
-    // 3. If the content does not include `oldContent`, throw an error.
-    // 4. Use `content.replace(oldContent, newContent)` to create the new content.
-    // 5. Write the new, full content back to the file.
-    // 6. Return true on success.
-    throw new Error('Not implemented');
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      // Read the current file content
+      const currentContent = await fs.readFile(fullPath, 'utf-8');
+
+      // Verify the old content exists
+      if (!currentContent.includes(oldContent)) {
+        throw new Error(
+          `File content does not match expected old content in ${filePath}`
+        );
+      }
+
+      // Replace the content
+      const updatedContent = currentContent.replace(oldContent, newContent);
+
+      // Write the new content back
+      await fs.writeFile(fullPath, updatedContent, 'utf-8');
+      return true;
+    } catch (error) {
+      throw new Error(
+        `Failed to update file ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const deleteFile =
   (graphRoot: string) =>
   async (filePath: string): Promise<boolean> => {
-    // Cheatsheet for implementation:
-    // 1. Use resolveSecurePath to get the full, validated path.
-    // 2. Use `fs.rm()` to delete the file or empty directory.
-    // 3. Return true on success.
-    throw new Error('Not implemented');
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      await fs.rm(fullPath, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      throw new Error(
+        `Failed to delete file ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const rename =
   (graphRoot: string) =>
   async (oldPath: string, newPath: string): Promise<boolean> => {
-    // Cheatsheet for implementation:
-    // 1. Use resolveSecurePath for both `oldPath` and `newPath`.
-    // 2. Use `fs.rename()` to move/rename the file.
-    // 3. Return true on success.
-    throw new Error('Not implemented');
+    const fullOldPath = resolveSecurePath(graphRoot, oldPath);
+    const fullNewPath = resolveSecurePath(graphRoot, newPath);
+
+    try {
+      await fs.rename(fullOldPath, fullNewPath);
+      return true;
+    } catch (error) {
+      throw new Error(
+        `Failed to rename ${oldPath} to ${newPath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const fileExists =
   (graphRoot: string) =>
   async (filePath: string): Promise<boolean> => {
-    // Cheatsheet for implementation:
-    // 1. Use resolveSecurePath to get the full, validated path.
-    // 2. Use `fs.access()` or `fs.stat()` in a try/catch block.
-    // 3. Return true if it exists, false if it throws a 'not found' error.
-    throw new Error('Not implemented');
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      await fs.access(fullPath);
+      return true;
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === 'ENOENT') {
+        return false;
+      }
+      throw new Error(
+        `Failed to check if file exists ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const createDir =
   (graphRoot: string) =>
   async (directoryPath: string): Promise<boolean> => {
-    // Cheatsheet for implementation:
-    // 1. Use resolveSecurePath to get the full, validated path.
-    // 2. Use `fs.mkdir()` with `{ recursive: true }`.
-    // 3. Return true on success.
-    throw new Error('Not implemented');
+    const fullPath = resolveSecurePath(graphRoot, directoryPath);
+
+    try {
+      await fs.mkdir(fullPath, { recursive: true });
+      return true;
+    } catch (error) {
+      throw new Error(
+        `Failed to create directory ${directoryPath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const listFiles =
   (graphRoot: string) =>
   async (directoryPath?: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Determine the target directory: `directoryPath` or the graphRoot itself if undefined.
-    // 2. Use resolveSecurePath on the target directory.
-    // 3. Use `fs.readdir()` to list directory contents.
-    // 4. Return the array of names.
-    throw new Error('Not implemented');
+    const targetDir = directoryPath ? directoryPath : '.';
+    const fullPath = resolveSecurePath(graphRoot, targetDir);
+
+    try {
+      const entries = await fs.readdir(fullPath, { withFileTypes: true });
+      return entries.map((entry) => entry.name).sort(); // Sort for consistent ordering
+    } catch (error) {
+      throw new Error(
+        `Failed to list files in directory ${directoryPath || 'root'}: ${(error as Error).message}`
+      );
+    }
   };

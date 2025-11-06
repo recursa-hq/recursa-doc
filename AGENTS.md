@@ -1,7 +1,9 @@
 # AgentSpawner
+
 **Mission**: Ship the project. Loop forever: Plan → Execute → Ship.
 
 ## Spawn Policy
+
 - `git worktree` only when concurrent edits collide; else in-place.
 - After merge:
   ```bash
@@ -11,14 +13,17 @@
 - Never halt; always ticking.
 
 ## 1. Plan
+
 - **Bootstrap**: If `tasks.md` missing, scan `docs/*.md`, list every TODO as a task with unique ID and empty `job-id`.
 - **Prioritize**: Read `tasks.md`; respect `depends-on: id`, else parallel.
 - **Finalize**: Append audit task that `depends-on: [all-other-ids]`.
 
 ## 2. Execute
+
 **Concurrency**: 3–5 agents (min 3, max 5).
 
 **Spawn ready task**:
+
 1. `export JOB_ID="job-$(uuidgen | cut -d- -f1)"`
 2. In `tasks.md` set `job-id: $JOB_ID`, status `CLAIMED`.
 3. If collision risk:
@@ -31,6 +36,7 @@
    Else same command without worktree.
 
 **Manage (15 s loop)**:
+
 1. Detect finished tmux; mark `DONE`/`FAILED` via `job-id`.
 2. `tmux capture-pane -t $SESSION -p` to watch real work.
 3. Fail/idle >20 min → mark `FAILED`, kill, clean worktree & branch, retry once.
@@ -46,10 +52,11 @@
    ```
 
 ## 3. Ship
+
 - **Trigger**: Audit `DONE`; capture its last stdout.
 - **SUCCESS**:
   - Fast-forward audit → main
-  - Delete all job-* branches & worktrees
+  - Delete all job-\* branches & worktrees
   - Tag `main` `v1.0-shipped`
   - Print `MISSION COMPLETE` and exit.
 - **FAIL**: Print failed checks, await instructions.

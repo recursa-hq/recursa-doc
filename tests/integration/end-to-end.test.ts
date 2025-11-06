@@ -39,7 +39,7 @@ describe('End-to-End HTTP Integration Tests', () => {
     // Clear the directory
     await fs.rm(tempDir, { recursive: true, force: true });
     await fs.mkdir(tempDir, { recursive: true });
-    
+
     // Initialize git
     const git = simpleGit(tempDir);
     await git.init();
@@ -54,7 +54,7 @@ describe('End-to-End HTTP Integration Tests', () => {
   // Mock LLM responses for testing
   const createMockLLMQuery = (responses: string[]) => {
     let callCount = 0;
-    return mock(async (_history: any, _config: any) => {
+    return mock(async (_history: unknown[], _config: unknown) => {
       const response = responses[callCount] || responses[responses.length - 1];
       callCount++;
       return response;
@@ -87,14 +87,12 @@ I've successfully created a test file through the HTTP API and committed the cha
       ]);
 
       // Mock the server's LLM query function
-      const originalModule = require('../../src/core/loop');
-      const originalHandleUserQuery = originalModule.handleUserQuery;
-      originalModule.handleUserQuery = mock(originalHandleUserQuery);
+      const mockHandleUserQuery = mock(handleUserQuery);
 
       // Make HTTP request to the server
       const requestBody = {
         query: 'Create a test file via HTTP API',
-        sessionId: 'test-session-456'
+        sessionId: 'test-session-456',
       };
 
       try {
@@ -115,7 +113,9 @@ I've successfully created a test file through the HTTP API and committed the cha
           mockLLMQuery
         );
 
-        expect(result).toBe('I\'ve successfully created a test file through the HTTP API and committed the changes.');
+        expect(result).toBe(
+          "I've successfully created a test file through the HTTP API and committed the changes."
+        );
 
         // Verify the file was created
         const mem = createMemAPI(mockConfig);
@@ -139,7 +139,7 @@ I've successfully created a test file through the HTTP API and committed the cha
 
     it('should handle streaming responses with status updates', async () => {
       const statusUpdates: StatusUpdate[] = [];
-      
+
       const captureStatusUpdate = (update: StatusUpdate) => {
         statusUpdates.push(update);
       };
@@ -183,18 +183,20 @@ I've successfully created three files to demonstrate the streaming progress func
       );
 
       // Verify final response
-      expect(result).toBe('I\'ve successfully created three files to demonstrate the streaming progress functionality. All changes have been committed.');
+      expect(result).toBe(
+        "I've successfully created three files to demonstrate the streaming progress functionality. All changes have been committed."
+      );
 
       // Verify status updates were captured
       expect(statusUpdates.length).toBeGreaterThan(0);
 
       // Check for different types of status updates
-      const types = new Set(statusUpdates.map(u => u.type));
+      const types = new Set(statusUpdates.map((u) => u.type));
       expect(types.has('think')).toBe(true);
       expect(types.has('act')).toBe(true);
 
       // Verify runId consistency
-      const runIds = [...new Set(statusUpdates.map(u => u.runId))];
+      const runIds = [...new Set(statusUpdates.map((u) => u.runId))];
       expect(runIds.length).toBe(1); // All updates should have same runId
 
       // Verify files were created
@@ -207,7 +209,7 @@ I've successfully created three files to demonstrate the streaming progress func
 
     it('should handle complex multi-turn conversations', async () => {
       const sessionId = 'complex-conversation';
-      
+
       // First query: Create a project structure
       const firstMockLLMQuery = createMockLLMQuery([
         `</think>
@@ -260,5 +262,19 @@ await mem.updateFile(
 </typescript>`,
         `<think>
 Enhanced project with tests and documentation. Commit the additions.
-`
+`,
       ]);
+
+      const secondResult = await handleUserQuery(
+        'Add tests and documentation',
+        mockConfig,
+        sessionId,
+        secondMockLLMQuery
+      );
+
+      expect(secondResult).toContain(
+        'Enhanced project with tests and documentation'
+      );
+    });
+  });
+});
