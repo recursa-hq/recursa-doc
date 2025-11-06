@@ -2,43 +2,122 @@ import type { AppConfig } from '../config';
 
 import type { ChatMessage } from '../types';
 
+// Custom error class for HTTP errors with status code
+class HttpError extends Error {
+  constructor(
+    message: string,
+    public statusCode: number,
+    public responseText?: string
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
 const withRetry =
   <T extends (...args: any[]) => Promise<any>>(queryFn: T) =>
   async (...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> => {
-    // Cheatsheet for implementation:
-    // 1. Define retry options (e.g., maxAttempts = 3, initialDelay = 1000ms, backoffFactor = 2).
-    // 2. Use a for-loop for attempts from 0 to maxAttempts - 1.
-    // 3. Inside the loop, use a try/catch block to call `await queryFn(...args)`.
-    // 4. On success, return the result immediately.
-    // 5. In catch, inspect the error. If it's a non-retryable error (e.g., a custom error with a 4xx HTTP status), re-throw.
-    // 6. For retryable errors (network issues, 5xx), log a warning. If it's the last attempt, re-throw the error.
-    // 7. Calculate the next delay using exponential backoff: `const delay = initialDelay * Math.pow(backoffFactor, attempt);`
-    // 8. Wait for the delay: `await new Promise(resolve => setTimeout(resolve, delay));`
-    // 9. If the loop completes without a successful return, throw the last error caught.
-    throw new Error('Retry logic not implemented');
+    const maxAttempts = 3;
+    const initialDelay = 1000;
+    const backoffFactor = 2;
+    let lastError: Error;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await queryFn(...args);
+      } catch (error) {
+        lastError = error as Error;
+        
+        // Don't retry on non-retryable errors (4xx status codes)
+        if (error instanceof HttpError && error.statusCode >= 400 && error.statusCode < 500) {
+          throw error;
+        }
+
+        // If this is the last attempt, throw the error
+        if (attempt === maxAttempts - 1) {
+          throw lastError;
+        }
+
+        // Calculate exponential backoff delay
+        const delay = initialDelay * Math.pow(backoffFactor, attempt);
+        console.warn(`Retry attempt ${attempt + 1}/${maxAttempts} after ${delay}ms delay. Error: ${lastError.message}`);
+        
+        // Wait for the delay
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError!;
   };
 
 export const queryLLM = async (
   history: ChatMessage[],
   config: AppConfig
 ): Promise<string> => {
-  // Cheatsheet for implementation:
-  // 1. Define the OpenRouter API endpoint URL.
-  // 2. Create the request body: `{ model: config.llmModel, messages: history }`.
-  //    - Consider adding other standard parameters like `temperature`, `max_tokens` if needed.
-  //    - OpenRouter also supports advanced routing via `route: "fallback"` or specific model lists.
-  // 3. Use `fetch` to make a POST request.
-  // 4. Set required headers:
-  //    - 'Authorization': `Bearer ${config.openRouterApiKey}`
-  //    - 'Content-Type': 'application/json'
-  //    - Recommended: 'HTTP-Referer': `http://localhost:${config.port}` (or your app's URL from config)
-  //    - Recommended: 'X-Title': 'Recursa' (your app's name)
-  // 5. Check if `response.ok`. If not, `await response.json()` to get error details.
-  //    - Create a custom error object (e.g., class HttpError extends Error) that includes the status code and the error message from the body.
-  //    - Throw this custom error. This is crucial for the retry logic to inspect the status code.
-  // 6. Parse the JSON response: `const data = await response.json();`.
-  // 7. Extract content: `data.choices[0].message.content`. Handle potential empty or malformed responses.
-  throw new Error('Not implemented');
+  // OpenRouter API endpoint
+  const openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
+
+  // Create request body
+  const requestBody = {
+    model: config.llmModel,
+    messages: history,
+    temperature: 0.7,
+    max_tokens: 4000,
+  };
+
+  try {
+    // Make POST request to OpenRouter API
+    const response = await fetch(openRouterUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.openRouterApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': `http://localhost:${config.port}`,
+        'X-Title': 'Recursa',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    // Check if response is successful
+    if (!response.ok) {
+      let errorDetails = 'Unknown error';
+      try {
+        const errorData = await response.json() as any;
+        errorDetails = errorData.error?.message || JSON.stringify(errorData);
+      } catch {
+        errorDetails = await response.text();
+      }
+      
+      throw new HttpError(
+        `OpenRouter API error: ${response.status} ${response.statusText}`,
+        response.status,
+        errorDetails
+      );
+    }
+
+    // Parse JSON response
+    const data = await response.json() as any;
+
+    // Extract and validate content
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response format from OpenRouter API');
+    }
+
+    const content = data.choices[0].message.content;
+    if (!content) {
+      throw new Error('Empty content received from OpenRouter API');
+    }
+
+    return content;
+  } catch (error) {
+    // Re-throw HttpError instances
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    
+    // Wrap other errors
+    throw new Error(`Failed to query OpenRouter API: ${(error as Error).message}`);
+  }
 };
 
 export const queryLLMWithRetries = withRetry(queryLLM);
