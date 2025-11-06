@@ -6,16 +6,16 @@ import type { PathTokenCount } from '../../types';
 // use the exact same tokenization implementation.
 // This assumes tiktoken is available once implemented.
 // const countTokensForContent = (_content: string): number => {
-  // Cheatsheet for implementation:
-  // 1. `import { get_encoding } from 'tiktoken';`
-  // 2. `const encoding = get_encoding('cl100k_base');`
-  // 3. `const tokens = encoding.encode(content);`
-  // 4. `encoding.free();`
-  // 5. `return tokens.length;`
-  throw new Error(
-    'Token counting logic not implemented. Awaiting tiktoken integration.'
-  );
-};
+//   // Cheatsheet for implementation:
+//   // 1. `import { get_encoding } from 'tiktoken';`
+//   // 2. `const encoding = get_encoding('cl100k_base');`
+//   // 3. `const tokens = encoding.encode(content);`
+//   // 4. `encoding.free();`
+//   // 5. `return tokens.length;`
+//   throw new Error(
+//     'Token counting logic not implemented. Awaiting tiktoken integration.'
+//   );
+// };
 
 // Note: HOFs returning the final mem API functions.
 
@@ -25,8 +25,8 @@ export const getGraphRoot =
   };
 
 export const getTokenCount =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<number> => {
+  (_graphRoot: string) =>
+  async (_filePath: string): Promise<number> => {
     // Cheatsheet for implementation:
     // 1. This module needs a tokenizer, e.g., `tiktoken`. Add it to package.json.
     // 2. Use resolveSecurePath to get the full, validated path.
@@ -37,8 +37,8 @@ export const getTokenCount =
   };
 
 export const getTokenCountForPaths =
-  (graphRoot: string) =>
-  async (paths: string[]): Promise<PathTokenCount[]> => {
+  (_graphRoot: string) =>
+  async (_paths: string[]): Promise<PathTokenCount[]> => {
     // Cheatsheet for implementation:
     // 1. Use `Promise.all` to process all paths concurrently.
     // 2. For each path in the input array:

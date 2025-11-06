@@ -66,8 +66,9 @@ export const handleUserQuery = async (
 
   const memAPI = createMemAPI(config);
 
-  const history = sessionHistories[currentSessionId] ?? [getSystemPrompt()];
-  if (!sessionHistories[currentSessionId]) {
+  let history = sessionHistories[currentSessionId];
+  if (!history) {
+    history = [getSystemPrompt()];
     sessionHistories[currentSessionId] = history;
   }
   history.push({ role: 'user', content: query });
