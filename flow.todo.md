@@ -1,7 +1,0 @@
-- add grep to tool
-- show system result variants examples in readme.md
-- the managed markdowns should be in valid orgmode syntax and also there is orgmode validator, so update readme.md
-- think should be abstracted away from technical because it direcly viewed by end users
-- need checkpoint system
-- no <tool_call>, only <think>
-- add token to tools
