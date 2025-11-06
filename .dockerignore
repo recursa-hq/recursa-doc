@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Node
+node_modules
+
+# Local Environment
+.env
+.env.*
+! .env.example
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Logs and temp files
+npm-debug.log*
+yarn-debug.log*
+*.log
+
+# Docker
+Dockerfile
+.dockerignore
