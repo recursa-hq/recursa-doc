@@ -12,14 +12,13 @@ import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
 import { createApp } from '../../src/server';
-import { handleUserQuery } from '../../src/core/loop';
 import type { AppConfig } from '../../src/config';
 import type { StatusUpdate, ChatMessage } from '../../src/types';
 
 describe('MCP Server Complete End-to-End Tests', () => {
   let tempDir: string;
   let mockConfig: AppConfig;
-  let app: any;
+  let app: unknown;
   let testPort: number;
   let baseUrl: string;
 
@@ -84,7 +83,7 @@ I've successfully created a new entry for Test Person in your knowledge base.
       ];
 
       const mockQueryLLM = mock(
-        async (history: ChatMessage[], config: AppConfig) => {
+        async (history: ChatMessage[], _config: AppConfig) => {
           // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
           const responseCount = historyArray.filter(
@@ -166,7 +165,7 @@ I've created entries for both Test Organization and John Doe, with proper linkin
       ];
 
       const mockQueryLLM = mock(
-        async (history: ChatMessage[], config: AppConfig) => {
+        async (history: ChatMessage[], _config: AppConfig) => {
           // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
           const responseCount = historyArray.filter(
@@ -231,8 +230,6 @@ I've created entries for both Test Organization and John Doe, with proper linkin
 
   describe('Server-Sent Events (SSE) Integration', () => {
     it('should provide real-time status updates during processing', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
       const mockLLMResponses = [
         // Turn 1: Multiple actions to generate status updates
         `I'll analyze the request and create the necessary files.
@@ -250,7 +247,7 @@ The status test operation has been completed successfully.
       ];
 
       const mockQueryLLM = mock(
-        async (history: ChatMessage[], config: AppConfig) => {
+        async (history: ChatMessage[], _config: AppConfig) => {
           // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
           const responseCount = historyArray.filter(
@@ -299,7 +296,9 @@ The status test operation has been completed successfully.
 
         // Read all available data
         try {
-          while (true) {
+          const startTime = Date.now();
+          const timeoutMs = 5000; // 5 second timeout
+          while (Date.now() - startTime < timeoutMs) {
             const { done, value } = await reader.read();
             if (done) break;
             sseData += decoder.decode(value);
@@ -374,7 +373,7 @@ There was an error executing the code. Please check the syntax and try again.
       ];
 
       const mockQueryLLM = mock(
-        async (history: ChatMessage[], config: AppConfig) => {
+        async (history: ChatMessage[], _config: AppConfig) => {
           // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
           const responseCount = historyArray.filter(
@@ -439,7 +438,7 @@ Second file created and linked to the first.
 
       const requestCount = 0;
       const mockQueryLLM = mock(
-        async (history: ChatMessage[], config: AppConfig) => {
+        async (history: ChatMessage[], _config: AppConfig) => {
           const sessionId = history[0]?.content?.includes('second') ? 1 : 0;
           // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
@@ -517,7 +516,7 @@ Concurrent test completed successfully.
       ];
 
       const mockQueryLLM = mock(
-        async (history: ChatMessage[], config: AppConfig) => {
+        async (history: ChatMessage[], _config: AppConfig) => {
           // Ensure history is an array
           const historyArray = Array.isArray(history) ? history : [];
           const responseCount = historyArray.filter(
