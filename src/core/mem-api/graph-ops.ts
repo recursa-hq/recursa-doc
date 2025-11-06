@@ -1,6 +1,4 @@
 import type { QueryResult } from '../../types';
-import { promises as fs } from 'fs';
-import path from 'path';
 
 // Note: These are complex and will require file system access and parsing logic.
 
