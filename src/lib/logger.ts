@@ -44,28 +44,26 @@ export type Logger = {
 
 const createLoggerInternal = (baseContext: LogContext = {}): Logger => {
   const log = (level: LogLevel, message: string, context: LogContext = {}) => {
-    // TODO: Implement the logging logic.
-    // if (level < MIN_LOG_LEVEL) {
-    //   return;
-    // }
-    // const finalContext = { ...baseContext, ...context };
-    // const logEntry = {
-    //   level: LOG_LEVEL_NAMES[level],
-    //   timestamp: new Date().toISOString(),
-    //   message,
-    //   ...finalContext,
-    // };
-    // // eslint-disable-next-line no-console
-    // console.log(JSON.stringify(logEntry));
+    if (level < MIN_LOG_LEVEL) {
+      return;
+    }
+    const finalContext = { ...baseContext, ...context };
+    const logEntry = {
+      level: LOG_LEVEL_NAMES[level],
+      timestamp: new Date().toISOString(),
+      message,
+      ...finalContext,
+    };
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify(logEntry));
   };
 
   const error = (message: string, err?: Error, context?: LogContext) => {
-    // TODO: Implement the error logging logic.
-    // const errorContext = {
-    //   ...context,
-    //   error: err ? { message: err.message, stack: err.stack } : undefined,
-    // };
-    // log(LogLevel.ERROR, message, errorContext);
+    const errorContext = {
+      ...context,
+      error: err ? { message: err.message, stack: err.stack } : undefined,
+    };
+    log(LogLevel.ERROR, message, errorContext);
   };
 
   return {
@@ -74,10 +72,8 @@ const createLoggerInternal = (baseContext: LogContext = {}): Logger => {
     warn: (message, context) => log(LogLevel.WARN, message, context),
     error,
     child: (childContext: LogContext) => {
-      // TODO: Implement the child logger creation.
-      // const mergedContext = { ...baseContext, ...childContext };
-      // return createLoggerInternal(mergedContext);
-      return createLoggerInternal({ ...baseContext, ...childContext });
+      const mergedContext = { ...baseContext, ...childContext };
+      return createLoggerInternal(mergedContext);
     },
   };
 };
