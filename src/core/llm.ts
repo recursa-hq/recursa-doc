@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config';
-
+import { logger } from '../lib/logger';
 import type { ChatMessage } from '../types';
 
 // Custom error class for HTTP errors with status code
@@ -44,7 +44,7 @@ const withRetry =
 
         // Calculate exponential backoff delay
         const delay = initialDelay * Math.pow(backoffFactor, attempt);
-        console.warn(
+        logger.warn(
           `Retry attempt ${attempt + 1}/${maxAttempts} after ${delay}ms delay. Error: ${lastError.message}`
         );
 

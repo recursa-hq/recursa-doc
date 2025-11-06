@@ -53,7 +53,7 @@ describe('Think-Act-Commit Loop Integration Tests', () => {
   // Mock LLM responses for testing different scenarios
   const createMockLLMQuery = (responses: string[]) => {
     let callCount = 0;
-    return mock(async (_history: any, _config: any) => {
+    return mock(async (_history: unknown[], _config: unknown) => {
       const response = responses[callCount] || responses[responses.length - 1];
       callCount++;
       return response;

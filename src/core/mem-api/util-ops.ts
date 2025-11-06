@@ -1,13 +1,11 @@
 import type { PathTokenCount } from '../../types';
 // import { get_encoding } from 'tiktoken';
-import { resolveSecurePath } from './secure-path';
-import { promises as fs } from 'fs';
 
 // A private helper to centralize token counting logic.
 // This promotes DRY by ensuring both getTokenCount and getTokenCountForPaths
 // use the exact same tokenization implementation.
 // This assumes tiktoken is available once implemented.
-const countTokensForContent = (content: string): number => {
+// const countTokensForContent = (_content: string): number => {
   // Cheatsheet for implementation:
   // 1. `import { get_encoding } from 'tiktoken';`
   // 2. `const encoding = get_encoding('cl100k_base');`

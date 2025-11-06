@@ -10,42 +10,75 @@ export const gitDiff =
     fromCommit?: string,
     toCommit?: string
   ): Promise<string> => {
-    // Cheatsheet for implementation:
-    // 1. Construct options for `git.diff()`.
-    // 2. Example for two commits: `[`${fromCommit}..${toCommit}`, '--', filePath]`
-    // 3. If commits are not provided, diff against the work-tree or HEAD.
-    // 4. Return the string result from `await git.diff(...)`.
-    throw new Error('Not implemented');
+    try {
+      if (fromCommit && toCommit) {
+        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
+      } else if (fromCommit) {
+        return await git.diff([`${fromCommit}`, '--', filePath]);
+      } else {
+        return await git.diff([filePath]);
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const gitLog =
   (git: SimpleGit) =>
   async (filePath: string, maxCommits = 5): Promise<LogEntry[]> => {
-    // Cheatsheet for implementation:
-    // 1. Call `await git.log({ file: filePath, maxCount: maxCommits })`.
-    // 2. The result from simple-git's `log` has an `all` property (an array).
-    // 3. Map over `result.all` to transform each entry into the `LogEntry` type.
-    // 4. Return the mapped array.
-    throw new Error('Not implemented');
+    try {
+      const result = await git.log({ file: filePath, maxCount: maxCommits });
+      return result.all.map((entry) => ({
+        hash: entry.hash,
+        message: entry.message,
+        date: entry.date,
+      }));
+    } catch (error) {
+      throw new Error(
+        `Failed to get git log for ${filePath}: ${(error as Error).message}`
+      );
+    }
   };
 
 export const gitStagedFiles =
   (git: SimpleGit) => async (): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Get status with `await git.status()`.
-    // 2. The result object contains arrays like `staged`, `modified`, `created`.
-    // 3. Combine these arrays to get a list of all uncommitted changes.
-    // 4. Return a unique array of file paths.
-    throw new Error('Not implemented');
+    try {
+      const status = await git.status();
+      // Combine all relevant file arrays and remove duplicates
+      const allFiles = new Set([
+        ...status.staged,
+        ...status.modified,
+        ...status.created,
+        ...status.deleted,
+        ...status.renamed.map((r) => r.to),
+      ]);
+      return Array.from(allFiles);
+    } catch (error) {
+      throw new Error(
+        `Failed to get staged files: ${(error as Error).message}`
+      );
+    }
   };
 
 export const commitChanges =
   (git: SimpleGit) =>
   async (message: string): Promise<string> => {
-    // Cheatsheet for implementation:
-    // 1. Stage all changes: `await git.add('.')`.
-    // 2. Commit staged changes: `const result = await git.commit(message)`.
-    // 3. The commit hash is in `result.commit`.
-    // 4. Return the commit hash string.
-    throw new Error('Not implemented');
+    try {
+      // Stage all changes
+      await git.add('.');
+
+      // Commit staged changes
+      const result = await git.commit(message);
+
+      // Return the commit hash
+      if (result.commit) {
+        return result.commit;
+      } else {
+        throw new Error('No commit hash returned from git commit');
+      }
+    } catch (error) {
+      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
+    }
   };
