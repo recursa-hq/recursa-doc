@@ -7,6 +7,11 @@ import {
   createSystemPrompt,
 } from './services/Llm.js';
 import type { RecursaConfig, EnvironmentVariables } from './types/index.js';
+import { Elysia, t } from 'elysia';
+import { handleUserQuery } from './core/loop.js';
+import { logger } from './lib/logger.js';
+import { randomUUID } from 'crypto';
+import { config as appConfig } from './config.js';
 
 const loadEnvironmentVariables = (): EnvironmentVariables => {
   const vars: EnvironmentVariables = {
@@ -72,6 +77,7 @@ const validateConfiguration = (config: RecursaConfig): void => {
 
 const startServer = async (): Promise<void> => {
   try {
+    // eslint-disable-next-line no-console
     console.log('Starting Recursa MCP Server...');
 
     const envVars = loadEnvironmentVariables();
@@ -88,21 +94,99 @@ const startServer = async (): Promise<void> => {
       config.knowledgeGraphPath
     );
 
-    const llmClient = createLLMClient(config.llm);
+    const _llmClient = createLLMClient(config.llm);
+    const _systemPrompt = createSystemPrompt(config.knowledgeGraphPath);
 
-    const systemPrompt = createSystemPrompt(config.knowledgeGraphPath);
-
+    // eslint-disable-next-line no-console
     console.log(`Knowledge Graph Path: ${config.knowledgeGraphPath}`);
+    // eslint-disable-next-line no-console
     console.log(`LLM Model: ${config.llm.model}`);
+    // eslint-disable-next-line no-console
     console.log(`Sandbox Timeout: ${config.sandbox.timeout}ms`);
+    // eslint-disable-next-line no-console
     console.log('Server ready. Connected to stdin/stdout.');
 
     await server.connect(transport);
     await server.run();
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('Failed to start server:', error);
     process.exit(1);
   }
 };
 
+export const createApp = (
+  handleQuery: typeof handleUserQuery,
+  config: typeof appConfig
+) => {
+  const app = new Elysia()
+    // --- Middleware: Request Logging ---
+    .onRequest(({ request }) => {
+      request.headers.set('X-Request-ID', randomUUID());
+    })
+    .onBeforeHandle(({ request, store }) => {
+      store.startTime = Date.now();
+      logger.info('Request received', {
+        reqId: request.headers.get('X-Request-ID'),
+        method: request.method,
+        path: new URL(request.url).pathname,
+      });
+    })
+    .onAfterHandle(({ request, store }) => {
+      const duration = Date.now() - (store.startTime as number);
+      logger.info('Request completed', {
+        reqId: request.headers.get('X-Request-ID'),
+        method: request.method,
+        path: new URL(request.url).pathname,
+        duration: `${duration}ms`,
+      });
+    })
+    // --- Error Handling ---
+    .onError(({ code, error, set, request }) => {
+      logger.error('An error occurred', error, {
+        reqId: request.headers.get('X-Request-ID'),
+        code,
+      });
+      set.status = 500;
+      return { error: 'Internal Server Error' };
+    })
+    // --- Routes ---
+    .get('/', () => ({ status: 'ok', message: 'Recursa server is running' }))
+    .post(
+      '/mcp',
+      async ({ body }) => {
+        const { query, sessionId } = body;
+        // NOTE: For a simple non-streaming implementation, we await the final result.
+        // A production implementation should use WebSockets or SSE to stream back messages.
+        const finalReply = await handleQuery(query, config, sessionId);
+        return { reply: finalReply };
+      },
+      {
+        body: t.Object({
+          query: t.String({ minLength: 1 }),
+          sessionId: t.Optional(t.String()),
+        }),
+      }
+    );
+
+  return app;
+};
+
+export const createMCPApp = async () => {
+  const envVars = loadEnvironmentVariables();
+  const config = createConfig(envVars);
+
+  validateConfiguration(config);
+  await initializeKnowledgeGraph(config);
+
+  const memApi = createMemAPI(config.knowledgeGraphPath);
+  const { server, transport } = createMCPHandler(
+    memApi,
+    config.knowledgeGraphPath
+  );
+
+  return { server, transport, config, memApi };
+};
+
+export { startServer };
 startServer();

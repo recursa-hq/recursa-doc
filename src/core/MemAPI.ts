@@ -163,7 +163,7 @@ export const createMemAPI = (
   ): Promise<GitCommit[]> => {
     try {
       const resolvedPath = resolvePath(filePath);
-      const gitPath = join(knowledgeGraphPath, resolvedPath);
+      const _gitPath = join(knowledgeGraphPath, resolvedPath);
       const logs = getGitLog(resolvedPath, maxCommits, gitOptions);
       return logs.map((log) => ({
         hash: log.hash,
@@ -232,7 +232,10 @@ export const createMemAPI = (
               const searchText = contentMatch[1];
               const linkRegex = /\[\[([^\]]+)\]\]/g;
               const links = content.match(linkRegex);
-              if (links && links.some((link) => content.includes(searchText))) {
+              if (
+                links &&
+                links.some((_link) => content.includes(searchText))
+              ) {
                 matches.push(`Contains link and content: ${searchText}`);
               }
             }

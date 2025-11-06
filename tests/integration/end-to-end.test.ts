@@ -14,9 +14,7 @@ import simpleGit from 'simple-git';
 import { handleUserQuery } from '../../src/core/loop';
 import { createMemAPI } from '../../src/core/mem-api';
 import { Elysia } from 'elysia';
-import { server } from '../../src/server';
 import type { AppConfig } from '../../src/config';
-import type { StatusUpdate } from '../../src/types';
 
 describe('End-to-End HTTP Integration Tests', () => {
   let tempDir: string;
@@ -87,7 +85,7 @@ I've successfully created a test file through the HTTP API and committed the cha
       ]);
 
       // Mock the server's LLM query function
-      const mockHandleUserQuery = mock(handleUserQuery);
+      const _mockHandleUserQuery = mock(handleUserQuery);
 
       // Make HTTP request to the server
       const requestBody = {
@@ -96,7 +94,7 @@ I've successfully created a test file through the HTTP API and committed the cha
       };
 
       try {
-        const response = await fetch(`http://localhost:${testPort}/mcp`, {
+        const _response = await fetch(`http://localhost:${testPort}/mcp`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
