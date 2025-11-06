@@ -19,9 +19,9 @@ import type { StatusUpdate } from '../../src/types';
 describe('MCP Server HTTP Integration Tests', () => {
   let tempDir: string;
   let mockConfig: AppConfig;
-  let app: any;
+  let app: ReturnType<typeof createApp>;
   let testPort: number;
-  let server: any;
+  let server: ReturnType<typeof createApp>;
 
   beforeAll(async () => {
     // Create a temporary directory for the test knowledge graph
