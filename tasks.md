@@ -1,97 +1,66 @@
-# Recursa Project Tasks
+# Tasks
 
-## Core Infrastructure Tasks
+Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 
-### Task 1: Implement Logger Logic
+## Part 1: Purge `any` Types to Enforce Strict Type Safety
 
-- **id**: task-1
-- **description**: Implement the actual logging logic in src/lib/logger.ts - currently has TODO comments for core logging functionality, error handling, and child logger creation
-- **status**: DONE
-- **job-id**: job-ff715793
+### Task 1.1: Harden Emitter with `unknown`
+- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
+- **status**: done
+- **job-id**: job-44fc2242 
 - **depends-on**: []
+- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
+- **files**: src/lib/events.ts
 
-### Task 2: Implement OpenRouter LLM Integration
-
-- **id**: task-2
-- **description**: Complete the LLM query implementation in src/core/llm.ts - includes OpenRouter API integration, proper error handling, and retry logic with exponential backoff
-- **status**: DONE
-- **job-id**: job-378da45b
+### Task 1.2: Add Strict Types to MCP E2E Test
+- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
+- **status**: done
+- **job-id**: job-44fc2242 
 - **depends-on**: []
+- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
+- **files**: tests/e2e/mcp-protocol.test.ts
 
-### Task 3: Complete System Prompt Loading
+## Part 2: Abstract Test Environment Setup (DRY)
 
-- **id**: task-3
-- **description**: Implement proper system prompt loading from docs/system-prompt.md in src/core/loop.ts instead of using hardcoded fallback
-- **status**: DONE
-- **job-id**: job-1eb85cfe
+### Task 2.1: Create a `TestHarness` for Environment Management
+- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
+- **status**: claimed
+- **job-id**: job-b2ec7d18 
 - **depends-on**: []
+- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
+- **files**: tests/lib/test-harness.ts (new)
 
-### Task 4: Implement Real-time Communication
+### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
+- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
+- **status**: todo
+- **job-id**: 
+- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
+- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
+- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
 
-- **id**: task-4
-- **description**: Replace TODO in src/core/loop.ts for real-time agent status updates via SSE or WebSocket instead of placeholder
-- **status**: DONE
-- **job-id**: job-62d9c37b
-- **depends-on**: []
+## Part 3: Consolidate Mock LLM Utility (DRY)
 
-### Task 5: Complete Server Response Streaming
+### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
+- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
+- **status**: claimed
+- **job-id**: job-11bd80d6 
+- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
+- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
+- **files**: tests/lib/test-harness.ts
 
-- **id**: task-5
-- **description**: Implement proper streaming responses in src/server.ts for real-time agent communication instead of simple non-streaming implementation
-- **status**: DONE
-- **job-id**: job-8cc473eb
-- **depends-on**: [task-4]
+### Task 3.2: Refactor Tests to Use Shared LLM Mock
+- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
+- **status**: todo
+- **job-id**: 
+- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
+- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
+- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
 
-## Testing & Validation Tasks
+## Audit Task
 
-### Task 6: Create Unit Tests
-
-- **id**: task-6
-- **description**: Create comprehensive unit tests for all core modules following the project's testing structure and DRY principles
-- **status**: DONE
-- **job-id**: job-c275ebb5
-- **depends-on**: [task-1, task-2, task-3]
-
-### Task 7: Create Integration Tests
-
-- **id**: task-7
-- **description**: Create integration tests to verify the complete Think-Act-Commit loop works end-to-end with real file operations
-- **status**: DONE
-- **job-id**: job-0b4ca146
-- **depends-on**: [task-6]
-
-### Task 8: Create E2E Tests
-
-- **id**: task-8
-- **description**: Create end-to-end tests that verify the complete MCP server functionality with HTTP requests and responses
-- **status**: DONE
-- **job-id**: job-7d9556f2
-- **depends-on**: [task-7, task-5]
-
-## Code Quality & Compliance Tasks
-
-### Task 9: Type Safety Validation
-
-- **id**: task-9
-- **description**: Ensure all TypeScript code has strict type safety with no 'any' or 'unknown' types, following project compliance rules
-- **status**: DONE
-- **job-id**: job-e5310d99
-- **depends-on**: [task-1, task-2, task-3, task-4, task-5]
-
-### Task 10: Code Style & Linting
-
-- **id**: task-10
-- **description**: Run linting and formatting tools to ensure code compliance with project standards (no OOP, HOFs only, DRY principles)
-- **status**: DONE
-- **job-id**: job-1fda3c2f
-- **depends-on**: [task-9]
-
-## Final Audit Task
-
-### Task 11: Final Audit & Ship Preparation
-
-- **id**: task-11
-- **description**: Complete final audit of entire codebase including test suite validation, documentation verification, and deployment readiness
-- **status**: CLAIMED
-- **job-id**: job-aff105b8
-- **depends-on**: [task-1, task-2, task-3, task-4, task-5, task-6, task-7, task-8, task-9, task-10]
+### Task A.1: Final Audit and Merge
+- **uuid**: audit-001
+- **status**: todo
+- **job-id**: 
+- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
+- **description**: Merge every job-* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
