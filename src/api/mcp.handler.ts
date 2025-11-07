@@ -73,7 +73,7 @@ export const createMCPHandler = (
     },
   ];
 
-  server.setRequestHandler(InitializeRequestSchema, async (_request) => {
+  server.setRequestHandler(InitializeRequestSchema, async (request) => {
     return {
       protocolVersion: '2024-11-05',
       capabilities: {

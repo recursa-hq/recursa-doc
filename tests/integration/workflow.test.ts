@@ -228,7 +228,7 @@ console.log('Files created:', docsFiles);
 await mem.rename('docs/temp.md', 'docs/overview.md');
 
 // Delete the obsolete file
-await mem.deleteFile('docs/obsolete.md');
+await mem.deletePath('docs/obsolete.md');
 
 // Update the introduction to reference the overview
 const introContent = await mem.readFile('docs/intro.md');
@@ -236,7 +236,7 @@ const updatedIntro = introContent + '\n\nSee also: [[Overview]] for a project ov
 await mem.updateFile('docs/intro.md', introContent, updatedIntro);
 
 // Verify git staged files
-const stagedFiles = await mem.gitStagedFiles();
+const stagedFiles = await mem.getChangedFiles();
 console.log('Staged files:', stagedFiles);
 </typescript>`,
         `<think>File operations complete. Now commit and verify git operations.</think>
@@ -352,7 +352,7 @@ try {
 
 // Try to delete a file that doesn't exist
 try {
-  await mem.deleteFile('already-deleted.md');
+  await mem.deletePath('already-deleted.md');
 } catch (error) {
   console.log('Delete error caught:', error.message);
 }

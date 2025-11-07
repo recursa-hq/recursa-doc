@@ -130,6 +130,35 @@ export class EventEmitter<
 }
 ````
 
+## File: src/types/loop.ts
+````typescript
+import type { MemAPI } from './mem';
+import type { ChatMessage } from './llm';
+
+// Real-time status update types
+export type StatusUpdate = {
+  type: 'think' | 'act' | 'error' | 'complete';
+  runId: string;
+  timestamp: number;
+  content?: string;
+  data?: Record<string, unknown>;
+};
+
+// The execution context passed through the agent loop.
+export type ExecutionContext = {
+  // The complete conversation history for this session.
+  history: ChatMessage[];
+  // The API implementation available to the sandbox.
+  memAPI: MemAPI;
+  // The application configuration.
+  config: import('../config').AppConfig;
+  // A unique ID for this execution run.
+  runId: string;
+  // Optional callback for real-time status updates
+  onStatusUpdate?: (update: StatusUpdate) => void;
+};
+````
+
 ## File: tests/e2e/mcp-protocol.test.ts
 ````typescript
 import {
@@ -214,7 +243,7 @@ describe('MCP Protocol E2E Test', () => {
   it('should initialize and list tools correctly', async () => {
     if (!proc) throw new Error('Process not started');
 
-    const writer = proc.stdin.getWriter();
+    const writer = proc.stdin;
     const reader = readMessages(proc.stdout);
 
     // 1. Send initialize request
@@ -263,7 +292,7 @@ describe('MCP Protocol E2E Test', () => {
     // The agent loop's functionality is thoroughly tested with a mock LLM in the integration tests (`tests/integration/workflow.test.ts`).
     // This E2E test focuses on verifying the MCP server's protocol compliance and basic request/response handling.
 
-    await writer.close();
+    await writer.end();
   }, 20000); // Increase timeout for spawning process
 });
 ````
@@ -500,7 +529,7 @@ console.log('Files created:', docsFiles);
 await mem.rename('docs/temp.md', 'docs/overview.md');
 
 // Delete the obsolete file
-await mem.deleteFile('docs/obsolete.md');
+await mem.deletePath('docs/obsolete.md');
 
 // Update the introduction to reference the overview
 const introContent = await mem.readFile('docs/intro.md');
@@ -508,7 +537,7 @@ const updatedIntro = introContent + '\n\nSee also: [[Overview]] for a project ov
 await mem.updateFile('docs/intro.md', introContent, updatedIntro);
 
 // Verify git staged files
-const stagedFiles = await mem.gitStagedFiles();
+const stagedFiles = await mem.getChangedFiles();
 console.log('Staged files:', stagedFiles);
 </typescript>`,
         `<think>File operations complete. Now commit and verify git operations.</think>
@@ -624,7 +653,7 @@ try {
 
 // Try to delete a file that doesn't exist
 try {
-  await mem.deleteFile('already-deleted.md');
+  await mem.deletePath('already-deleted.md');
 } catch (error) {
   console.log('Delete error caught:', error.message);
 }
@@ -681,35 +710,6 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
     });
   });
 });
-````
-
-## File: src/types/loop.ts
-````typescript
-import type { MemAPI } from './mem';
-import type { ChatMessage } from './llm';
-
-// Real-time status update types
-export type StatusUpdate = {
-  type: 'think' | 'act' | 'error' | 'complete';
-  runId: string;
-  timestamp: number;
-  content?: string;
-  data?: Record<string, unknown>;
-};
-
-// The execution context passed through the agent loop.
-export type ExecutionContext = {
-  // The complete conversation history for this session.
-  history: ChatMessage[];
-  // The API implementation available to the sandbox.
-  memAPI: MemAPI;
-  // The application configuration.
-  config: import('../config').AppConfig;
-  // A unique ID for this execution run.
-  runId: string;
-  // Optional callback for real-time status updates
-  onStatusUpdate?: (update: StatusUpdate) => void;
-};
 ````
 
 ## File: .dockerignore
@@ -784,9 +784,147 @@ EXPOSE 3000
 CMD ["bun", "run", "src/server.ts"]
 ````
 
+## File: docs/tools.md
+````markdown
+# TOOLS.md: Recursa Sandboxed API (`mem` Object)
+
+The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
+
+**All methods are asynchronous (`Promise<T>`) and MUST be called using `await`.**
+
+## Category 1: Core File & Directory Operations
+
+These are the fundamental building blocks for manipulating the Logseq/Obsidian graph structure.
+
+| Method               | Signature                                                                      | Returns             | Description                                                                                                                        |
+| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                          |
+| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories.           |
+| **`mem.updateFile`** | `(filePath: string, oldContent: string, newContent: string): Promise<boolean>` | `Promise<boolean>`  | Atomically finds the `oldContent` string in the file and replaces it with `newContent`. This is the primary tool for modification. |
+| **`mem.deletePath`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or directory recursively.                                                                               |
+| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                        |
+| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                           |
+| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                               |
+| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                    |
+
+---
+
+## Category 2: Git-Native Operations (Auditing & Versioning)
+
+These tools leverage the Git repository tracking the knowledge graph, allowing the agent to audit its own memory and understand historical context.
+
+| Method                   | Signature                                                                                              | Returns               | Description                                                                                                                                                |
+| :----------------------- | :----------------------------------------------------------------------------------------------------- | :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.gitDiff`**        | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.**  |
+| **`mem.gitLog`**         | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                 |
+| **`mem.getChangedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists all files that have been created, modified, staged, or deleted in the working tree. Provides a complete view of pending changes.                      |
+| **`mem.commitChanges`**  | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.    |
+
+---
+
+## Category 3: Intelligent Graph & Semantic Operations
+
+These tools allow the agent to reason about the relationships and structure inherent in Logseq/Org Mode syntax, moving beyond simple file I/O.
+
+| Method                     | Signature                                                           | Returns                  | Description                                                                                                                                                                                                                                               |
+| :------------------------- | :------------------------------------------------------------------ | :----------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.queryGraph`**       | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. _Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`_ |
+| **`mem.getBacklinks`**     | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage.                                                                                                                                       |
+| **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**.                                                                                                                                                                     |
+| **`mem.searchGlobal`**     | `(query: string): Promise<string[]>`                                | `Promise<string[]>`      | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match.                                                                                                                                         |
+
+---
+
+## Category 4: State Management & Checkpoints
+
+Tools for managing the working state during complex, multi-turn operations, providing a safety net against errors.
+
+| Method                           | Signature              | Returns            | Description                                                                                                                             |
+| :------------------------------- | :--------------------- | :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.saveCheckpoint`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Saves the current state.** Stages all working changes (`git add .`) and creates a temporary stash. Use this before a risky operation. |
+| **`mem.revertToLastCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Reverts to the last saved state.** Restores the files to how they were when `saveCheckpoint` was last called.                         |
+| **`mem.discardChanges`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Performs a hard reset.** Abandons all current work (staged and unstaged changes) and reverts the repository to the last commit.       |
+
+---
+
+## Category 5: Utility & Diagnostics
+
+General-purpose operations for the sandbox environment.
+
+| Method                          | Signature                                                          | Returns                     | Description                                                                                           |
+| :------------------------------ | :----------------------------------------------------------------- | :-------------------------- | :---------------------------------------------------------------------------------------------------- |
+| **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
+| **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
+| **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
+````
+
+## File: src/core/mem-api/secure-path.ts
+````typescript
+import path from 'path';
+
+/**
+ * A crucial utility to prevent path traversal attacks.
+ * The LLM should never be able to access files outside the knowledge graph.
+ * @param graphRoot The absolute path to the root of the knowledge graph.
+ * @param userPath The user-provided sub-path.
+ * @returns The resolved, secure absolute path.
+ * @throws If a path traversal attempt is detected.
+ */
+export const resolveSecurePath = (
+  graphRoot: string,
+  userPath: string
+): string => {
+  const resolvedPath = path.resolve(graphRoot, userPath);
+  if (!resolvedPath.startsWith(graphRoot)) {
+    throw new Error('Security Error: Path traversal attempt detected.');
+  }
+  return resolvedPath;
+};
+````
+
+## File: .eslintrc.json
+````json
+{
+  "parser": "@typescript-eslint/parser",
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:prettier/recommended"
+  ],
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "env": {
+    "es6": true,
+    "node": true
+  },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      { "argsIgnorePattern": "^_" }
+    ],
+    "no-console": "warn"
+  }
+}
+````
+
+## File: .prettierrc.json
+````json
+{
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 80,
+  "tabWidth": 2,
+  "endOfLine": "lf"
+}
+````
+
 ## File: tsconfig.tsbuildinfo
 ````
-{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/event-emitter.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
+{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/event-emitter.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"errors":true,"version":"5.9.3"}
 ````
 
 ## File: docs/readme.md
@@ -982,6 +1120,18 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 **Stop building infrastructure. Start building intelligence.**
 ````
 
+## File: docs/rules.md
+````markdown
+codebase compliance rules;
+
+1. No OOP, only HOFs
+2. Use bun.sh and e2e type safe TypeScript
+3. No unknown or any type
+4. [e2e|integration|unit]/[domain].test.ts files & dirs
+5. Bun tests, real implementation (no mocks), isolated tests
+6. DRY
+````
+
 ## File: docs/system-prompt.md
 ````markdown
 # Recursa Agent System Prompt
@@ -1134,102 +1284,36 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 ```
 ````
 
-## File: docs/tools.md
-````markdown
-# TOOLS.md: Recursa Sandboxed API (`mem` Object)
-
-The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
-
-**All methods are asynchronous (`Promise<T>`) and MUST be called using `await`.**
-
-## Category 1: Core File & Directory Operations
-
-These are the fundamental building blocks for manipulating the Logseq/Obsidian graph structure.
-
-| Method               | Signature                                                                      | Returns             | Description                                                                                                                        |
-| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                          |
-| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories.           |
-| **`mem.updateFile`** | `(filePath: string, oldContent: string, newContent: string): Promise<boolean>` | `Promise<boolean>`  | Atomically finds the `oldContent` string in the file and replaces it with `newContent`. This is the primary tool for modification. |
-| **`mem.deleteFile`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or empty directory.                                                                                     |
-| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                        |
-| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                           |
-| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                               |
-| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                    |
-
----
-
-## Category 2: Git-Native Operations (Auditing & Versioning)
-
-These tools leverage the Git repository tracking the knowledge graph, allowing the agent to audit its own memory and understand historical context.
-
-| Method                   | Signature                                                                                              | Returns               | Description                                                                                                                                                |
-| :----------------------- | :----------------------------------------------------------------------------------------------------- | :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.gitDiff`**        | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.**  |
-| **`mem.gitLog`**         | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                 |
-| **`mem.gitStagedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists files that have been modified and are currently "staged" for the next commit (or the current working tree changes). Useful before a major operation. |
-| **`mem.commitChanges`**  | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.    |
-
----
-
-## Category 3: Intelligent Graph & Semantic Operations
-
-These tools allow the agent to reason about the relationships and structure inherent in Logseq/Org Mode syntax, moving beyond simple file I/O.
-
-| Method                     | Signature                                                           | Returns                  | Description                                                                                                                                                                                                                                               |
-| :------------------------- | :------------------------------------------------------------------ | :----------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.queryGraph`**       | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. _Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`_ |
-| **`mem.getBacklinks`**     | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage.                                                                                                                                       |
-| **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**.                                                                                                                                                                     |
-| **`mem.searchGlobal`**     | `(query: string): Promise<string[]>`                                | `Promise<string[]>`      | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match.                                                                                                                                         |
-
----
-
-## Category 4: State Management & Checkpoints
-
-Tools for managing the working state during complex, multi-turn operations, providing a safety net against errors.
-
-| Method                           | Signature              | Returns            | Description                                                                                                                             |
-| :------------------------------- | :--------------------- | :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.saveCheckpoint`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Saves the current state.** Stages all working changes (`git add .`) and creates a temporary stash. Use this before a risky operation. |
-| **`mem.revertToLastCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Reverts to the last saved state.** Restores the files to how they were when `saveCheckpoint` was last called.                         |
-| **`mem.discardChanges`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Performs a hard reset.** Abandons all current work (staged and unstaged changes) and reverts the repository to the last commit.       |
-
----
-
-## Category 5: Utility & Diagnostics
-
-General-purpose operations for the sandbox environment.
-
-| Method                          | Signature                                                          | Returns                     | Description                                                                                           |
-| :------------------------------ | :----------------------------------------------------------------- | :-------------------------- | :---------------------------------------------------------------------------------------------------- |
-| **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
-| **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
-| **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
-````
-
-## File: src/core/mem-api/secure-path.ts
+## File: src/types/sandbox.ts
 ````typescript
-import path from 'path';
+export interface SandboxOptions {
+  timeout?: number;
+  memoryLimit?: number;
+  allowedGlobals?: string[];
+  forbiddenGlobals?: string[];
+}
 
-/**
- * A crucial utility to prevent path traversal attacks.
- * The LLM should never be able to access files outside the knowledge graph.
- * @param graphRoot The absolute path to the root of the knowledge graph.
- * @param userPath The user-provided sub-path.
- * @returns The resolved, secure absolute path.
- * @throws If a path traversal attempt is detected.
- */
-export const resolveSecurePath = (
-  graphRoot: string,
-  userPath: string
-): string => {
-  const resolvedPath = path.resolve(graphRoot, userPath);
-  if (!resolvedPath.startsWith(graphRoot)) {
-    throw new Error('Security Error: Path traversal attempt detected.');
-  }
-  return resolvedPath;
-};
+export interface SandboxExecutionContext {
+  mem: import('./mem.js').MemAPI;
+  console: Console;
+}
+
+export interface SandboxResult {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+  output?: string;
+  executionTime: number;
+}
+
+export type SandboxCode = string;
+
+export interface ExecutionConstraints {
+  maxExecutionTime: number;
+  maxMemoryBytes: number;
+  allowedModules: string[];
+  forbiddenAPIs: string[];
+}
 ````
 
 ## File: tests/unit/llm.test.ts
@@ -1409,98 +1493,6 @@ describe('LLM Module', () => {
 });
 ````
 
-## File: .env.test
-````
-# Test Environment Configuration
-OPENROUTER_API_KEY="mock-test-api-key"
-KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
-LLM_MODEL="mock-test-model"
-````
-
-## File: .eslintrc.json
-````json
-{
-  "parser": "@typescript-eslint/parser",
-  "extends": [
-    "eslint:recommended",
-    "plugin:@typescript-eslint/recommended",
-    "plugin:prettier/recommended"
-  ],
-  "parserOptions": {
-    "ecmaVersion": "latest",
-    "sourceType": "module"
-  },
-  "env": {
-    "es6": true,
-    "node": true
-  },
-  "rules": {
-    "@typescript-eslint/no-explicit-any": "error",
-    "@typescript-eslint/no-unused-vars": [
-      "warn",
-      { "argsIgnorePattern": "^_" }
-    ],
-    "no-console": "warn"
-  }
-}
-````
-
-## File: .prettierrc.json
-````json
-{
-  "semi": true,
-  "trailingComma": "es5",
-  "singleQuote": true,
-  "printWidth": 80,
-  "tabWidth": 2,
-  "endOfLine": "lf"
-}
-````
-
-## File: docs/rules.md
-````markdown
-codebase compliance rules;
-
-1. No OOP, only HOFs
-2. Use bun.sh and e2e type safe TypeScript
-3. No unknown or any type
-4. [e2e|integration|unit]/[domain].test.ts files & dirs
-5. Bun tests, real implementation (no mocks), isolated tests
-6. DRY
-````
-
-## File: src/types/sandbox.ts
-````typescript
-export interface SandboxOptions {
-  timeout?: number;
-  memoryLimit?: number;
-  allowedGlobals?: string[];
-  forbiddenGlobals?: string[];
-}
-
-export interface SandboxExecutionContext {
-  mem: import('./mem.js').MemAPI;
-  console: Console;
-}
-
-export interface SandboxResult {
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  output?: string;
-  executionTime: number;
-}
-
-export type SandboxCode = string;
-
-export interface ExecutionConstraints {
-  maxExecutionTime: number;
-  maxMemoryBytes: number;
-  allowedModules: string[];
-  forbiddenAPIs: string[];
-}
-````
-
 ## File: tests/unit/parser.test.ts
 ````typescript
 import { describe, it, expect } from 'bun:test';
@@ -1575,6 +1567,14 @@ describe('LLM Response Parser', () => {
     });
   });
 });
+````
+
+## File: .env.test
+````
+# Test Environment Configuration
+OPENROUTER_API_KEY="mock-test-api-key"
+KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
+LLM_MODEL="mock-test-model"
 ````
 
 ## File: relay.config.json
@@ -1685,7 +1685,7 @@ export const updateFile =
     }
   };
 
-export const deleteFile =
+export const deletePath =
   (graphRoot: string) =>
   async (filePath: string): Promise<boolean> => {
     const fullPath = resolveSecurePath(graphRoot, filePath);
@@ -1695,7 +1695,7 @@ export const deleteFile =
       return true;
     } catch (error) {
       throw new Error(
-        `Failed to delete file ${filePath}: ${(error as Error).message}`
+        `Failed to delete path ${filePath}: ${(error as Error).message}`
       );
     }
   };
@@ -1767,6 +1767,204 @@ export const listFiles =
   };
 ````
 
+## File: src/core/mem-api/index.ts
+````typescript
+import type { MemAPI } from '../../types';
+import type { AppConfig } from '../../config';
+import simpleGit from 'simple-git';
+
+import * as fileOps from './file-ops';
+import * as gitOps from './git-ops';
+import * as graphOps from './graph-ops';
+import * as stateOps from './state-ops';
+import * as utilOps from './util-ops';
+
+/**
+ * Creates a fully-functional MemAPI object.
+ * This is a Higher-Order Function that takes the application configuration
+ * and returns an object where each method is pre-configured with the necessary
+ * context (like the knowledge graph path or a git instance).
+ *
+ * @param config The application configuration.
+ * @returns A complete MemAPI object ready to be used by the sandbox.
+ */
+export const createMemAPI = (config: AppConfig): MemAPI => {
+  const git = simpleGit(config.knowledgeGraphPath);
+  const graphRoot = config.knowledgeGraphPath;
+
+  return {
+    // Core File I/O
+    readFile: fileOps.readFile(graphRoot),
+    writeFile: fileOps.writeFile(graphRoot),
+    updateFile: fileOps.updateFile(graphRoot),
+    deletePath: fileOps.deletePath(graphRoot),
+    rename: fileOps.rename(graphRoot),
+    fileExists: fileOps.fileExists(graphRoot),
+    createDir: fileOps.createDir(graphRoot),
+    listFiles: fileOps.listFiles(graphRoot),
+
+    // Git-Native Operations
+    gitDiff: gitOps.gitDiff(git),
+    gitLog: gitOps.gitLog(git),
+    getChangedFiles: gitOps.getChangedFiles(git),
+    commitChanges: gitOps.commitChanges(git),
+
+    // Intelligent Graph Operations
+    queryGraph: graphOps.queryGraph(graphRoot),
+    getBacklinks: graphOps.getBacklinks(graphRoot),
+    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
+    searchGlobal: graphOps.searchGlobal(graphRoot),
+
+    // State Management & Checkpoints
+    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
+    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
+    discardChanges: stateOps.discardChanges(git), // Implemented
+
+    // Utility & Diagnostics
+    getGraphRoot: utilOps.getGraphRoot(graphRoot),
+    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
+    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
+  };
+};
+````
+
+## File: src/types/index.ts
+````typescript
+export * from './mem.js';
+export * from './git.js';
+export * from './sandbox.js';
+export * from './mcp.js';
+export * from './llm.js';
+export * from './loop.js';
+
+export interface RecursaConfig {
+  knowledgeGraphPath: string;
+  llm: {
+    apiKey: string;
+    baseUrl?: string;
+    model: string;
+    maxTokens?: number;
+    temperature?: number;
+  };
+  sandbox: {
+    timeout: number;
+    memoryLimit: number;
+  };
+  git: {
+    userName: string;
+    userEmail: string;
+  };
+}
+
+export interface EnvironmentVariables {
+  KNOWLEDGE_GRAPH_PATH: string;
+  OPENROUTER_API_KEY: string;
+  OPENROUTER_MODEL?: string;
+  LLM_TEMPERATURE?: string;
+  LLM_MAX_TOKENS?: string;
+  SANDBOX_TIMEOUT?: string;
+  SANDBOX_MEMORY_LIMIT?: string;
+  GIT_USER_NAME?: string;
+  GIT_USER_EMAIL?: string;
+}
+````
+
+## File: src/types/llm.ts
+````typescript
+export type ParsedLLMResponse = {
+  think?: string;
+  typescript?: string;
+  reply?: string;
+};
+
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
+export interface LLMRequest {
+  messages: ChatMessage[];
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+export interface LLMResponse {
+  content: string;
+  model: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export interface LLMConfig {
+  apiKey: string;
+  baseUrl?: string;
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+export interface LLMProvider {
+  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
+  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
+}
+
+export type StreamingCallback = (chunk: string) => void;
+````
+
+## File: .gitignore
+````
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Production
+/build
+/dist
+
+# Misc
+.DS_Store
+*.pem
+
+# Debugging
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs
+.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+
+# Relay
+.relay/
+
+# Worktrees (from original)
+worktrees/*/node_modules/
+worktrees/*/.git/
+````
+
 ## File: src/core/mem-api/git-ops.ts
 ````typescript
 import type { SimpleGit } from 'simple-git';
@@ -1798,22 +1996,27 @@ export const gitDiff =
 
 export const gitLog =
   (git: SimpleGit) =>
-  async (filePath: string, maxCommits = 5): Promise<LogEntry[]> => {
+  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
     try {
-      const result = await git.log({ file: filePath, maxCount: maxCommits });
+      const options = {
+        maxCount: maxCommits,
+        ...(filePath ? { file: filePath } : {}),
+      };
+      const result = await git.log(options);
       return result.all.map((entry) => ({
         hash: entry.hash,
         message: entry.message,
         date: entry.date,
       }));
     } catch (error) {
+      const target = filePath || 'repository';
       throw new Error(
-        `Failed to get git log for ${filePath}: ${(error as Error).message}`
+        `Failed to get git log for ${target}: ${(error as Error).message}`
       );
     }
   };
 
-export const gitStagedFiles =
+export const getChangedFiles =
   (git: SimpleGit) => async (): Promise<string[]> => {
     try {
       const status = await git.status();
@@ -1828,7 +2031,7 @@ export const gitStagedFiles =
       return Array.from(allFiles);
     } catch (error) {
       throw new Error(
-        `Failed to get staged files: ${(error as Error).message}`
+        `Failed to get changed files: ${(error as Error).message}`
       );
     }
   };
@@ -1846,72 +2049,130 @@ export const commitChanges =
       // Return the commit hash
       if (result.commit) {
         return result.commit;
-      } else {
-        throw new Error('No commit hash returned from git commit');
       }
+      // If result.commit is empty or null, it means no changes were committed. This is not an error.
+      return 'No changes to commit.';
     } catch (error) {
       throw new Error(`Failed to commit changes: ${(error as Error).message}`);
     }
   };
 ````
 
-## File: src/core/mem-api/index.ts
+## File: src/core/mem-api/state-ops.ts
 ````typescript
-import type { MemAPI } from '../../types';
-import type { AppConfig } from '../../config';
-import simpleGit from 'simple-git';
+import type { SimpleGit } from 'simple-git';
 
-import * as fileOps from './file-ops';
-import * as gitOps from './git-ops';
-import * as graphOps from './graph-ops';
-import * as stateOps from './state-ops';
-import * as utilOps from './util-ops';
+// Note: These functions map to specific git commands for state management.
+
+export const saveCheckpoint =
+  (git: SimpleGit) => async (): Promise<boolean> => {
+    // 1. Stage all changes: `await git.add('.')`.
+    await git.add('.');
+    // 2. Save to stash with a message: `await git.stash(['push', '-m', 'recursa-checkpoint'])`.
+    await git.stash(['push', '-m', 'recursa-checkpoint']);
+    // 3. Return true on success.
+    return true;
+  };
+
+export const revertToLastCheckpoint =
+  (git: SimpleGit) => async (): Promise<boolean> => {
+    try {
+      // 1. Apply the most recent stash: `await git.stash(['pop'])`.
+      // This can fail if the stash is empty, so wrap in a try/catch.
+      await git.stash(['pop']);
+      return true;
+    } catch (error) {
+      // If stash is empty, simple-git throws. We can consider this a "success"
+      // in that there's nothing to revert to. Or we can re-throw.
+      // For now, let's log and return false.
+      // eslint-disable-next-line no-console
+      console.warn('Could not revert to checkpoint, stash may be empty.');
+      return false;
+    }
+  };
+
+export const discardChanges =
+  (git: SimpleGit) => async (): Promise<boolean> => {
+    // 1. Reset all tracked files: `await git.reset(['--hard', 'HEAD'])`.
+    await git.reset(['--hard', 'HEAD']);
+    // 2. Remove all untracked files and directories: `await git.clean('f', ['-d'])`.
+    await git.clean('f', ['-d']);
+    // 3. Return true on success.
+    return true;
+  };
+````
+
+## File: src/core/parser.ts
+````typescript
+import type { ParsedLLMResponse } from '../types';
 
 /**
- * Creates a fully-functional MemAPI object.
- * This is a Higher-Order Function that takes the application configuration
- * and returns an object where each method is pre-configured with the necessary
- * context (like the knowledge graph path or a git instance).
+ * Parses the LLM's XML-like response string into a structured object.
+ * This function uses a simple regex-based approach for robustness against
+ * potentially malformed, non-XML-compliant output from the LLM, which is
+ * often more reliable than a strict XML parser.
  *
- * @param config The application configuration.
- * @returns A complete MemAPI object ready to be used by the sandbox.
+ * @param response The raw string response from the LLM.
+ * @returns A ParsedLLMResponse object with optional `think`, `typescript`, and `reply` fields.
  */
-export const createMemAPI = (config: AppConfig): MemAPI => {
-  const git = simpleGit(config.knowledgeGraphPath);
-  const graphRoot = config.knowledgeGraphPath;
+export const parseLLMResponse = (response: string): ParsedLLMResponse => {
+  const extractTagContent = (tagName: string): string | undefined => {
+    const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
+    const match = response.match(regex);
+    // If a match is found, return the captured group (the content), trimmed.
+    return match && match[1] ? match[1].trim() : undefined;
+  };
+
+  // Parse structured tags
+  let think = extractTagContent('think');
+  let typescript = extractTagContent('typescript');
+  let reply = extractTagContent('reply');
+  
+  // Handle malformed responses: if no think tag but there's content before the first XML tag,
+  // treat that content as the think content
+  if (!think) {
+    const firstTagMatch = response.match(/<[^>]+>/);
+    if (firstTagMatch) {
+      const contentBeforeFirstTag = response.substring(0, firstTagMatch.index).trim();
+      if (contentBeforeFirstTag) {
+        think = contentBeforeFirstTag;
+      }
+    }
+  }
+
+  // Handle malformed responses or alternative formats
+  if (!think && !typescript && !reply) {
+    // Try to extract any content that looks like a reply (text after XML-like tags)
+    const lines = response.split('\n').filter(line => line.trim());
+    const nonTagLines = lines.filter(line => !line.trim().match(/^<[^>]+>$/));
+    
+    if (nonTagLines.length > 0) {
+      // If there's content that's not just tags, treat it as a reply
+      const lastLineIndex = response.lastIndexOf('>');
+      if (lastLineIndex > 0 && lastLineIndex < response.length - 1) {
+        reply = response.substring(lastLineIndex + 1).trim();
+      } else if (nonTagLines.length === 1) {
+          reply = nonTagLines[0]!.trim();
+      }
+    }
+  }
+
+  // Handle cases where reply is embedded in XML-like structure but without explicit tags
+  if (!reply && typescript && think) {
+    // If we have think and typescript but no reply, there might be content after the typescript block
+    const tsEndIndex = response.lastIndexOf('</typescript>');
+    if (tsEndIndex > 0 && tsEndIndex < response.length - 1) {
+      const afterTs = response.substring(tsEndIndex + 13).trim();
+      if (afterTs && !afterTs.startsWith('<')) {
+        reply = afterTs;
+      }
+    }
+  }
 
   return {
-    // Core File I/O
-    readFile: fileOps.readFile(graphRoot),
-    writeFile: fileOps.writeFile(graphRoot),
-    updateFile: fileOps.updateFile(graphRoot),
-    deleteFile: fileOps.deleteFile(graphRoot),
-    rename: fileOps.rename(graphRoot),
-    fileExists: fileOps.fileExists(graphRoot),
-    createDir: fileOps.createDir(graphRoot),
-    listFiles: fileOps.listFiles(graphRoot),
-
-    // Git-Native Operations
-    gitDiff: gitOps.gitDiff(git),
-    gitLog: gitOps.gitLog(git),
-    gitStagedFiles: gitOps.gitStagedFiles(git),
-    commitChanges: gitOps.commitChanges(git),
-
-    // Intelligent Graph Operations
-    queryGraph: graphOps.queryGraph(graphRoot),
-    getBacklinks: graphOps.getBacklinks(graphRoot),
-    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
-    searchGlobal: graphOps.searchGlobal(graphRoot),
-
-    // State Management & Checkpoints
-    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
-    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
-    discardChanges: stateOps.discardChanges(git), // Implemented
-
-    // Utility & Diagnostics
-    getGraphRoot: utilOps.getGraphRoot(graphRoot),
-    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
-    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
+    think,
+    typescript,
+    reply,
   };
 };
 ````
@@ -2004,92 +2265,181 @@ export const createLogger = (): Logger => createLoggerInternal();
 export const logger = createLogger();
 ````
 
-## File: src/types/index.ts
+## File: src/types/git.ts
 ````typescript
-export * from './mem.js';
-export * from './git.js';
-export * from './sandbox.js';
-export * from './mcp.js';
-export * from './llm.js';
-export * from './loop.js';
+export interface GitOptions {
+  baseDir?: string;
+}
 
-export interface RecursaConfig {
-  knowledgeGraphPath: string;
-  llm: {
-    apiKey: string;
-    baseUrl?: string;
-    model: string;
-    maxTokens?: number;
-    temperature?: number;
+// Structure for a single Git log entry.
+export type LogEntry = {
+  hash: string;
+  message: string;
+  date: string;
+};
+
+export interface GitDiffResult {
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface GitStatus {
+  staged: string[];
+  unstaged: string[];
+  untracked: string[];
+}
+
+export type GitCommand =
+  | 'init'
+  | 'add'
+  | 'commit'
+  | 'status'
+  | 'log'
+  | 'diff'
+  | 'branch';
+````
+
+## File: src/types/mcp.ts
+````typescript
+import type { Resource } from '@modelcontextprotocol/sdk/types.js';
+
+export interface MCPInitializeRequest {
+  protocolVersion: string;
+  capabilities: {
+    tools?: {
+      listChanged?: boolean;
+    };
+    resources?: {
+      listChanged?: boolean;
+      subscribe?: boolean;
+      unsubscribe?: boolean;
+    };
   };
-  sandbox: {
-    timeout: number;
-    memoryLimit: number;
-  };
-  git: {
-    userName: string;
-    userEmail: string;
+  clientInfo: {
+    name: string;
+    version: string;
   };
 }
 
-export interface EnvironmentVariables {
-  KNOWLEDGE_GRAPH_PATH: string;
-  OPENROUTER_API_KEY: string;
-  OPENROUTER_MODEL?: string;
-  LLM_TEMPERATURE?: string;
-  LLM_MAX_TOKENS?: string;
-  SANDBOX_TIMEOUT?: string;
-  SANDBOX_MEMORY_LIMIT?: string;
-  GIT_USER_NAME?: string;
-  GIT_USER_EMAIL?: string;
+export interface MCPInitializeResult {
+  protocolVersion: string;
+  capabilities: {
+    tools: {
+      listChanged?: boolean;
+    };
+    resources: {
+      listChanged?: boolean;
+      subscribe?: boolean;
+      unsubscribe?: boolean;
+    };
+  };
+  serverInfo: {
+    name: string;
+    version: string;
+  };
+}
+
+export interface MCPTool {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export interface MCPResource extends Resource {
+  mimeType?: string;
+}
+
+export interface MCPRequest {
+  id: string;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+export interface MCPResponse {
+  id: string;
+  result?: Record<string, unknown>;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+export interface MCPServerConfig {
+  name: string;
+  version: string;
+  description?: string;
 }
 ````
 
-## File: src/types/llm.ts
+## File: src/types/mem.ts
 ````typescript
-export type ParsedLLMResponse = {
-  think?: string;
-  typescript?: string;
-  reply?: string;
+import type { LogEntry } from './git';
+
+// --- Knowledge Graph & Git ---
+
+// Structure for a graph query result.
+export type GraphQueryResult = {
+  filePath: string;
+  matches: string[];
 };
 
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+// Structure for token count results for multiple paths.
+export type PathTokenCount = {
+  path: string;
+  tokenCount: number;
 };
 
-export interface LLMRequest {
-  messages: ChatMessage[];
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-  topP?: number;
-}
+// --- MemAPI Interface (Matches tools.md) ---
 
-export interface LLMResponse {
-  content: string;
-  model: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
+// This is the "cheatsheet" for what's available in the sandbox.
+// It must be kept in sync with the tools documentation.
+export type MemAPI = {
+  // Core File I/O
+  readFile: (filePath: string) => Promise<string>;
+  writeFile: (filePath: string, content: string) => Promise<boolean>;
+  updateFile: (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ) => Promise<boolean>;
+  deletePath: (filePath: string) => Promise<boolean>;
+  rename: (oldPath: string, newPath: string) => Promise<boolean>;
+  fileExists: (filePath: string) => Promise<boolean>;
+  createDir: (directoryPath: string) => Promise<boolean>;
+  listFiles: (directoryPath?: string) => Promise<string[]>;
 
-export interface LLMConfig {
-  apiKey: string;
-  baseUrl?: string;
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-}
+  // Git-Native Operations
+  gitDiff: (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ) => Promise<string>;
+  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
+  getChangedFiles: () => Promise<string[]>;
+  commitChanges: (message: string) => Promise<string>;
 
-export interface LLMProvider {
-  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
-  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
-}
+  // Intelligent Graph Operations
+  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
+  getBacklinks: (filePath: string) => Promise<string[]>;
+  getOutgoingLinks: (filePath: string) => Promise<string[]>;
+  searchGlobal: (query: string) => Promise<string[]>;
 
-export type StreamingCallback = (chunk: string) => void;
+  // State Management
+  saveCheckpoint: () => Promise<boolean>;
+  revertToLastCheckpoint: () => Promise<boolean>;
+  discardChanges: () => Promise<boolean>;
+
+  // Utility
+  getGraphRoot: () => Promise<string>;
+  getTokenCount: (filePath: string) => Promise<number>;
+  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
+};
 ````
 
 ## File: src/config.ts
@@ -2203,96 +2553,83 @@ GIT_USER_EMAIL=recursa@local
 # 5. Run the server: bun run start
 ````
 
-## File: .gitignore
-````
-# Dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# Testing
-/coverage
-
-# Production
-/build
-/dist
-
-# Misc
-.DS_Store
-*.pem
-
-# Debugging
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Environment Variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDEs
-.idea
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-*.sublime-workspace
-
-# Relay
-.relay/
-
-# Worktrees (from original)
-worktrees/*/node_modules/
-worktrees/*/.git/
+## File: tsconfig.json
+````json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "moduleResolution": "bundler",
+    "rootDir": "src",
+    "outDir": "dist",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
+    "noEmit": false,
+    "types": ["bun-types"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
 ````
 
-## File: src/core/mem-api/state-ops.ts
+## File: src/core/mem-api/util-ops.ts
 ````typescript
-import type { SimpleGit } from 'simple-git';
+import { promises as fs } from 'fs';
+import type { PathTokenCount } from '../../types';
+import { resolveSecurePath } from './secure-path';
 
-// Note: These functions map to specific git commands for state management.
+// A private helper to centralize token counting logic.
+// This is a simple estimation and should be replaced with a proper
+// tokenizer library like tiktoken if higher accuracy is needed.
+const countTokensForContent = (content: string): number => {
+  // A common rough estimate is 4 characters per token.
+  return Math.ceil(content.length / 4);
+};
 
-export const saveCheckpoint =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    // 1. Stage all changes: `await git.add('.')`.
-    await git.add('.');
-    // 2. Save to stash with a message: `await git.stash(['push', '-m', 'recursa-checkpoint'])`.
-    await git.stash(['push', '-m', 'recursa-checkpoint']);
-    // 3. Return true on success.
-    return true;
+// Note: HOFs returning the final mem API functions.
+
+export const getGraphRoot =
+  (graphRoot: string) => async (): Promise<string> => {
+    return graphRoot;
   };
 
-export const revertToLastCheckpoint =
-  (git: SimpleGit) => async (): Promise<boolean> => {
+export const getTokenCount =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<number> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
     try {
-      // 1. Apply the most recent stash: `await git.stash(['pop'])`.
-      // This can fail if the stash is empty, so wrap in a try/catch.
-      await git.stash(['pop']);
-      return true;
+      const content = await fs.readFile(fullPath, 'utf-8');
+      return countTokensForContent(content);
     } catch (error) {
-      // If stash is empty, simple-git throws. We can consider this a "success"
-      // in that there's nothing to revert to. Or we can re-throw.
-      // For now, let's log and return false.
-      // eslint-disable-next-line no-console
-      console.warn('Could not revert to checkpoint, stash may be empty.');
-      return false;
+      throw new Error(
+        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
+      );
     }
   };
 
-export const discardChanges =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    // 1. Reset all tracked files: `await git.reset(['--hard', 'HEAD'])`.
-    await git.reset(['--hard', 'HEAD']);
-    // 2. Remove all untracked files and directories: `await git.clean('f', ['-d'])`.
-    await git.clean('f', ['-d']);
-    // 3. Return true on success.
-    return true;
+export const getTokenCountForPaths =
+  (graphRoot: string) =>
+  async (paths: string[]): Promise<PathTokenCount[]> => {
+    return Promise.all(
+      paths.map(async (filePath) => {
+        const tokenCount = await getTokenCount(graphRoot)(filePath);
+        return {
+          path: filePath,
+          tokenCount,
+        };
+      })
+    );
   };
 ````
 
@@ -2441,618 +2778,6 @@ export const queryLLMWithRetries = withRetry(
 );
 ````
 
-## File: src/core/parser.ts
-````typescript
-import type { ParsedLLMResponse } from '../types';
-
-/**
- * Parses the LLM's XML-like response string into a structured object.
- * This function uses a simple regex-based approach for robustness against
- * potentially malformed, non-XML-compliant output from the LLM, which is
- * often more reliable than a strict XML parser.
- *
- * @param response The raw string response from the LLM.
- * @returns A ParsedLLMResponse object with optional `think`, `typescript`, and `reply` fields.
- */
-export const parseLLMResponse = (response: string): ParsedLLMResponse => {
-  const extractTagContent = (tagName: string): string | undefined => {
-    const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
-    const match = response.match(regex);
-    // If a match is found, return the captured group (the content), trimmed.
-    return match && match[1] ? match[1].trim() : undefined;
-  };
-
-  // Parse structured tags
-  let think = extractTagContent('think');
-  let typescript = extractTagContent('typescript');
-  let reply = extractTagContent('reply');
-  
-  // Handle malformed responses: if no think tag but there's content before the first XML tag,
-  // treat that content as the think content
-  if (!think) {
-    const firstTagMatch = response.match(/<[^>]+>/);
-    if (firstTagMatch) {
-      const contentBeforeFirstTag = response.substring(0, firstTagMatch.index).trim();
-      if (contentBeforeFirstTag) {
-        think = contentBeforeFirstTag;
-      }
-    }
-  }
-
-  // Handle malformed responses or alternative formats
-  if (!think && !typescript && !reply) {
-    // Try to extract any content that looks like a reply (text after XML-like tags)
-    const lines = response.split('\n').filter(line => line.trim());
-    const nonTagLines = lines.filter(line => !line.trim().match(/^<[^>]+>$/));
-    
-    if (nonTagLines.length > 0) {
-      // If there's content that's not just tags, treat it as a reply
-      const lastLineIndex = response.lastIndexOf('>');
-      if (lastLineIndex > 0 && lastLineIndex < response.length - 1) {
-        reply = response.substring(lastLineIndex + 1).trim();
-      } else if (nonTagLines.length === 1) {
-          reply = nonTagLines[0]!.trim();
-      }
-    }
-  }
-
-  // Handle cases where reply is embedded in XML-like structure but without explicit tags
-  if (!reply && typescript && think) {
-    // If we have think and typescript but no reply, there might be content after the typescript block
-    const tsEndIndex = response.lastIndexOf('</typescript>');
-    if (tsEndIndex > 0 && tsEndIndex < response.length - 1) {
-      const afterTs = response.substring(tsEndIndex + 13).trim();
-      if (afterTs && !afterTs.startsWith('<')) {
-        reply = afterTs;
-      }
-    }
-  }
-
-  return {
-    think,
-    typescript,
-    reply,
-  };
-};
-````
-
-## File: src/types/git.ts
-````typescript
-export interface GitOptions {
-  baseDir?: string;
-}
-
-// Structure for a single Git log entry.
-export type LogEntry = {
-  hash: string;
-  message: string;
-  date: string;
-};
-
-export interface GitDiffResult {
-  additions: number;
-  deletions: number;
-  patch: string;
-}
-
-export interface GitStatus {
-  staged: string[];
-  unstaged: string[];
-  untracked: string[];
-}
-
-export type GitCommand =
-  | 'init'
-  | 'add'
-  | 'commit'
-  | 'status'
-  | 'log'
-  | 'diff'
-  | 'branch';
-````
-
-## File: src/types/mcp.ts
-````typescript
-import type { Resource } from '@modelcontextprotocol/sdk/types.js';
-
-export interface MCPInitializeRequest {
-  protocolVersion: string;
-  capabilities: {
-    tools?: {
-      listChanged?: boolean;
-    };
-    resources?: {
-      listChanged?: boolean;
-      subscribe?: boolean;
-      unsubscribe?: boolean;
-    };
-  };
-  clientInfo: {
-    name: string;
-    version: string;
-  };
-}
-
-export interface MCPInitializeResult {
-  protocolVersion: string;
-  capabilities: {
-    tools: {
-      listChanged?: boolean;
-    };
-    resources: {
-      listChanged?: boolean;
-      subscribe?: boolean;
-      unsubscribe?: boolean;
-    };
-  };
-  serverInfo: {
-    name: string;
-    version: string;
-  };
-}
-
-export interface MCPTool {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
-}
-
-export interface MCPResource extends Resource {
-  mimeType?: string;
-}
-
-export interface MCPRequest {
-  id: string;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-export interface MCPResponse {
-  id: string;
-  result?: Record<string, unknown>;
-  error?: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-export interface MCPServerConfig {
-  name: string;
-  version: string;
-  description?: string;
-}
-````
-
-## File: src/types/mem.ts
-````typescript
-import type { LogEntry } from './git';
-
-// --- Knowledge Graph & Git ---
-
-// Structure for a graph query result.
-export type GraphQueryResult = {
-  filePath: string;
-  matches: string[];
-};
-
-// Structure for token count results for multiple paths.
-export type PathTokenCount = {
-  path: string;
-  tokenCount: number;
-};
-
-// --- MemAPI Interface (Matches tools.md) ---
-
-// This is the "cheatsheet" for what's available in the sandbox.
-// It must be kept in sync with the tools documentation.
-export type MemAPI = {
-  // Core File I/O
-  readFile: (filePath: string) => Promise<string>;
-  writeFile: (filePath: string, content: string) => Promise<boolean>;
-  updateFile: (
-    filePath: string,
-    oldContent: string,
-    newContent: string
-  ) => Promise<boolean>;
-  deleteFile: (filePath: string) => Promise<boolean>;
-  rename: (oldPath: string, newPath: string) => Promise<boolean>;
-  fileExists: (filePath: string) => Promise<boolean>;
-  createDir: (directoryPath: string) => Promise<boolean>;
-  listFiles: (directoryPath?: string) => Promise<string[]>;
-
-  // Git-Native Operations
-  gitDiff: (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ) => Promise<string>;
-  gitLog: (filePath: string, maxCommits?: number) => Promise<LogEntry[]>;
-  gitStagedFiles: () => Promise<string[]>;
-  commitChanges: (message: string) => Promise<string>;
-
-  // Intelligent Graph Operations
-  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
-  getBacklinks: (filePath: string) => Promise<string[]>;
-  getOutgoingLinks: (filePath: string) => Promise<string[]>;
-  searchGlobal: (query: string) => Promise<string[]>;
-
-  // State Management
-  saveCheckpoint: () => Promise<boolean>;
-  revertToLastCheckpoint: () => Promise<boolean>;
-  discardChanges: () => Promise<boolean>;
-
-  // Utility
-  getGraphRoot: () => Promise<string>;
-  getTokenCount: (filePath: string) => Promise<number>;
-  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
-};
-````
-
-## File: tests/integration/mem-api.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Integration Tests', () => {
-  let tempDir: string;
-  let mem: MemAPI;
-
-  // Provide a full mock config
-  const mockConfig: AppConfig = {
-    knowledgeGraphPath: '', // This will be set in beforeAll,
-    openRouterApiKey: 'test-key',
-    llmModel: 'test-model',
-  };
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
-    mockConfig.knowledgeGraphPath = tempDir;
-  });
-
-  beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-    // Init git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-    // Create the mem API instance for this test, it's now AppConfig
-    mem = createMemAPI(mockConfig as AppConfig);
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  it('should write, read, and check existence of a file', async () => {
-    const filePath = 'test.md';
-    const content = 'hello world';
-
-    await mem.writeFile(filePath, content);
-
-    const readContent = await mem.readFile(filePath);
-    expect(readContent).toBe(content);
-
-    const exists = await mem.fileExists(filePath);
-    expect(exists).toBe(true);
-
-    const nonExistent = await mem.fileExists('not-real.md');
-    expect(nonExistent).toBe(false);
-  });
-
-  it('should throw an error for path traversal attempts', async () => {
-    const maliciousPath = '../../../etc/passwd';
-
-    await expect(mem.readFile(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-
-    await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-
-    await expect(mem.deleteFile(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-
-    await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-  });
-
-  it('should commit a change and log it', async () => {
-    const filePath = 'a.md';
-    const content = 'content';
-    const commitMessage = 'feat: add a.md';
-
-    await mem.writeFile(filePath, content);
-
-    const commitHash = await mem.commitChanges(commitMessage);
-
-    expect(typeof commitHash).toBe('string');
-    expect(commitHash.length).toBeGreaterThan(5);
-
-    const log = await mem.gitLog(filePath, 1);
-
-    expect(log.length).toBe(1);
-    expect(log[0].message).toBe(commitMessage);
-  });
-
-  it('should list files in a directory', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.writeFile('b.txt', 'b');
-    await mem.createDir('subdir');
-    await mem.writeFile('subdir/c.txt', 'c');
-
-    const rootFiles = await mem.listFiles();
-    expect(rootFiles).toEqual(
-      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
-    );
-    expect(rootFiles.length).toBeGreaterThanOrEqual(3);
-
-    const subdirFiles = await mem.listFiles('subdir');
-    expect(subdirFiles).toEqual(['c.txt']);
-
-    await mem.createDir('empty');
-    const emptyFiles = await mem.listFiles('empty');
-    expect(emptyFiles).toEqual([]);
-  });
-});
-````
-
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "dev": "bun run --watch src/server.ts",
-    "start": "bun run src/server.ts",
-    "test": "bun test",
-    "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix",
-    "format": "prettier --check .",
-    "format:fix": "prettier --write .",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8",
-    "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.0",
-    "bun-types": "^1.0.0",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^7.10.0",
-    "@typescript-eslint/parser": "^7.10.0",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.1.3",
-    "prettier": "^3.2.5"
-  },
-  "engines": {
-    "bun": ">=1.0.0"
-  },
-  "license": "MIT"
-}
-````
-
-## File: tsconfig.json
-````json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "lib": ["ES2022"],
-    "moduleResolution": "bundler",
-    "rootDir": "src",
-    "outDir": "dist",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noPropertyAccessFromIndexSignature": false,
-    "resolveJsonModule": true,
-    "allowImportingTsExtensions": false,
-    "noEmit": false,
-    "types": ["bun-types"]
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
-}
-````
-
-## File: src/core/mem-api/graph-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path';
-import { walk } from './fs-walker';
-
-export const queryGraph =
-  (graphRoot: string) =>
-  async (query: string): Promise<GraphQueryResult[]> => {
-    // Basic property query parser: (property key:: value)
-    const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-    const match = query.trim().match(propertyRegex);
-
-    if (!match || !match[1] || !match[2]) {
-      // For now, only support property queries. Return empty for others.
-      return [];
-    }
-
-    const key = match[1];
-    const value = match[2];
-    const results: GraphQueryResult[] = [];
-
-    for await (const filePath of walk(graphRoot)) {
-      if (filePath.endsWith('.md')) {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const lines = content.split('\n');
-        const matchingLines: string[] = [];
-        for (const line of lines) {
-          if (line.trim() === `${key.trim()}:: ${value.trim()}`) {
-            matchingLines.push(line);
-          }
-        }
-        if (matchingLines.length > 0) {
-          results.push({
-            filePath: path.relative(graphRoot, filePath),
-            matches: matchingLines,
-          });
-        }
-      }
-    }
-    return results;
-  };
-
-export const getBacklinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const targetBaseName = path.basename(filePath, path.extname(filePath));
-    const linkPattern = `[[${targetBaseName}]]`;
-    const backlinks: string[] = [];
-
-    for await (const currentFilePath of walk(graphRoot)) {
-      // Don't link to self
-      if (
-        path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)
-      ) {
-        continue;
-      }
-
-      if (currentFilePath.endsWith('.md')) {
-        try {
-          const content = await fs.readFile(currentFilePath, 'utf-8');
-          if (content.includes(linkPattern)) {
-            backlinks.push(path.relative(graphRoot, currentFilePath));
-          }
-        } catch (e) {
-          // Ignore files that can't be read
-        }
-      }
-    }
-    return backlinks;
-  };
-
-export const getOutgoingLinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    const content = await fs.readFile(fullPath, 'utf-8');
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const matches = content.matchAll(linkRegex);
-    const uniqueLinks = new Set<string>();
-
-    for (const match of matches) {
-      if (match[1]) {
-        uniqueLinks.add(match[1]);
-      }
-    }
-    return Array.from(uniqueLinks);
-  };
-
-export const searchGlobal =
-  (graphRoot: string) =>
-  async (query: string): Promise<string[]> => {
-    const matchingFiles: string[] = [];
-    const lowerCaseQuery = query.toLowerCase();
-
-    for await (const filePath of walk(graphRoot)) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        if (content.toLowerCase().includes(lowerCaseQuery)) {
-          matchingFiles.push(path.relative(graphRoot, filePath));
-        }
-      } catch (e) {
-        // Ignore binary files or files that can't be read
-      }
-    }
-    return matchingFiles;
-  };
-````
-
-## File: src/core/mem-api/util-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import type { PathTokenCount } from '../../types';
-import { resolveSecurePath } from './secure-path';
-
-// A private helper to centralize token counting logic.
-// This is a simple estimation and should be replaced with a proper
-// tokenizer library like tiktoken if higher accuracy is needed.
-const countTokensForContent = (content: string): number => {
-  // A common rough estimate is 4 characters per token.
-  return Math.ceil(content.length / 4);
-};
-
-// Note: HOFs returning the final mem API functions.
-
-export const getGraphRoot =
-  (graphRoot: string) => async (): Promise<string> => {
-    return graphRoot;
-  };
-
-export const getTokenCount =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<number> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    try {
-      const content = await fs.readFile(fullPath, 'utf-8');
-      return countTokensForContent(content);
-    } catch (error) {
-      throw new Error(
-        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getTokenCountForPaths =
-  (graphRoot: string) =>
-  async (paths: string[]): Promise<PathTokenCount[]> => {
-    return Promise.all(
-      paths.map(async (filePath) => {
-        const tokenCount = await getTokenCount(graphRoot)(filePath);
-        return {
-          path: filePath,
-          tokenCount,
-        };
-      })
-    );
-  };
-````
-
 ## File: tests/e2e/agent-workflow.test.ts
 ````typescript
 import {
@@ -3198,79 +2923,322 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 });
 ````
 
-## File: src/core/sandbox.ts
+## File: tests/integration/mem-api.test.ts
 ````typescript
-import { createContext, runInContext } from 'node:vm';
-import type { MemAPI } from '../types/mem';
-import { logger } from '../lib/logger';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from 'bun:test';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import simpleGit from 'simple-git';
+import { createMemAPI } from '../../src/core/mem-api';
+import type { AppConfig } from '../../src/config';
+import type { MemAPI } from '../../src/types';
 
-/**
- * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
- * @param code The TypeScript code snippet to execute.
- * @param memApi The MemAPI instance to expose to the sandboxed code.
- * @returns The result of the code execution.
- */
-export const runInSandbox = async (
-  code: string,
-  memApi: MemAPI
-): Promise<unknown> => {
-  // Create a sandboxed context with the mem API and only essential globals
-  const context = createContext({
-    mem: memApi,
-    // Essential JavaScript globals
-    console: {
-      log: (...args: unknown[]) =>
-        logger.info('Sandbox console.log', { arguments: args }),
-      error: (...args: unknown[]) =>
-        logger.error('Sandbox console.error', undefined, {
-          arguments: args,
-        }),
-      warn: (...args: unknown[]) =>
-        logger.warn('Sandbox console.warn', { arguments: args }),
-    },
-    // Promise and async support
-    Promise,
-    setTimeout: (fn: () => void, delay: number) => {
-      if (delay > 1000) {
-        throw new Error('Timeout too long');
-      }
-      return setTimeout(fn, Math.min(delay, 10000));
-    },
-    clearTimeout,
-    // Basic types and constructors
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    Date,
-    Math,
-    JSON,
-    RegExp,
-    Error,
+describe('MemAPI Integration Tests', () => {
+  let tempDir: string;
+  let mem: MemAPI;
+
+  // Provide a full mock config
+  const mockConfig: AppConfig = {
+    knowledgeGraphPath: '', // This will be set in beforeAll,
+    openRouterApiKey: 'test-key',
+    llmModel: 'test-model',
+  };
+
+  beforeAll(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
+    mockConfig.knowledgeGraphPath = tempDir;
   });
 
-  // Wrap the user code in an async IIFE to allow top-level await.
-  const wrappedCode = `(async () => {
-    ${code}
-  })()`;
+  beforeEach(async () => {
+    // Clear the directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+    // Init git
+    const git = simpleGit(tempDir);
+    await git.init();
+    await git.addConfig('user.name', 'Test User');
+    await git.addConfig('user.email', 'test@example.com');
+    // Create the mem API instance for this test, it's now AppConfig
+    mem = createMemAPI(mockConfig as AppConfig);
+  });
 
-  try {
-    logger.debug('Executing code in sandbox', { code });
-    const result = await runInContext(wrappedCode, context, {
-      timeout: 10000, // 10 seconds
-      displayErrors: true,
-    });
-    logger.debug('Sandbox execution successful', { result, type: typeof result });
-    return result;
-  } catch (error) {
-    logger.error('Error executing sandboxed code', error as Error, {
-      code,
-    });
-    // Re-throw a sanitized error to the agent loop
-    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
-  }
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('should write, read, and check existence of a file', async () => {
+    const filePath = 'test.md';
+    const content = 'hello world';
+
+    await mem.writeFile(filePath, content);
+
+    const readContent = await mem.readFile(filePath);
+    expect(readContent).toBe(content);
+
+    const exists = await mem.fileExists(filePath);
+    expect(exists).toBe(true);
+
+    const nonExistent = await mem.fileExists('not-real.md');
+    expect(nonExistent).toBe(false);
+  });
+
+  it('should throw an error for path traversal attempts', async () => {
+    const maliciousPath = '../../../etc/passwd';
+
+    await expect(mem.readFile(maliciousPath)).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+
+    await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+
+    await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+
+    await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+  });
+
+  it('should commit a change and log it', async () => {
+    const filePath = 'a.md';
+    const content = 'content';
+    const commitMessage = 'feat: add a.md';
+
+    await mem.writeFile(filePath, content);
+
+    const commitHash = await mem.commitChanges(commitMessage);
+
+    expect(typeof commitHash).toBe('string');
+    expect(commitHash.length).toBeGreaterThan(5);
+
+    const log = await mem.gitLog(filePath, 1);
+
+    expect(log.length).toBe(1);
+    expect(log[0].message).toBe(commitMessage);
+  });
+
+  it('should list files in a directory', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.writeFile('b.txt', 'b');
+    await mem.createDir('subdir');
+    await mem.writeFile('subdir/c.txt', 'c');
+
+    const rootFiles = await mem.listFiles();
+    expect(rootFiles).toEqual(
+      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
+    );
+    expect(rootFiles.length).toBeGreaterThanOrEqual(3);
+
+    const subdirFiles = await mem.listFiles('subdir');
+    expect(subdirFiles).toEqual(['c.txt']);
+
+    await mem.createDir('empty');
+    const emptyFiles = await mem.listFiles('empty');
+    expect(emptyFiles).toEqual([]);
+  });
+});
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/server.ts",
+    "start": "bun run src/server.ts",
+    "test": "bun test",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "bun-types": "^1.0.0",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^7.10.0",
+    "@typescript-eslint/parser": "^7.10.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "license": "MIT"
+}
+````
+
+## File: src/core/mem-api/graph-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import type { GraphQueryResult } from '../../types';
+import { resolveSecurePath } from './secure-path';
+import { walk } from './fs-walker';
+
+type PropertyCondition = {
+  type: 'property';
+  key: string;
+  value: string;
 };
+
+type Condition = PropertyCondition; // For future expansion
+
+const parseCondition = (conditionStr: string): Condition | null => {
+  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+  const match = conditionStr.trim().match(propertyRegex);
+  if (match && match[1] && match[2]) {
+    return {
+      type: 'property',
+      key: match[1].trim(),
+      value: match[2].trim(),
+    };
+  }
+  return null;
+};
+
+const checkCondition = (content: string, condition: Condition): string[] => {
+  const matches: string[] = [];
+  if (condition.type === 'property') {
+    const lines = content.split('\n');
+    for (const line of lines) {
+      if (line.trim() === `${condition.key}:: ${condition.value}`) {
+        matches.push(line);
+      }
+    }
+  }
+  return matches;
+};
+
+export const queryGraph =
+  (graphRoot: string) =>
+  async (query: string): Promise<GraphQueryResult[]> => {
+    const conditionStrings = query.split(/ AND /i);
+    const conditions = conditionStrings
+      .map(parseCondition)
+      .filter((c): c is Condition => c !== null);
+
+    if (conditions.length === 0) {
+      return [];
+    }
+
+    const results: GraphQueryResult[] = [];
+
+    for await (const filePath of walk(graphRoot)) {
+      if (!filePath.endsWith('.md')) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const allMatchingLines: string[] = [];
+      let allConditionsMet = true;
+
+      for (const condition of conditions) {
+        const matchingLines = checkCondition(content, condition);
+        if (matchingLines.length > 0) {
+          allMatchingLines.push(...matchingLines);
+        } else {
+          allConditionsMet = false;
+          break;
+        }
+      }
+
+      if (allConditionsMet) {
+        results.push({
+          filePath: path.relative(graphRoot, filePath),
+          matches: allMatchingLines,
+        });
+      }
+    }
+    return results;
+  };
+
+export const getBacklinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const targetBaseName = path.basename(filePath, path.extname(filePath));
+    const linkPattern = `[[${targetBaseName}]]`;
+    const backlinks: string[] = [];
+
+    for await (const currentFilePath of walk(graphRoot)) {
+      // Don't link to self
+      if (
+        path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)
+      ) {
+        continue;
+      }
+
+      if (currentFilePath.endsWith('.md')) {
+        try {
+          const content = await fs.readFile(currentFilePath, 'utf-8');
+          if (content.includes(linkPattern)) {
+            backlinks.push(path.relative(graphRoot, currentFilePath));
+          }
+        } catch (e) {
+          // Ignore files that can't be read
+        }
+      }
+    }
+    return backlinks;
+  };
+
+export const getOutgoingLinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const matches = content.matchAll(linkRegex);
+    const uniqueLinks = new Set<string>();
+
+    for (const match of matches) {
+      if (match[1]) {
+        uniqueLinks.add(match[1]);
+      }
+    }
+    return Array.from(uniqueLinks);
+  };
+
+export const searchGlobal =
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    const matchingFiles: string[] = [];
+    const lowerCaseQuery = query.toLowerCase();
+
+    for await (const filePath of walk(graphRoot)) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.toLowerCase().includes(lowerCaseQuery)) {
+          matchingFiles.push(path.relative(graphRoot, filePath));
+        }
+      } catch (e) {
+        // Ignore binary files or files that can't be read
+      }
+    }
+    return matchingFiles;
+  };
 ````
 
 ## File: repomix.config.json
@@ -3426,6 +3394,187 @@ export const runInSandbox = async (
 - **depends-on**: [task-1, task-2, task-3, task-4, task-5, task-6, task-7, task-8, task-9, task-10]
 ````
 
+## File: src/core/sandbox.ts
+````typescript
+import { createContext, runInContext } from 'node:vm';
+import type { MemAPI } from '../types/mem';
+import { logger } from '../lib/logger';
+
+/**
+ * Preprocesses code to fix common syntax issues from LLM output.
+ * This handles malformed strings, mismatched quotes, and other common issues.
+ * @param code The raw TypeScript code from the LLM
+ * @returns The preprocessed, syntactically valid code
+ */
+const preprocessCode = (code: string): string => {
+  let processedCode = code;
+
+  // Step 1: Fix mixed quote types (most critical issue)
+  // Look for patterns where string starts with one quote type and ends with another
+  // This handles cases like: 'string` or `string' or "string`
+  const mixedQuotePattern = /(['"`])([^'"`\\]*?)(['"`])(?=\s|[;,.)\]}]|$)/g;
+  processedCode = processedCode.replace(mixedQuotePattern, (match, startQuote, content, endQuote) => {
+    if (startQuote !== endQuote) {
+      // If quotes don't match, convert to backticks and escape content
+      const escapedContent = content.replace(/`/g, '\\`');
+      return `\`${escapedContent}\``;
+    }
+    return match;
+  });
+
+  // Step 2: Skip the simple malformed patterns as they conflict with other steps
+  // The mixed quote pattern in Step 1 should handle these cases more carefully
+
+  // Step 3: Fix multiline strings in single/double quotes (convert to template literals)
+  const multilineStringPattern = /(['"])([^'"\\\n]*\n[^'"\\]*?)\1/g;
+  processedCode = processedCode.replace(multilineStringPattern, (match, quote, content) => {
+    const escapedContent = content.replace(/`/g, '\\`');
+    return `\`${escapedContent}\``;
+  });
+
+  // Step 4: Fix unterminated strings - look for opening quotes without closing quotes
+  // This is critical for the EOF errors we're seeing
+  const unterminatedPatterns = [
+    // Pattern: 'string without closing quote, followed by end of line or comma/semicolon
+    { regex: /'([^'\n]*?)(?=\n|,|;|$)/g, replacement: (match: string, content: string) => `\`${content}\`` },
+    // Pattern: `string without closing quote, followed by end of line or comma/semicolon  
+    { regex: /`([^`\n]*?)(?=\n|,|;|$)/g, replacement: (match: string, content: string) => `\`${content}\`` },
+    // Pattern: "string without closing quote, followed by end of line or comma/semicolon
+    { regex: /"([^"\n]*?)(?=\n|,|;|$)/g, replacement: (match: string, content: string) => `\`${content}\`` },
+  ];
+
+  unterminatedPatterns.forEach(({ regex, replacement }) => {
+    processedCode = processedCode.replace(regex, replacement);
+  });
+
+  // Step 5: Skip the aggressive replacements that are causing issues
+  // The previous steps should handle most cases correctly
+
+  return processedCode;
+};
+
+/**
+ * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
+ * @param code The TypeScript code snippet to execute.
+ * @param memApi The MemAPI instance to expose to the sandboxed code.
+ * @returns The result of the code execution.
+ */
+export const runInSandbox = async (
+  code: string,
+  memApi: MemAPI
+): Promise<unknown> => {
+  // Simple preprocessing to fix only the most critical syntax errors
+  // that prevent the code from running at all
+  let preprocessedCode = code;
+  
+  // Fix multiline strings in single quotes - these cause EOF errors
+  // Pattern: 'content\ncontent' -> `content\ncontent`
+  const multilineStringPattern = /'([^']*\n[^']*)'/g;
+  preprocessedCode = preprocessedCode.replace(multilineStringPattern, (match, content) => {
+    // Escape any backticks in the content
+    const escapedContent = content.replace(/`/g, '\\`');
+    return `\`${escapedContent}\``;
+  });
+  
+  // Fix the most common issue: mixed quotes in string literals
+  // Pattern: 'content` or `content' -> `content`
+  const mixedQuotePatterns = [
+    // Single quote followed by backtick (more aggressive)
+    {
+      regex: /'([^'\n]+)`/g,
+      replacement: (match: string, content: string) => {
+        // Fix if it doesn't contain quotes
+        if (content && !content.includes("'") && !content.includes("`")) {
+          return `\`${content}\``;
+        }
+        return match;
+      }
+    },
+    // Backtick followed by single quote (more aggressive)
+    {
+      regex: /`([^`\n]+)'/g,
+      replacement: (match: string, content: string) => {
+        if (content && !content.includes("'") && !content.includes("`")) {
+          return `\`${content}\``;
+        }
+        return match;
+      }
+    },
+    // Pattern: `content', (backtick, content, single quote, comma)
+    {
+      regex: /`([^`\n]+)',/g,
+      replacement: (match: string, content: string) => {
+        if (content && !content.includes("'") && !content.includes("`")) {
+          return `\`${content}\`,`;
+        }
+        return match;
+      }
+    },
+  ];
+  
+  mixedQuotePatterns.forEach(({ regex, replacement }) => {
+    preprocessedCode = preprocessedCode.replace(regex, replacement);
+  });
+
+  // Create a sandboxed context with the mem API and only essential globals
+  const context = createContext({
+    mem: memApi,
+    // Essential JavaScript globals
+    console: {
+      log: (...args: unknown[]) =>
+        logger.info('Sandbox console.log', { arguments: args }),
+      error: (...args: unknown[]) =>
+        logger.error('Sandbox console.error', undefined, {
+          arguments: args,
+        }),
+      warn: (...args: unknown[]) =>
+        logger.warn('Sandbox console.warn', { arguments: args }),
+    },
+    // Promise and async support
+    Promise,
+    setTimeout: (fn: () => void, delay: number) => {
+      if (delay > 1000) {
+        throw new Error('Timeout too long');
+      }
+      return setTimeout(fn, Math.min(delay, 10000));
+    },
+    clearTimeout,
+    // Basic types and constructors
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Date,
+    Math,
+    JSON,
+    RegExp,
+    Error,
+  });
+
+  // Wrap the user code in an async IIFE to allow top-level await.
+  const wrappedCode = `(async () => {
+    ${preprocessedCode}
+  })();`;
+
+  try {
+    logger.debug('Executing code in sandbox', { code: preprocessedCode });
+    const result = await runInContext(wrappedCode, context, {
+      timeout: 10000, // 10 seconds
+      displayErrors: true,
+    });
+    logger.debug('Sandbox execution successful', { result, type: typeof result });
+    return result;
+  } catch (error) {
+    logger.error('Error executing sandboxed code', error as Error, {
+      code: preprocessedCode,
+    });
+    // Re-throw a sanitized error to the agent loop
+    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
+  }
+};
+````
+
 ## File: src/api/mcp.handler.ts
 ````typescript
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -3503,8 +3652,9 @@ export const createMCPHandler = (
     },
   ];
 
-  server.setRequestHandler(InitializeRequestSchema, async (_request) => {
+  server.setRequestHandler(InitializeRequestSchema, async (request) => {
     return {
+      id: request.id,
       protocolVersion: '2024-11-05',
       capabilities: {
         tools: {

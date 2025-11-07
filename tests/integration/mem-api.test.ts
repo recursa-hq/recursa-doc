@@ -74,7 +74,7 @@ describe('MemAPI Integration Tests', () => {
       'Security Error: Path traversal attempt detected.'
     );
 
-    await expect(mem.deleteFile(maliciousPath)).rejects.toThrow(
+    await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
       'Security Error: Path traversal attempt detected.'
     );
 
