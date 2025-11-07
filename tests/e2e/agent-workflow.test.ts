@@ -77,9 +77,9 @@ describe('Agent End-to-End Workflow', () => {
 const orgPath = 'AI Research Institute.md';
 const orgExists = await mem.fileExists(orgPath);
 if (!orgExists) {
-  await mem.writeFile(orgPath, '# AI Research Institute\\ntype:: organization\\n');
+  await mem.writeFile(orgPath, '# AI Research Institute\ntype:: organization\n');
 }
-await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\\ntype:: person\\naffiliation:: [[AI Research Institute]]\\nfield:: [[Symbolic Reasoning]]');
+await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]');
 </typescript>`;
     const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
 <typescript>
@@ -112,8 +112,19 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
     const thornePath = path.join(testGraphPath, 'Dr. Aris Thorne.md');
     const orgPath = path.join(testGraphPath, 'AI Research Institute.md');
-    await expect(fs.access(thornePath)).resolves.not.toThrow();
-    await expect(fs.access(orgPath)).resolves.not.toThrow();
+    
+    // Use fileExists pattern instead of fs.access()
+    const checkFileExists = async (filePath: string) => {
+      try {
+        await fs.access(filePath);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    
+    expect(await checkFileExists(thornePath)).toBe(true);
+    expect(await checkFileExists(orgPath)).toBe(true);
 
     // Verify file content. Read 'Dr. Aris Thorne.md' and check for `affiliation:: [[AI Research Institute]]`.
     const thorneContent = await fs.readFile(thornePath, 'utf-8');

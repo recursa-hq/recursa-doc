@@ -138,7 +138,18 @@ I've successfully created a new entry for Test Person in your knowledge base.
 
       // Verify the file was actually created
       const testPersonPath = path.join(tempDir, 'Test Person.md');
-      expect(await fs.access(testPersonPath)).not.toThrow();
+      
+      // Use fileExists pattern instead of fs.access()
+      const checkFileExists = async (filePath: string) => {
+        try {
+          await fs.access(filePath);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      
+      expect(await checkFileExists(testPersonPath)).toBe(true);
 
       const content = await fs.readFile(testPersonPath, 'utf-8');
       expect(content).toContain('# Test Person');
@@ -224,8 +235,18 @@ I've created entries for both Test Organization and John Doe, with proper linkin
       const orgPath = path.join(tempDir, 'Test Organization.md');
       const personPath = path.join(tempDir, 'John Doe.md');
 
-      expect(await fs.access(orgPath)).not.toThrow();
-      expect(await fs.access(personPath)).not.toThrow();
+      // Use fileExists pattern instead of fs.access()
+      const checkFileExists = async (filePath: string) => {
+        try {
+          await fs.access(filePath);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      
+      expect(await checkFileExists(orgPath)).toBe(true);
+      expect(await checkFileExists(personPath)).toBe(true);
 
       // Verify content and linking
       const orgContent = await fs.readFile(orgPath, 'utf-8');
@@ -560,8 +581,18 @@ Second file created and linked to the first.
       const file1Path = path.join(tempDir, 'Session Test 1.md');
       const file2Path = path.join(tempDir, 'Session Test 2.md');
 
-      expect(await fs.access(file1Path)).not.toThrow();
-      expect(await fs.access(file2Path)).not.toThrow();
+      // Use fileExists pattern instead of fs.access()
+      const checkFileExists = async (filePath: string) => {
+        try {
+          await fs.access(filePath);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      
+      expect(await checkFileExists(file1Path)).toBe(true);
+      expect(await checkFileExists(file2Path)).toBe(true);
 
       const file2Content = await fs.readFile(file2Path, 'utf-8');
       expect(file2Content).toContain('related:: [[Session Test 1]]');
@@ -632,9 +663,19 @@ Concurrent test completed successfully.
       });
 
       // Verify all files were created
+      // Use fileExists pattern instead of fs.access()
+      const checkFileExists = async (filePath: string) => {
+        try {
+          await fs.access(filePath);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      
       for (let i = 0; i < 5; i++) {
         const filePath = path.join(tempDir, 'Concurrent Test.md');
-        expect(await fs.access(filePath)).not.toThrow();
+        expect(await checkFileExists(filePath)).toBe(true);
       }
     });
   });

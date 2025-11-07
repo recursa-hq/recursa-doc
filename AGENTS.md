@@ -30,7 +30,7 @@
    ```bash
    git worktree add worktrees/$JOB_ID -b $JOB_ID
    tmux new-session -d -s $JOB_ID \
-     "cd worktrees/$JOB_ID && droid exec --skip-permissions-unsafe \
+     "cd worktrees/$JOB_ID && droid exec --skip-permissions-unsafe --output-format debug \
      'Read docs/*.md; accomplish \"$TASK_TEXT\"; replace every TODO/MOCK/PLACEHOLDER with production-ready code; commit; exit 0 when done.'"
    ```
    Else same command without worktree.
@@ -41,9 +41,9 @@
 2. `tmux capture-pane -t $SESSION -p` to watch real work.
 3. Fail/idle >20 min → mark `FAILED`, kill, clean worktree & branch, retry once.
 4. Keep 3–5 agents alive; spawn while ready tasks exist.
-5. When audit ready (all `DONE`), spawn multiple tmux sessions agents without isolated worktree, make sure they work at different scope areas:
+5. When audit ready (all `DONE`), spawn multiple non isolated:
    ```bash
-   droid exec --skip-permissions-unsafe "first, understand docs md files, then do ;
+   droid exec --skip-permissions-unsafe --output-format debug "
    1. Merge every job-* branch.
    2. Lint & auto-fix entire codebase.
    3. Run full test suite → 100 % pass.

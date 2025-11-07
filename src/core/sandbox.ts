@@ -1,4 +1,4 @@
-import { VM, type VMOptions } from 'vm2';
+import { createContext, runInContext } from 'node:vm';
 import type { MemAPI } from '../types/mem';
 import { logger } from '../lib/logger';
 
@@ -12,25 +12,68 @@ export const runInSandbox = async (
   code: string,
   memApi: MemAPI
 ): Promise<unknown> => {
-  const vm = new VM({
-    timeout: 10000, // 10 seconds
-    eval: false,
-    wasm: false,
-    fixAsync: true,
-    // Deny access to all node builtins by default.
-    require: { builtin: [] },
-  } as VMOptions);
-
-  // Freeze the mem API into the VM's global context.
-  vm.freeze(memApi, 'mem');
+  // Create a sandboxed context with the mem API and only essential globals
+  const context = createContext({
+    mem: memApi,
+    // Essential JavaScript globals
+    console: {
+      log: (...args: unknown[]) => logger.info('Sandbox console.log', args),
+      error: (...args: unknown[]) => logger.error('Sandbox console.error', args),
+      warn: (...args: unknown[]) => logger.warn('Sandbox console.warn', args),
+    },
+    // Promise and async support
+    Promise,
+    setTimeout: (fn: () => void, delay: number) => {
+      if (delay > 1000) {
+        throw new Error('Timeout too long');
+      }
+      return setTimeout(fn, Math.min(delay, 10000));
+    },
+    clearTimeout,
+    // Basic types and constructors
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Date,
+    Math,
+    JSON,
+    RegExp,
+    Error,
+  });
 
   // Wrap the user code in an async IIFE to allow top-level await.
-  const wrappedCode = `(async () => { ${code} })();`;
+  // Only escape newlines within string literals to avoid syntax errors
+  const escapedCode = code.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, (match, content) => {
+    return `'${content.replace(/\n/g, '\\n')}'`;
+  }).replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, (match, content) => {
+    return `"${content.replace(/\n/g, '\\n')}"`;
+  });
+  
+  const wrappedCode = `(async () => {
+    try {
+      // Helper function to unescape newlines
+      const unescape = (str) => str.replace(/\\\\n/g, '\\n');
+      const memWriteFile = mem.writeFile;
+      mem.writeFile = async (path, content) => memWriteFile(path, unescape(content));
+      
+      ${escapedCode}
+    } catch (error) {
+      throw new Error('Code execution error: ' + error.message);
+    }
+  })()`;
 
   try {
-    logger.debug('Executing code in sandbox', { code: wrappedCode });
-    const result = await vm.run(wrappedCode);
-    logger.debug('Sandbox execution successful', { result });
+    logger.debug('Executing code in sandbox', { 
+      wrappedCode,
+      originalCode: code 
+    });
+    const result = await runInContext(wrappedCode, context, {
+      timeout: 10000, // 10 seconds
+      displayErrors: true,
+    });
+    logger.debug('Sandbox execution successful', { result, type: typeof result });
     return result;
   } catch (error) {
     logger.error('Error executing sandboxed code', error as Error, {
