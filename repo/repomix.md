@@ -62,6 +62,28 @@ tsconfig.tsbuildinfo
 
 # Files
 
+## File: src/core/mem-api/fs-walker.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+
+/**
+ * Asynchronously and recursively walks a directory, yielding the full path of each file.
+ * @param dir The directory to walk.
+ * @returns An async generator that yields file paths.
+ */
+export async function* walk(dir: string): AsyncGenerator<string> {
+  for await (const d of await fs.opendir(dir)) {
+    const entry = path.join(dir, d.name);
+    if (d.isDirectory()) {
+      yield* walk(entry);
+    } else if (d.isFile()) {
+      yield entry;
+    }
+  }
+}
+````
+
 ## File: src/lib/events.ts
 ````typescript
 type Listener<T = unknown> = (data: T) => void;
@@ -143,28 +165,6 @@ export const createEmitter = <
     once,
   };
 };
-````
-
-## File: src/core/mem-api/fs-walker.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-
-/**
- * Asynchronously and recursively walks a directory, yielding the full path of each file.
- * @param dir The directory to walk.
- * @returns An async generator that yields file paths.
- */
-export async function* walk(dir: string): AsyncGenerator<string> {
-  for await (const d of await fs.opendir(dir)) {
-    const entry = path.join(dir, d.name);
-    if (d.isDirectory()) {
-      yield* walk(entry);
-    } else if (d.isFile()) {
-      yield entry;
-    }
-  }
-}
 ````
 
 ## File: src/types/loop.ts
@@ -885,217 +885,6 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
 }
 ````
 
-## File: tsconfig.tsbuildinfo
-````
-{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
-````
-
-## File: docs/readme.md
-````markdown
-# Recursa: The Git-Native Memory Layer for Local-First LLMs
-
-**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
-
-**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
-
-Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
-
----
-
-## The Problem: Agent Amnesia & The RAG Ceiling
-
-You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
-
-1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
-2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
-3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
-
-Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
-
-## The Recursa Philosophy: Core Features
-
-Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
-
-- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
-- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
-- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
-- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
-
-## How It Works: Architecture
-
-Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
-
-```mermaid
-graph TD
-    subgraph Your Local Machine
-        A[MCP Client <br> e.g., your script, or a compatible editor]
-        B[Recursa MCP Server <br> (This Project)]
-        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
-
-        A -- 1. User Query via Stdio --> B
-        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
-        B -- 3. Executes Sandboxed Code --> C
-        C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply & Notifications --> A
-    end
-
-    subgraph Cloud Service
-        D
-    end
-
-    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
-    style B fill:#fff2cc,stroke:#333,stroke-width:2px
-```
-
-1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
-3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
-4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
-5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
-
-## An Agent in Action: Example Workflow
-
-**Scenario:** An agent is asked to learn about a new person.
-
-**1. User Query:**
-"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
-
-**2. Turn 1: The agent communicates its intent and acts efficiently.**
-The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
-
-**LLM Response (Turn 1):**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    '# AI Research Institute\ntype:: organization\n'
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
-);
-</typescript>
-```
-
-_Recursa executes the code and confirms success to the LLM._
-
-**3. Turn 2: The agent saves its work and replies to the user.**
-Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
-
-**LLM Response (Turn 2):**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
-- An [OpenRouter.ai](https://openrouter.ai/) API Key
-
-### 1. Installation
-
-```bash
-git clone https://github.com/your-username/recursa.git
-cd recursa
-npm install
-```
-
-### 2. Configuration
-
-Create a `.env` file in the root of the project by copying the example:
-
-```bash
-cp .env.example .env
-```
-
-Now, edit your `.env` file with your details:
-
-```env
-# Your OpenRouter API Key
-OPENROUTER_API_KEY="sk-or-..."
-
-# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
-KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
-
-# The model you want to use from OpenRouter
-LLM_MODEL="anthropic/claude-3-sonnet-20240229"
-```
-
-### 3. Running the Server
-
-```bash
-bun run start
-```
-
-This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
-
-## 🗺️ Roadmap
-
-Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
-
-- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
-- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
-- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
-- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
-- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
-
-## 🧑‍💻 Contributing
-
-Recursa is designed to be hacked on. Contributions are welcome!
-
-### Adding New Tools
-
-To add a new tool (e.g., `mem.searchWeb(query)`):
-
-1.  Implement the function's logic in a file within `src/core/mem-api/`.
-2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
-3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
-4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
-5.  Open a Pull Request!
-
-## 📜 License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-**Stop building infrastructure. Start building intelligence.**
-````
-
-## File: docs/rules.md
-````markdown
-codebase compliance rules;
-
-1. No OOP, only HOFs
-2. Use bun.sh and e2e type safe TypeScript
-3. No unknown or any type
-4. [e2e|integration|unit]/[domain].test.ts files & dirs
-5. Bun tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
-6. DRY
-````
-
 ## File: docs/system-prompt.md
 ````markdown
 # Recursa Agent System Prompt
@@ -1648,6 +1437,217 @@ LLM_MODEL="mock-test-model"
 }
 ````
 
+## File: tsconfig.tsbuildinfo
+````
+{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
+````
+
+## File: docs/readme.md
+````markdown
+# Recursa: The Git-Native Memory Layer for Local-First LLMs
+
+**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
+
+**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
+
+Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+
+---
+
+## The Problem: Agent Amnesia & The RAG Ceiling
+
+You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
+
+1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
+2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
+3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
+
+Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
+
+## The Recursa Philosophy: Core Features
+
+Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
+
+- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
+- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
+- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
+- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
+
+## How It Works: Architecture
+
+Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
+
+```mermaid
+graph TD
+    subgraph Your Local Machine
+        A[MCP Client <br> e.g., your script, or a compatible editor]
+        B[Recursa MCP Server <br> (This Project)]
+        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
+
+        A -- 1. User Query via Stdio --> B
+        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
+        B -- 3. Executes Sandboxed Code --> C
+        C -- 4. Reads/Writes .md files --> C
+        B -- 5. Final Reply & Notifications --> A
+    end
+
+    subgraph Cloud Service
+        D
+    end
+
+    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
+    style B fill:#fff2cc,stroke:#333,stroke-width:2px
+```
+
+1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
+2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
+3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
+4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
+5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
+
+## An Agent in Action: Example Workflow
+
+**Scenario:** An agent is asked to learn about a new person.
+
+**1. User Query:**
+"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
+
+**2. Turn 1: The agent communicates its intent and acts efficiently.**
+The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
+
+**LLM Response (Turn 1):**
+
+```xml
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
+<typescript>
+// Perform all logic in one block for maximum efficiency.
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    '# AI Research Institute\ntype:: organization\n'
+  );
+}
+
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
+);
+</typescript>
+```
+
+_Recursa executes the code and confirms success to the LLM._
+
+**3. Turn 2: The agent saves its work and replies to the user.**
+Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
+
+**LLM Response (Turn 2):**
+
+```xml
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>
+```
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
+- An [OpenRouter.ai](https://openrouter.ai/) API Key
+
+### 1. Installation
+
+```bash
+git clone https://github.com/your-username/recursa.git
+cd recursa
+npm install
+```
+
+### 2. Configuration
+
+Create a `.env` file in the root of the project by copying the example:
+
+```bash
+cp .env.example .env
+```
+
+Now, edit your `.env` file with your details:
+
+```env
+# Your OpenRouter API Key
+OPENROUTER_API_KEY="sk-or-..."
+
+# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
+KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# The model you want to use from OpenRouter
+LLM_MODEL="anthropic/claude-3-sonnet-20240229"
+```
+
+### 3. Running the Server
+
+```bash
+bun run start
+```
+
+This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
+
+## 🗺️ Roadmap
+
+Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
+
+- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
+- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
+- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
+- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
+- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
+
+## 🧑‍💻 Contributing
+
+Recursa is designed to be hacked on. Contributions are welcome!
+
+### Adding New Tools
+
+To add a new tool (e.g., `mem.searchWeb(query)`):
+
+1.  Implement the function's logic in a file within `src/core/mem-api/`.
+2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
+3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
+4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
+5.  Open a Pull Request!
+
+## 📜 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+**Stop building infrastructure. Start building intelligence.**
+````
+
+## File: docs/rules.md
+````markdown
+codebase compliance rules;
+
+1. No OOP, only HOFs
+2. Use bun.sh and e2e type safe TypeScript
+3. No unknown or any type
+4. [e2e|integration|unit]/[domain].test.ts files & dirs
+5. Bun tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
+6. DRY
+````
+
 ## File: src/types/index.ts
 ````typescript
 export * from './mem.js';
@@ -2068,56 +2068,10 @@ export const parseLLMResponse = (response: string): ParsedLLMResponse => {
     return match && match[1] ? match[1].trim() : undefined;
   };
 
-  // Parse structured tags
-  let think = extractTagContent('think');
-  let typescript = extractTagContent('typescript');
-  let reply = extractTagContent('reply');
-  
-  // Handle malformed responses: if no think tag but there's content before the first XML tag,
-  // treat that content as the think content
-  if (!think) {
-    const firstTagMatch = response.match(/<[^>]+>/);
-    if (firstTagMatch) {
-      const contentBeforeFirstTag = response.substring(0, firstTagMatch.index).trim();
-      if (contentBeforeFirstTag) {
-        think = contentBeforeFirstTag;
-      }
-    }
-  }
-
-  // Handle malformed responses or alternative formats
-  if (!think && !typescript && !reply) {
-    // Try to extract any content that looks like a reply (text after XML-like tags)
-    const lines = response.split('\n').filter(line => line.trim());
-    const nonTagLines = lines.filter(line => !line.trim().match(/^<[^>]+>$/));
-    
-    if (nonTagLines.length > 0) {
-      // If there's content that's not just tags, treat it as a reply
-      const lastLineIndex = response.lastIndexOf('>');
-      if (lastLineIndex > 0 && lastLineIndex < response.length - 1) {
-        reply = response.substring(lastLineIndex + 1).trim();
-      } else if (nonTagLines.length === 1) {
-          reply = nonTagLines[0]!.trim();
-      }
-    }
-  }
-
-  // Handle cases where reply is embedded in XML-like structure but without explicit tags
-  if (!reply && typescript && think) {
-    // If we have think and typescript but no reply, there might be content after the typescript block
-    const tsEndIndex = response.lastIndexOf('</typescript>');
-    if (tsEndIndex > 0 && tsEndIndex < response.length - 1) {
-      const afterTs = response.substring(tsEndIndex + 13).trim();
-      if (afterTs && !afterTs.startsWith('<')) {
-        reply = afterTs;
-      }
-    }
-  }
-
   return {
-    think,
-    typescript,
-    reply,
+    think: extractTagContent('think'),
+    typescript: extractTagContent('typescript'),
+    reply: extractTagContent('reply'),
   };
 };
 ````
@@ -2327,7 +2281,7 @@ export interface MCPServerConfig {
 import 'dotenv/config';
 import { z } from 'zod';
 import path from 'path';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
@@ -2344,7 +2298,7 @@ export type AppConfig = {
   llmModel: string;
 };
 
-export const loadAndValidateConfig = (): AppConfig => {
+export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   const parseResult = configSchema.safeParse(process.env);
 
   if (!parseResult.success) {
@@ -2373,7 +2327,7 @@ export const loadAndValidateConfig = (): AppConfig => {
   // so we should skip this check. `bun test` automatically sets NODE_ENV=test.
   if (process.env.NODE_ENV !== 'test') {
     try {
-      const stats = fs.statSync(resolvedPath);
+      const stats = await fs.stat(resolvedPath);
       if (!stats.isDirectory()) {
         throw new Error('is not a directory.');
       }
@@ -2394,8 +2348,6 @@ export const loadAndValidateConfig = (): AppConfig => {
     llmModel: LLM_MODEL!,
   });
 };
-
-export const config: AppConfig = loadAndValidateConfig();
 ````
 
 ## File: .env.example
@@ -2410,8 +2362,9 @@ KNOWLEDGE_GRAPH_PATH=./knowledge-graph
 # Get your API key from: https://openrouter.ai/keys
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 
-# Optional: OpenRouter model to use (default: anthropic/claude-3.5-sonnet)
-OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
+# See https://openrouter.ai/models for a list of available models
+LLM_MODEL=anthropic/claude-3-haiku-20240307
 
 # Optional: LLM Configuration
 LLM_TEMPERATURE=0.7
@@ -2827,13 +2780,12 @@ import {
   beforeEach,
 } from 'bun:test';
 import { handleUserQuery } from '../../src/core/loop';
-import type { AppConfig } from '../../src/config';
+import { type AppConfig, loadAndValidateConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
-import { config as appConfig } from '../../src/config';
 
 // This is a test-scoped override for the LLM call.
 // It allows us to simulate the LLM's responses without making network requests.
@@ -2856,10 +2808,12 @@ const createMockQueryLLM = (responses: string[]) => {
 };
 
 describe('Agent End-to-End Workflow', () => {
+  let appConfig: AppConfig;
   let testGraphPath: string;
   let testConfig: AppConfig;
 
   beforeAll(async () => {
+    appConfig = await loadAndValidateConfig();
     // Set up a temporary directory for the knowledge graph.
     testGraphPath = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-'));
     testConfig = { ...appConfig, knowledgeGraphPath: testGraphPath };
@@ -3001,157 +2955,6 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
   },
   "license": "MIT"
 }
-````
-
-## File: tests/integration/mem-api.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Integration Tests', () => {
-  let tempDir: string;
-  let mem: MemAPI;
-
-  // Provide a full mock config
-  const mockConfig: AppConfig = {
-    knowledgeGraphPath: '', // This will be set in beforeAll,
-    openRouterApiKey: 'test-key',
-    llmModel: 'test-model',
-  };
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
-    mockConfig.knowledgeGraphPath = tempDir;
-  });
-
-  beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-    // Init git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-    // Create the mem API instance for this test, it's now AppConfig
-    mem = createMemAPI(mockConfig as AppConfig);
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  it('should write, read, and check existence of a file', async () => {
-    const filePath = 'test.md';
-    const content = 'hello world';
-
-    await mem.writeFile(filePath, content);
-
-    const readContent = await mem.readFile(filePath);
-    expect(readContent).toBe(content);
-
-    const exists = await mem.fileExists(filePath);
-    expect(exists).toBe(true);
-
-    const nonExistent = await mem.fileExists('not-real.md');
-    expect(nonExistent).toBe(false);
-  });
-
-  it('should throw an error for path traversal attempts', async () => {
-    const maliciousPath = '../../../etc/passwd';
-
-    await expect(mem.readFile(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-
-    await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-
-    await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-
-    await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
-    );
-  });
-
-  it('should commit a change and log it', async () => {
-    const filePath = 'a.md';
-    const content = 'content';
-    const commitMessage = 'feat: add a.md';
-
-    await mem.writeFile(filePath, content);
-
-    const commitHash = await mem.commitChanges(commitMessage);
-
-    expect(typeof commitHash).toBe('string');
-    expect(commitHash.length).toBeGreaterThan(5);
-
-    const log = await mem.gitLog(filePath, 1);
-
-    expect(log.length).toBe(1);
-    expect(log[0].message).toBe(commitMessage);
-  });
-
-  it('should list files in a directory', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.writeFile('b.txt', 'b');
-    await mem.createDir('subdir');
-    await mem.writeFile('subdir/c.txt', 'c');
-
-    const rootFiles = await mem.listFiles();
-    expect(rootFiles).toEqual(
-      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
-    );
-    expect(rootFiles.length).toBeGreaterThanOrEqual(3);
-
-    const subdirFiles = await mem.listFiles('subdir');
-    expect(subdirFiles).toEqual(['c.txt']);
-
-    await mem.createDir('empty');
-    const emptyFiles = await mem.listFiles('empty');
-    expect(emptyFiles).toEqual([]);
-  });
-
-  it('should query the graph with multiple conditions', async () => {
-    const pageAContent = `
-# Page A
-prop:: value
-
-Link to [[Page B]].
-    `;
-    const pageBContent = `
-# Page B
-prop:: other
-
-No links here.
-    `;
-
-    await mem.writeFile('PageA.md', pageAContent);
-    await mem.writeFile('PageB.md', pageBContent);
-
-    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
-    const results = await mem.queryGraph(query);
-
-    expect(results.length).toBe(1);
-    expect(results[0].filePath).toBe('PageA.md');
-  });
-});
 ````
 
 ## File: repomix.config.json
@@ -3305,6 +3108,157 @@ No links here.
 - **status**: CLAIMED
 - **job-id**: job-aff105b8
 - **depends-on**: [task-1, task-2, task-3, task-4, task-5, task-6, task-7, task-8, task-9, task-10]
+````
+
+## File: tests/integration/mem-api.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from 'bun:test';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import simpleGit from 'simple-git';
+import { createMemAPI } from '../../src/core/mem-api';
+import type { AppConfig } from '../../src/config';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Integration Tests', () => {
+  let tempDir: string;
+  let mem: MemAPI;
+
+  // Provide a full mock config
+  const mockConfig: AppConfig = {
+    knowledgeGraphPath: '', // This will be set in beforeAll,
+    openRouterApiKey: 'test-key',
+    llmModel: 'test-model',
+  };
+
+  beforeAll(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
+    mockConfig.knowledgeGraphPath = tempDir;
+  });
+
+  beforeEach(async () => {
+    // Clear the directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+    // Init git
+    const git = simpleGit(tempDir);
+    await git.init();
+    await git.addConfig('user.name', 'Test User');
+    await git.addConfig('user.email', 'test@example.com');
+    // Create the mem API instance for this test, it's now AppConfig
+    mem = createMemAPI(mockConfig as AppConfig);
+  });
+
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('should write, read, and check existence of a file', async () => {
+    const filePath = 'test.md';
+    const content = 'hello world';
+
+    await mem.writeFile(filePath, content);
+
+    const readContent = await mem.readFile(filePath);
+    expect(readContent).toBe(content);
+
+    const exists = await mem.fileExists(filePath);
+    expect(exists).toBe(true);
+
+    const nonExistent = await mem.fileExists('not-real.md');
+    expect(nonExistent).toBe(false);
+  });
+
+  it('should throw an error for path traversal attempts', async () => {
+    const maliciousPath = '../../../etc/passwd';
+
+    await expect(mem.readFile(maliciousPath)).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+
+    await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+
+    await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+
+    await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
+      'Security Error: Path traversal attempt detected.'
+    );
+  });
+
+  it('should commit a change and log it', async () => {
+    const filePath = 'a.md';
+    const content = 'content';
+    const commitMessage = 'feat: add a.md';
+
+    await mem.writeFile(filePath, content);
+
+    const commitHash = await mem.commitChanges(commitMessage);
+
+    expect(typeof commitHash).toBe('string');
+    expect(commitHash.length).toBeGreaterThan(5);
+
+    const log = await mem.gitLog(filePath, 1);
+
+    expect(log.length).toBe(1);
+    expect(log[0].message).toBe(commitMessage);
+  });
+
+  it('should list files in a directory', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.writeFile('b.txt', 'b');
+    await mem.createDir('subdir');
+    await mem.writeFile('subdir/c.txt', 'c');
+
+    const rootFiles = await mem.listFiles();
+    expect(rootFiles).toEqual(
+      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
+    );
+    expect(rootFiles.length).toBeGreaterThanOrEqual(3);
+
+    const subdirFiles = await mem.listFiles('subdir');
+    expect(subdirFiles).toEqual(['c.txt']);
+
+    await mem.createDir('empty');
+    const emptyFiles = await mem.listFiles('empty');
+    expect(emptyFiles).toEqual([]);
+  });
+
+  it('should query the graph with multiple conditions', async () => {
+    const pageAContent = `
+# Page A
+prop:: value
+
+Link to [[Page B]].
+    `;
+    const pageBContent = `
+# Page B
+prop:: other
+
+No links here.
+    `;
+
+    await mem.writeFile('PageA.md', pageAContent);
+    await mem.writeFile('PageB.md', pageBContent);
+
+    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
+    const results = await mem.queryGraph(query);
+
+    expect(results.length).toBe(1);
+    expect(results[0].filePath).toBe('PageA.md');
+  });
+});
 ````
 
 ## File: src/core/mem-api/graph-ops.ts
@@ -3490,7 +3444,7 @@ import { parseLLMResponse } from './parser';
 import { runInSandbox } from './sandbox';
 import { createMemAPI } from './mem-api';
 import { randomUUID } from 'crypto';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 
 // A mock in-memory session store. In a real app, this might be Redis, a DB, or a file store.
@@ -3498,7 +3452,7 @@ const sessionHistories: Record<string, ChatMessage[]> = {};
 
 let systemPromptMessage: ChatMessage | null = null;
 
-const getSystemPrompt = (): ChatMessage => {
+const getSystemPrompt = async (): Promise<ChatMessage> => {
   // This function reads the system prompt from disk on its first call and caches it.
   // This is a form of lazy-loading and ensures the file is read only once.
   if (systemPromptMessage) {
@@ -3509,8 +3463,8 @@ const getSystemPrompt = (): ChatMessage => {
     // Resolve the path to 'docs/system-prompt.md' from the project root.
     const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
 
-    // Read the file content synchronously.
-    const systemPromptContent = fs.readFileSync(promptPath, 'utf-8');
+    // Read the file content asynchronously.
+    const systemPromptContent = await fs.readFile(promptPath, 'utf-8');
 
     // Create the ChatMessage object and store it in `systemPromptMessage`.
     systemPromptMessage = {
@@ -3522,12 +3476,13 @@ const getSystemPrompt = (): ChatMessage => {
     return systemPromptMessage;
   } catch (error) {
     // If file read fails, log a critical error and exit, as the agent cannot run without it.
-    logger.error('Failed to load system prompt file', error as Error, {
+    const errorMessage = 'Failed to load system prompt file';
+    logger.error(errorMessage, error as Error, {
       path: path.resolve(process.cwd(), 'docs/system-prompt.md'),
     });
 
-    // Exit the process with a non-zero code to indicate failure
-    process.exit(1);
+    // Throw an error to be caught by the server's main function
+    throw new Error(errorMessage, { cause: error });
   }
 };
 
@@ -3552,9 +3507,9 @@ export const handleUserQuery = async (
 
   // Initialize or retrieve session history
   if (!sessionHistories[currentSessionId]) {
-    sessionHistories[currentSessionId] = [getSystemPrompt()];
+    sessionHistories[currentSessionId] = [await getSystemPrompt()];
   }
-  
+
   const history = sessionHistories[currentSessionId];
   history.push({ role: 'user', content: query });
 
@@ -3646,9 +3601,7 @@ export const handleUserQuery = async (
           // Safely serialize result for logging
           result: JSON.stringify(executionResult, null, 2),
         });
-        const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(
-          executionResult
-        )}`;
+        const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(executionResult)}`;
         context.history.push({ role: 'user', content: feedback });
 
         // Send success status update
@@ -3664,7 +3617,9 @@ export const handleUserQuery = async (
         }
       } catch (e) {
         logger.error('Code execution failed', e as Error, { runId });
-        const feedback = `[Execution Error]: ${(e as Error).message}`;
+        const feedback = `[Execution Error]: Your code failed to execute. Error: ${
+          (e as Error).message
+        }. You must analyze this error and correct your code in the next turn.`;
         context.history.push({ role: 'user', content: feedback });
 
         // Send error status update
@@ -3700,31 +3655,6 @@ import type { MemAPI } from '../types/mem';
 import { logger } from '../lib/logger';
 
 /**
- * Preprocesses code to fix common syntax issues from LLM output. The primary
- * issue is multiline strings in single/double quotes, which are invalid in
- * JS/TS and should be template literals.
- * @param code The raw TypeScript code from the LLM.
- * @returns The preprocessed code.
- */
-const preprocessCode = (code: string): string => {
-  // Fix multiline strings in single quotes: '...\n...' -> `...\n...`
-  const singleQuotePattern = /'((?:[^'\\]|\\.)*?\n(?:[^'\\]|\\.)*?)'/g;
-  let processedCode = code.replace(
-    singleQuotePattern,
-    (_match, content) => `\`${content.replace(/`/g, '\\`')}\``
-  );
-
-  // Fix multiline strings in double quotes: "...\n..." -> `...\n...`
-  const doubleQuotePattern = /"((?:[^"\\]|\\.)*?\n(?:[^"\\]|\\.)*?)"/g;
-  processedCode = processedCode.replace(
-    doubleQuotePattern,
-    (_match, content) => `\`${content.replace(/`/g, '\\`')}\``
-  );
-
-  return processedCode;
-};
-
-/**
  * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
  * @param code The TypeScript code snippet to execute.
  * @param memApi The MemAPI instance to expose to the sandboxed code.
@@ -3734,8 +3664,6 @@ export const runInSandbox = async (
   code: string,
   memApi: MemAPI
 ): Promise<unknown> => {
-  // Preprocess the code to fix common LLM-generated syntax errors.
-  const preprocessedCode = preprocessCode(code);
   // Create a sandboxed context with the mem API and only essential globals
   const context = createContext({
     mem: memApi,
@@ -3774,11 +3702,11 @@ export const runInSandbox = async (
 
   // Wrap the user code in an async IIFE to allow top-level await.
   const wrappedCode = `(async () => {
-    ${preprocessedCode}
+    ${code}
   })();`;
 
   try {
-    logger.debug('Executing code in sandbox', { code: preprocessedCode });
+    logger.debug('Executing code in sandbox', { code });
     const result = await runInContext(wrappedCode, context, {
       timeout: 10000, // 10 seconds
       displayErrors: true,
@@ -3786,9 +3714,7 @@ export const runInSandbox = async (
     logger.debug('Sandbox execution successful', { result, type: typeof result });
     return result;
   } catch (error) {
-    logger.error('Error executing sandboxed code', error as Error, {
-      code: preprocessedCode,
-    });
+    logger.error('Error executing sandboxed code', error as Error, { code });
     // Re-throw a sanitized error to the agent loop
     throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
   }
@@ -3985,7 +3911,7 @@ export const createMCPHandler = (
 import { createMCPHandler } from './api/mcp.handler.js';
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
-import { config } from './config.js';
+import { loadAndValidateConfig } from './config.js';
 import { createMemAPI } from './core/mem-api/index.js';
 import { createEmitter } from './lib/events.js';
 import type { StatusUpdate } from './types/loop.js';
@@ -3993,24 +3919,32 @@ import type { StatusUpdate } from './types/loop.js';
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
 
-  // 1. Initialize dependencies
-  const emitter = createEmitter<Record<string, StatusUpdate>>();
-  const memApi = createMemAPI(config);
+  try {
+    // 1. Load configuration
+    const config = await loadAndValidateConfig();
 
-  // 2. Create the MCP handler, injecting dependencies
-  const { server, transport } = createMCPHandler(
-    memApi,
-    config.knowledgeGraphPath,
-    config,
-    handleUserQuery,
-    emitter
-  );
+    // 2. Initialize dependencies
+    const emitter = createEmitter<Record<string, StatusUpdate>>();
+    const memApi = createMemAPI(config);
 
-  // 3. Start listening for requests over stdio
-  await transport.start();
-  await server.connect(transport);
+    // 3. Create the MCP handler, injecting dependencies
+    const { server, transport } = createMCPHandler(
+      memApi,
+      config.knowledgeGraphPath,
+      config,
+      handleUserQuery,
+      emitter
+    );
 
-  logger.info('Recursa MCP Server is running and listening on stdio.');
+    // 4. Start listening for requests over stdio
+    await transport.start();
+    await server.connect(transport);
+
+    logger.info('Recursa MCP Server is running and listening on stdio.');
+  } catch (error) {
+    logger.error('Failed to start server', error as Error);
+    process.exit(1);
+  }
 };
 
 main();

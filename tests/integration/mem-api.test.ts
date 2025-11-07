@@ -144,4 +144,33 @@ No links here.
     expect(results.length).toBe(1);
     expect(results[0].filePath).toBe('PageA.md');
   });
+
+  it('should update a file atomically and fail if content changes', async () => {
+    const filePath = 'atomic.txt';
+    const originalContent = 'version 1';
+    const newContent = 'version 2';
+
+    // 1. Successful update
+    await mem.writeFile(filePath, originalContent);
+    const success = await mem.updateFile(filePath, originalContent, newContent);
+    expect(success).toBe(true);
+    const readContent1 = await mem.readFile(filePath);
+    expect(readContent1).toBe(newContent);
+
+    // 2. Failed update (content changed underneath)
+    const currentContent = await mem.readFile(filePath); // "version 2"
+    const nextContent = 'version 3';
+
+    // Simulate another process changing the file
+    await fs.writeFile(path.join(tempDir, filePath), 'version 2.5');
+
+    // The update should fail because 'currentContent' ("version 2") no longer matches the file on disk ("version 2.5")
+    await expect(
+      mem.updateFile(filePath, currentContent, nextContent)
+    ).rejects.toThrow('File content has changed since it was last read');
+
+    // Verify the file was NOT changed
+    const readContent2 = await mem.readFile(filePath);
+    expect(readContent2).toBe('version 2.5');
+  });
 });

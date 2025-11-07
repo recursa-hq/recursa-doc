@@ -7,13 +7,12 @@ import {
   beforeEach,
 } from 'bun:test';
 import { handleUserQuery } from '../../src/core/loop';
-import type { AppConfig } from '../../src/config';
+import { type AppConfig, loadAndValidateConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
-import { config as appConfig } from '../../src/config';
 
 // This is a test-scoped override for the LLM call.
 // It allows us to simulate the LLM's responses without making network requests.
@@ -36,10 +35,12 @@ const createMockQueryLLM = (responses: string[]) => {
 };
 
 describe('Agent End-to-End Workflow', () => {
+  let appConfig: AppConfig;
   let testGraphPath: string;
   let testConfig: AppConfig;
 
   beforeAll(async () => {
+    appConfig = await loadAndValidateConfig();
     // Set up a temporary directory for the knowledge graph.
     testGraphPath = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-'));
     testConfig = { ...appConfig, knowledgeGraphPath: testGraphPath };

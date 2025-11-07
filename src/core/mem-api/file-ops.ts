@@ -48,21 +48,20 @@ export const updateFile =
     const fullPath = resolveSecurePath(graphRoot, filePath);
 
     try {
-      // Read the current file content
+      // Atomically read and compare the file content.
       const currentContent = await fs.readFile(fullPath, 'utf-8');
 
-      // Verify the old content exists
-      if (!currentContent.includes(oldContent)) {
+      // This is a Compare-and-Swap (CAS) operation.
+      // If the content on disk is not what the agent *thinks* it is,
+      // another process (or agent turn) has modified it. We must abort.
+      if (currentContent !== oldContent) {
         throw new Error(
-          `File content does not match expected old content in ${filePath}`
+          `File content has changed since it was last read for ${filePath}. Update aborted to prevent data loss.`
         );
       }
 
-      // Replace the content
-      const updatedContent = currentContent.replace(oldContent, newContent);
-
-      // Write the new content back
-      await fs.writeFile(fullPath, updatedContent, 'utf-8');
+      // Write the new content back.
+      await fs.writeFile(fullPath, newContent, 'utf-8');
       return true;
     } catch (error) {
       throw new Error(
