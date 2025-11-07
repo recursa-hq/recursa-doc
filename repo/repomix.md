@@ -11,6 +11,7 @@ src/
   core/
     mem-api/
       file-ops.ts
+      fs-walker.ts
       git-ops.ts
       graph-ops.ts
       index.ts
@@ -22,6 +23,7 @@ src/
     parser.ts
     sandbox.ts
   lib/
+    event-emitter.ts
     logger.ts
   types/
     git.ts
@@ -36,15 +38,10 @@ src/
 tests/
   e2e/
     agent-workflow.test.ts
-    mcp-server-complete.test.ts
+    mcp-protocol.test.ts
   integration/
-    basic-think-act-commit.test.ts
-    end-to-e2e.test.ts
-    end-to-end.test.ts
-    mcp-server-http.test.ts
     mem-api.test.ts
-    think-act-commit.test.ts
-    workflow-integration.test.ts
+    workflow.test.ts
   unit/
     llm.test.ts
     parser.test.ts
@@ -64,6 +61,627 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
+
+## File: src/core/mem-api/fs-walker.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+
+/**
+ * Asynchronously and recursively walks a directory, yielding the full path of each file.
+ * @param dir The directory to walk.
+ * @returns An async generator that yields file paths.
+ */
+export async function* walk(dir: string): AsyncGenerator<string> {
+  for await (const d of await fs.opendir(dir)) {
+    const entry = path.join(dir, d.name);
+    if (d.isDirectory()) {
+      yield* walk(entry);
+    } else if (d.isFile()) {
+      yield entry;
+    }
+  }
+}
+````
+
+## File: src/lib/event-emitter.ts
+````typescript
+type Listener<T = unknown> = (data: T) => void;
+
+export class EventEmitter<
+  Events extends Record<string, unknown> = Record<string, unknown>,
+> {
+  private listeners: { [K in keyof Events]?: Listener<Events[K]>[] } = {};
+
+  on<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void {
+    if (!this.listeners[event]) {
+      this.listeners[event] = [];
+    }
+    this.listeners[event]?.push(listener);
+  }
+
+  off<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void {
+    if (!this.listeners[event]) {
+      return;
+    }
+    this.listeners[event] = this.listeners[event]?.filter(
+      (l) => l !== listener
+    );
+  }
+
+  emit<K extends keyof Events>(event: K, data: Events[K]): void {
+    this.listeners[event]?.forEach((listener) => {
+      try {
+        listener(data);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(`Error in event listener for ${String(event)}`, e);
+      }
+    });
+  }
+
+  once<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void {
+    const onceListener: Listener<Events[K]> = (data) => {
+      this.off(event, onceListener);
+      listener(data);
+    };
+    this.on(event, onceListener);
+  }
+}
+````
+
+## File: tests/e2e/mcp-protocol.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from 'bun:test';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import type { Subprocess } from 'bun';
+import { randomUUID } from 'crypto';
+
+// Helper to read newline-delimited JSON from a stream
+async function* readMessages(
+  stream: ReadableStream<Uint8Array>
+): AsyncGenerator<any> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // Keep the last partial line
+
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          yield JSON.parse(line);
+        } catch (e) {
+          console.error('Failed to parse JSON line:', line);
+        }
+      }
+    }
+  }
+}
+
+describe('MCP Protocol E2E Test', () => {
+  let tempDir: string;
+  let proc: Subprocess | undefined;
+
+  beforeAll(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-mcp-e2e-'));
+  });
+
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    // Ensure the temp directory exists and is clean for the knowledge graph
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+
+    // Spawn the server as a child process for testing
+    proc = Bun.spawn(['bun', 'run', 'src/server.ts'], {
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: {
+        ...process.env,
+        KNOWLEDGE_GRAPH_PATH: tempDir,
+        OPENROUTER_API_KEY: 'mock-key-for-e2e-test',
+      },
+    });
+  });
+
+  afterEach(() => {
+    // Ensure the child process is terminated after each test
+    proc?.kill();
+    proc = undefined;
+  });
+
+  it('should initialize and list tools correctly', async () => {
+    if (!proc) throw new Error('Process not started');
+
+    const writer = proc.stdin.getWriter();
+    const reader = readMessages(proc.stdout);
+
+    // 1. Send initialize request
+    const initRequestId = randomUUID();
+    const initRequest = {
+      id: initRequestId,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        clientInfo: { name: 'test-client', version: '1.0.0' },
+      },
+    };
+    await writer.write(JSON.stringify(initRequest) + '\n');
+
+    // 2. Await and verify initialize response
+    const initResponse = await reader.next();
+    expect(initResponse.done).toBe(false);
+    expect(initResponse.value.id).toBe(initRequestId);
+    expect(initResponse.value.result.serverInfo.name).toBe('recursa-server');
+
+    // 3. Send list-tools request
+    const listToolsRequestId = randomUUID();
+    const listToolsRequest = {
+      id: listToolsRequestId,
+      method: 'list-tools',
+      params: {},
+    };
+    await writer.write(JSON.stringify(listToolsRequest) + '\n');
+
+    // 4. Await and verify list-tools response
+    const listToolsResponse = await reader.next();
+    expect(listToolsResponse.done).toBe(false);
+    expect(listToolsResponse.value.id).toBe(listToolsRequestId);
+    expect(listToolsResponse.value.result.tools).toBeArray();
+    expect(listToolsResponse.value.result.tools.length).toBeGreaterThan(0);
+    const processQueryTool = listToolsResponse.value.result.tools.find(
+      (t: any) => t.name === 'process_query'
+    );
+    expect(processQueryTool).toBeDefined();
+    expect(processQueryTool.description).toBeString();
+
+    // NOTE: Testing the 'call-tool' for 'process_query' is intentionally omitted here.
+    // A true process-level E2E test for the agent loop would require either:
+    // a) A live network connection and a valid LLM API key, making the test non-isolated and dependent on external services.
+    // b) A complex setup to inject a mock LLM into the child process, which is beyond the scope of this test suite.
+    // The agent loop's functionality is thoroughly tested with a mock LLM in the integration tests (`tests/integration/workflow.test.ts`).
+    // This E2E test focuses on verifying the MCP server's protocol compliance and basic request/response handling.
+
+    await writer.close();
+  }, 20000); // Increase timeout for spawning process
+});
+````
+
+## File: tests/integration/workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  mock,
+} from 'bun:test';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import simpleGit from 'simple-git';
+import { handleUserQuery } from '../../src/core/loop';
+import { createMemAPI } from '../../src/core/mem-api';
+import type { AppConfig } from '../../src/config';
+import type { StatusUpdate } from '../../src/types';
+
+describe('Agent Workflow Integration Tests', () => {
+  let tempDir: string;
+  let mockConfig: AppConfig;
+
+  beforeAll(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-test-'));
+    mockConfig = {
+      knowledgeGraphPath: tempDir,
+      openRouterApiKey: 'test-api-key',
+      llmModel: 'test-model',
+    };
+  });
+
+  beforeEach(async () => {
+    // Clear the directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+
+    // Initialize git
+    const git = simpleGit(tempDir);
+    await git.init();
+    await git.addConfig('user.name', 'Test User');
+    await git.addConfig('user.email', 'test@example.com');
+  });
+
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  // Mock LLM responses for testing
+  const createMockLLMQuery = (responses: string[]) => {
+    let callCount = 0;
+    return mock(async (_history: unknown[], _config: unknown) => {
+      const response = responses[callCount] || responses[responses.length - 1];
+      callCount++;
+      return response;
+    });
+  };
+
+  describe('Complete Workflow Integration', () => {
+    it('should execute a complete project lifecycle', async () => {
+      const sessionId = 'project-lifecycle';
+
+      // Phase 1: Initialize project
+      const initMockLLMQuery = createMockLLMQuery([
+        `<think>I'll initialize a new project with basic structure.</think>
+<typescript>
+// Create project structure
+await mem.writeFile('package.json', JSON.stringify({
+  name: 'test-project',
+  version: '1.0.0',
+  description: 'A test project',
+  scripts: { start: 'node index.js', test: 'jest' }
+}, null, 2));
+
+await mem.writeFile('README.md', '# Test Project\n\nThis is a comprehensive test project.');
+await mem.writeFile('index.js', 'console.log("Hello, World!");');
+await mem.createDir('src');
+await mem.writeFile('src/app.js', '// Application logic');
+</typescript>`,
+        `<think>Project initialized. Now commit the initial setup.</think>
+<typescript>
+await mem.commitChanges('feat: initialize project with basic structure');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
+      ]);
+
+      const initResult = await handleUserQuery(
+        'Initialize a new Node.js project',
+        mockConfig,
+        sessionId,
+        initMockLLMQuery
+      );
+
+      expect(initResult).toContain('Project initialized successfully');
+
+      // Phase 2: Add features
+      const featureMockLLMQuery = createMockLLMQuery([
+        `<think>I'll add features to the existing project.</think>
+<typescript>
+// Add feature files
+await mem.writeFile('src/utils.js', '// Utility functions\nexports.formatDate = (date) => date.toISOString();');
+await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
+await mem.createDir('tests');
+await mem.writeFile('tests/utils.test.js', '// Test utilities\nconst { formatDate } = require('../src/utils.js');');
+</typescript>`,
+        `<think>Features added. Commit the new functionality.</think>
+<typescript>
+await mem.commitChanges('feat: add utilities, config, and test structure');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
+      ]);
+
+      const featureResult = await handleUserQuery(
+        'Add utilities and configuration to the project',
+        mockConfig,
+        sessionId,
+        featureMockLLMQuery
+      );
+
+      expect(featureResult).toContain('Added utility functions');
+
+      // Phase 3: Update existing files
+      const updateMockLLMQuery = createMockLLMQuery([
+        `<think>I'll update the main application to use the new utilities.</think>
+<typescript>
+// Update main file
+const indexContent = await mem.readFile('index.js');
+const updatedIndex = indexContent.replace(
+  'console.log("Hello, World!");',
+  'const { formatDate } = require("./src/utils.js");\nconsole.log("Current time:", formatDate(new Date()));'
+);
+await mem.updateFile('index.js', indexContent, updatedIndex);
+
+// Update README
+const readmeContent = await mem.readFile('README.md');
+const updatedReadme = readmeContent + '\n\n## Usage\n\nRun with: npm start';
+await mem.updateFile('README.md', readmeContent, updatedReadme);
+</typescript>`,
+        `<think>Main application updated. Commit the improvements.</think>
+<typescript>
+await mem.commitChanges('feat: integrate utilities and update documentation');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Updated the main application to use utilities and improved documentation.</reply>`,
+      ]);
+
+      const updateResult = await handleUserQuery(
+        'Update the main application to use the new utilities',
+        mockConfig,
+        sessionId,
+        updateMockLLMQuery
+      );
+
+      expect(updateResult).toContain('Updated the main application');
+
+      // Verify complete project state
+      const mem = createMemAPI(mockConfig as AppConfig);
+
+      // Check all expected files exist
+      const expectedFiles = [
+        'package.json',
+        'README.md',
+        'index.js',
+        'src/app.js',
+        'src/utils.js',
+        'src/config.js',
+        'tests/utils.test.js',
+      ];
+
+      for (const file of expectedFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(true);
+      }
+
+      // Verify file contents
+      const indexContent = await mem.readFile('index.js');
+      expect(indexContent).toContain('formatDate');
+      expect(indexContent).toContain('./src/utils.js');
+
+      const readmeContent = await mem.readFile('README.md');
+      expect(readmeContent).toContain('Usage');
+      expect(readmeContent).toContain('npm start');
+
+      // Verify git history shows all three commits
+      const git = simpleGit(tempDir);
+      const log = await git.log();
+      expect(log.all.length).toBe(3);
+      expect(log.all[0].message).toBe(
+        'feat: integrate utilities and update documentation'
+      );
+      expect(log.all[1].message).toBe(
+        'feat: add utilities, config, and test structure'
+      );
+      expect(log.all[2].message).toBe(
+        'feat: initialize project with basic structure'
+      );
+    });
+
+    it('should handle complex file operations and git workflow', async () => {
+      const statusUpdates: StatusUpdate[] = [];
+
+      const captureStatusUpdate = (update: StatusUpdate) => {
+        statusUpdates.push(update);
+      };
+
+      const complexMockLLMQuery = createMockLLMQuery([
+        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
+<typescript>
+// Create multiple related files
+await mem.writeFile('docs/intro.md', '# Introduction\n\nProject introduction.');
+await mem.writeFile('docs/guide.md', '# User Guide\n\nDetailed user guide.');
+await mem.writeFile('docs/api.md', '# API Reference\n\nAPI documentation.');
+
+// Create a temporary file that will be renamed
+await mem.writeFile('docs/temp.md', '# Temporary\n\nThis will be renamed.');
+
+// Create a file that will be deleted
+await mem.writeFile('docs/obsolete.md', '# Obsolete\n\nThis will be deleted.');
+
+// List files to verify
+const docsFiles = await mem.listFiles('docs');
+console.log('Files created:', docsFiles);
+</typescript>`,
+        `<think>Now I'll perform file operations: rename and delete.</think>
+<typescript>
+// Rename temp.md to overview.md
+await mem.rename('docs/temp.md', 'docs/overview.md');
+
+// Delete the obsolete file
+await mem.deleteFile('docs/obsolete.md');
+
+// Update the introduction to reference the overview
+const introContent = await mem.readFile('docs/intro.md');
+const updatedIntro = introContent + '\n\nSee also: [[Overview]] for a project overview.';
+await mem.updateFile('docs/intro.md', introContent, updatedIntro);
+
+// Verify git staged files
+const stagedFiles = await mem.gitStagedFiles();
+console.log('Staged files:', stagedFiles);
+</typescript>`,
+        `<think>File operations complete. Now commit and verify git operations.</think>
+<typescript>
+await mem.commitChanges('feat: reorganize documentation structure');
+
+// Test git operations
+const gitDiff = await mem.gitDiff('docs/intro.md');
+const gitLog = await mem.gitLog('docs/', 5);
+
+console.log('Git diff for intro.md:', gitDiff);
+console.log('Git log for docs/:', gitLog);
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>
+Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
+</reply>`,
+      ]);
+
+      const result = await handleUserQuery(
+        'Perform complex file operations with git workflow',
+        mockConfig,
+        'complex-ops-session',
+        complexMockLLMQuery,
+        captureStatusUpdate
+      );
+
+      expect(result).toContain(
+        'Successfully performed complex file operations'
+      );
+
+      // Verify status updates were captured throughout the process
+      expect(statusUpdates.length).toBeGreaterThan(0);
+      const types = new Set(statusUpdates.map((u) => u.type));
+      expect(types.has('think')).toBe(true);
+      expect(types.has('act')).toBe(true);
+
+      // Verify final file state
+      const mem = createMemAPI(mockConfig as AppConfig);
+
+      // Files that should exist
+      const existingFiles = [
+        'docs/intro.md',
+        'docs/guide.md',
+        'docs/api.md',
+        'docs/overview.md',
+      ];
+      for (const file of existingFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(true);
+      }
+
+      // Files that should not exist
+      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
+      for (const file of deletedFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(false);
+      }
+
+      // Verify content was updated
+      const introContent = await mem.readFile('docs/intro.md');
+      expect(introContent).toContain('[[Overview]]');
+
+      // Verify git operations worked
+      const git = simpleGit(tempDir);
+      const log = await git.log();
+      expect(log.all.length).toBe(1);
+      expect(log.all[0].message).toBe(
+        'feat: reorganize documentation structure'
+      );
+    });
+
+    it('should handle error scenarios and recovery gracefully', async () => {
+      const statusUpdates: StatusUpdate[] = [];
+
+      const captureStatusUpdate = (update: StatusUpdate) => {
+        statusUpdates.push(update);
+      };
+
+      const errorRecoveryMockLLMQuery = createMockLLMQuery([
+        `<think>I'll attempt various operations to test error handling and recovery.</think>
+<typescript>
+// This should fail - file doesn't exist
+try {
+  await mem.readFile('non-existent-config.json');
+} catch (error) {
+  console.log('Expected error caught:', error.message);
+}
+
+// This should also fail - invalid path traversal attempt
+try {
+  await mem.writeFile('../../../etc/malicious.txt', 'hack');
+} catch (error) {
+  console.log('Security error caught:', error.message);
+}
+
+// This should work - create the missing file
+await mem.writeFile('non-existent-config.json', JSON.stringify({
+  app: 'test',
+  version: '1.0.0'
+}, null, 2));
+</typescript>`,
+        `<think>Now I'll test additional error scenarios.</think>
+<typescript>
+// Try to update a file that doesn't exist
+try {
+  await mem.updateFile('missing.md', 'old content', 'new content');
+} catch (error) {
+  console.log('Update error caught:', error.message);
+  // Create the file instead
+  await mem.writeFile('missing.md', '# Created after error\n\nContent here.');
+}
+
+// Try to delete a file that doesn't exist
+try {
+  await mem.deleteFile('already-deleted.md');
+} catch (error) {
+  console.log('Delete error caught:', error.message);
+}
+</typescript>`,
+        `<think>Error recovery completed. Now commit all successful operations.</think>
+<typescript>
+await mem.commitChanges('feat: demonstrate error handling and recovery');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>
+Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
+</reply>`,
+      ]);
+
+      const result = await handleUserQuery(
+        'Test error handling and recovery scenarios',
+        mockConfig,
+        'error-test-session',
+        errorRecoveryMockLLMQuery,
+        captureStatusUpdate
+      );
+
+      expect(result).toContain(
+        'Successfully demonstrated comprehensive error handling'
+      );
+
+      // Verify error status updates were captured
+      const errorUpdates = statusUpdates.filter((u) => u.type === 'error');
+      expect(errorUpdates.length).toBeGreaterThan(0);
+
+      // Verify files that should exist after recovery
+      const mem = createMemAPI(mockConfig as AppConfig);
+      const configExists = await mem.fileExists('non-existent-config.json');
+      expect(configExists).toBe(true);
+
+      const missingExists = await mem.fileExists('missing.md');
+      expect(missingExists).toBe(true);
+
+      // Verify content
+      const configContent = await mem.readFile('non-existent-config.json');
+      expect(configContent).toContain('test');
+      expect(configContent).toContain('1.0.0');
+
+      const missingContent = await mem.readFile('missing.md');
+      expect(missingContent).toContain('Created after error');
+
+      // Verify git commit was successful despite errors
+      const git = simpleGit(tempDir);
+      const log = await git.log();
+      expect(log.all.length).toBe(1);
+      expect(log.all[0].message).toBe(
+        'feat: demonstrate error handling and recovery'
+      );
+    });
+  });
+});
+````
 
 ## File: src/types/loop.ts
 ````typescript
@@ -168,7 +786,7 @@ CMD ["bun", "run", "src/server.ts"]
 
 ## File: tsconfig.tsbuildinfo
 ````
-{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
+{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/event-emitter.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
 ## File: docs/readme.md
@@ -179,7 +797,7 @@ CMD ["bun", "run", "src/server.ts"]
 
 **TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
 
-Forget wrestling with databases or opaque cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
 
 ---
 
@@ -210,15 +828,15 @@ Recursa is a local, stateless server that acts as a bridge between your chat cli
 ```mermaid
 graph TD
     subgraph Your Local Machine
-        A[AI Chat Client <br> e.g., Claude Desktop]
+        A[MCP Client <br> e.g., your script, or a compatible editor]
         B[Recursa MCP Server <br> (This Project)]
         C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
 
-        A -- 1. User Query via MCP --> B
+        A -- 1. User Query via Stdio --> B
         B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
         B -- 3. Executes Sandboxed Code --> C
         C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply --> A
+        B -- 5. Final Reply & Notifications --> A
     end
 
     subgraph Cloud Service
@@ -229,8 +847,8 @@ graph TD
     style B fill:#fff2cc,stroke:#333,stroke-width:2px
 ```
 
-1.  **Query via MCP:** Your chat client sends a message to the local Recursa server.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM.
+1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
+2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
 3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
 4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
 5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
@@ -329,10 +947,10 @@ LLM_MODEL="anthropic/claude-3-sonnet-20240229"
 ### 3. Running the Server
 
 ```bash
-npm start
+bun run start
 ```
 
-You'll see a confirmation that the server is running and ready to accept connections from your MCP client.
+This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
 
 ## 🗺️ Roadmap
 
@@ -383,6 +1001,27 @@ Every response you generate MUST conform to the following XML-like structure. Fa
 - `<think>`: **A user-facing status update.** A short, non-technical sentence describing the action you are about to take. This is shown to the user in real-time. **This tag is mandatory in every turn.**
 - `<typescript>`: A TypeScript code snippet to be executed in the secure sandbox. This is where your technical plan is implemented.
 - `<reply>`: The final, user-facing summary of the completed work. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
+
+### A CRITICAL Syntax Rule: Multiline Strings
+
+**For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
+
+**Correct:**
+```typescript
+await mem.writeFile('example.md', `
+# This is a title
+This is a multiline document.
+`);
+```
+
+**INCORRECT AND FORBIDDEN:**
+```typescript
+// This will fail!
+await mem.writeFile('example.md', '
+# This is a title
+This is a multiline document.
+');
+```
 
 ### Response Patterns
 
@@ -625,7 +1264,6 @@ const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
   llmModel: 'anthropic/claude-3-haiku-20240307',
-  port: 3000,
 };
 
 const mockHistory: ChatMessage[] = [
@@ -651,7 +1289,7 @@ describe('LLM Module', () => {
           headers: {
             Authorization: 'Bearer test-api-key',
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
+            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
             'X-Title': 'Recursa',
           },
           body: JSON.stringify({
@@ -777,7 +1415,6 @@ describe('LLM Module', () => {
 OPENROUTER_API_KEY="mock-test-api-key"
 KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
 LLM_MODEL="mock-test-model"
-PORT=3000
 ````
 
 ## File: .eslintrc.json
@@ -862,1657 +1499,6 @@ export interface ExecutionConstraints {
   allowedModules: string[];
   forbiddenAPIs: string[];
 }
-````
-
-## File: src/config.ts
-````typescript
-import 'dotenv/config';
-import { z } from 'zod';
-import path from 'path';
-import fs from 'fs';
-
-const configSchema = z.object({
-  OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
-  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
-  LLM_MODEL: z
-    .string()
-    .default('anthropic/claude-3-haiku-20240307') // Sensible default for cost/speed
-    .optional(),
-  PORT: z.coerce.number().int().positive().default(3000),
-});
-
-export type AppConfig = {
-  openRouterApiKey: string;
-  knowledgeGraphPath: string;
-  llmModel: string;
-  port: number;
-};
-
-export const loadAndValidateConfig = (): AppConfig => {
-  const parseResult = configSchema.safeParse(process.env);
-
-  if (!parseResult.success) {
-    // eslint-disable-next-line no-console
-    console.error(
-      '❌ Invalid environment variables:',
-      parseResult.error.flatten().fieldErrors
-    );
-    process.exit(1);
-  }
-
-  const { OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH, LLM_MODEL, PORT } =
-    parseResult.data;
-
-  // Perform runtime checks
-  let resolvedPath = KNOWLEDGE_GRAPH_PATH;
-  if (!path.isAbsolute(resolvedPath)) {
-    resolvedPath = path.resolve(process.cwd(), resolvedPath);
-    // eslint-disable-next-line no-console
-    console.warn(
-      `KNOWLEDGE_GRAPH_PATH is not absolute. Resolved to: ${resolvedPath}`
-    );
-  }
-
-  // In test environments, the path is created dynamically by the test runner,
-  // so we should skip this check. `bun test` automatically sets NODE_ENV=test.
-  if (process.env.NODE_ENV !== 'test') {
-    try {
-      const stats = fs.statSync(resolvedPath);
-      if (!stats.isDirectory()) {
-        throw new Error('is not a directory.');
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `❌ Error with KNOWLEDGE_GRAPH_PATH "${resolvedPath}": ${
-          (error as Error).message
-        }`
-      );
-      process.exit(1);
-    }
-  }
-
-  return Object.freeze({
-    openRouterApiKey: OPENROUTER_API_KEY,
-    knowledgeGraphPath: resolvedPath,
-    llmModel: LLM_MODEL!,
-    port: PORT,
-  });
-};
-
-export const config: AppConfig = loadAndValidateConfig();
-````
-
-## File: tests/integration/basic-think-act-commit.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  mock,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { StatusUpdate } from '../../src/types';
-
-describe('Basic Think-Act-Commit Integration Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-  let statusUpdates: StatusUpdate[];
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-basic-test-'));
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-      port: 3000,
-    };
-  });
-
-  beforeEach(async () => {
-    // Clear the directory completely
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-
-    // Reset status updates
-    statusUpdates = [];
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  // Mock LLM responses for testing different scenarios
-  const createMockLLMQuery = (responses: string[]) => {
-    let callCount = 0;
-    return mock(async (_history: unknown[], _config: unknown) => {
-      const response = responses[callCount] || responses[responses.length - 1];
-      callCount++;
-      return response;
-    });
-  };
-
-  // Helper function to capture status updates
-  const captureStatusUpdate = (update: StatusUpdate) => {
-    statusUpdates.push(update);
-  };
-
-  describe('Core Think-Act-Commit Loop', () => {
-    it('should execute a simple file creation and commit loop', async () => {
-      // Mock LLM response sequence
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Think and Act
-        `</think>
-I need to create a test file with some content.
-<typescript>
-const fileName = 'simple-test.md';
-const content = '# Simple Test\n\nThis is a simple test file.';
-await mem.writeFile(fileName, content);
-</typescript>`,
-        // Second response: Commit and Reply
-        `</think>
-File created successfully. Now commit the changes.
-<typescript>
-await mem.commitChanges('feat: add simple test file');
-</typescript>
-<reply>
-Successfully created and committed the test file.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Create a simple test file',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe('Successfully created and committed the test file.');
-
-      // Verify status updates were captured
-      expect(statusUpdates.length).toBeGreaterThan(0);
-
-      // Verify at least one 'think' update
-      const thinkUpdates = statusUpdates.filter((u) => u.type === 'think');
-      expect(thinkUpdates.length).toBeGreaterThan(0);
-
-      // Verify at least one 'act' update
-      const actUpdates = statusUpdates.filter((u) => u.type === 'act');
-      expect(actUpdates.length).toBeGreaterThan(0);
-
-      // Verify file was actually created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('simple-test.md');
-      expect(fileExists).toBe(true);
-
-      const fileContent = await mem.readFile('simple-test.md');
-      expect(fileContent).toContain('# Simple Test');
-      expect(fileContent).toContain('This is a simple test file');
-
-      // Verify git commit was made
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe('feat: add simple test file');
-    });
-
-    it('should handle file updates and commits', async () => {
-      // Create initial file
-      const mem = createMemAPI(mockConfig as AppConfig);
-      await mem.writeFile(
-        'update-test.md',
-        '# Original Title\n\nOriginal content.'
-      );
-      await mem.commitChanges('feat: add original file');
-
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Update file
-        `</think>
-I need to update the existing file with new content.
-<typescript>
-const fileName = 'update-test.md';
-const existingContent = await mem.readFile(fileName);
-const updatedContent = existingContent.replace('Original content.', 'Updated content with new information.');
-await mem.updateFile(fileName, existingContent, updatedContent);
-</typescript>`,
-        // Second response: Commit and Reply
-        `</think>
-File updated successfully. Now commit the changes.
-<typescript>
-await mem.commitChanges('feat: update file content');
-</typescript>
-<reply>
-Successfully updated the file and committed the changes.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Update the existing file',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'Successfully updated the file and committed the changes.'
-      );
-
-      // Verify file was updated
-      const updatedContent = await mem.readFile('update-test.md');
-      expect(updatedContent).toContain('Updated content with new information');
-      expect(updatedContent).toContain('Original Title'); // Title should remain
-
-      // Verify git commit was made
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0].message).toBe('feat: update file content');
-      expect(log.all[1].message).toBe('feat: add original file');
-    });
-
-    it('should handle error recovery and continue with work', async () => {
-      const mockLLMQuery = createMockLLMQuery([
-        // First response with intentional error
-        `</think>
-I'll try to read a file that doesn't exist to test error handling.
-<typescript>
-await mem.readFile('non-existent.md');
-</typescript>`,
-        // Second response: Recovery
-        `</think>
-There was an error reading the file. I'll create it instead.
-<typescript>
-await mem.writeFile('non-existent.md', '# Created After Error\n\nFile created after error.');
-</typescript>`,
-        // Third response: Commit and Reply
-        `</think>
-File created successfully after error recovery.
-<typescript>
-await mem.commitChanges('feat: create file after error recovery');
-</typescript>
-<reply>
-Successfully recovered from error and created the file.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Test error recovery',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'Successfully recovered from error and created the file.'
-      );
-
-      // Verify error status update was captured
-      const errorUpdates = statusUpdates.filter((u) => u.type === 'error');
-      expect(errorUpdates.length).toBeGreaterThan(0);
-
-      // Verify file was created after recovery
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('non-existent.md');
-      expect(fileExists).toBe(true);
-
-      const fileContent = await mem.readFile('non-existent.md');
-      expect(fileContent).toContain('Created After Error');
-    });
-
-    it('should handle multiple file operations in sequence', async () => {
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Create multiple files
-        `</think>
-I'll create a directory structure with multiple files.
-<typescript>
-// Create directory
-await mem.createDir('multi-test');
-
-// Create multiple files
-await mem.writeFile('multi-test/file1.txt', 'Content 1');
-await mem.writeFile('multi-test/file2.txt', 'Content 2');
-await mem.writeFile('multi-test/file3.txt', 'Content 3');
-
-// Verify files were created
-const files = await mem.listFiles('multi-test');
-console.log('Created files:', files);
-</typescript>`,
-        // Second response: Commit and Reply
-        `</think>
-All files created successfully. Now commit the changes.
-<typescript>
-await mem.commitChanges('feat: create multiple files in directory');
-</typescript>
-<reply>
-Successfully created multiple files in the directory structure.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Create multiple files in a directory',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'Successfully created multiple files in the directory structure.'
-      );
-
-      // Verify directory and files were created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const dirExists = await mem.fileExists('multi-test');
-      expect(dirExists).toBe(true);
-
-      const files = await mem.listFiles('multi-test');
-      expect(files).toContain('file1.txt');
-      expect(files).toContain('file2.txt');
-      expect(files).toContain('file3.txt');
-      expect(files.length).toBe(3);
-
-      // Verify git commit
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: create multiple files in directory'
-      );
-    });
-  });
-
-  describe('Session Persistence', () => {
-    it('should maintain context across multiple queries in the same session', async () => {
-      const sessionId = 'session-test-123';
-
-      // First query: Create initial file
-      const firstMockLLMQuery = createMockLLMQuery([
-        `</think>
-Creating the first file in the session.
-<typescript>
-await mem.writeFile('session-context.md', '# Session Test\n\nFirst file in this session.');
-</typescript>`,
-        `</think>
-First file created.
-<typescript>
-await mem.commitChanges('feat: add first session file');
-</typescript>`,
-        `<reply>
-First file created and committed in the session.
-</reply>`,
-      ]);
-
-      const firstResult = await handleUserQuery(
-        'Create first file in session',
-        mockConfig,
-        sessionId,
-        firstMockLLMQuery
-      );
-
-      expect(firstResult).toBe(
-        'First file created and committed in the session.'
-      );
-
-      // Second query: Update the file
-      const secondMockLLMQuery = createMockLLMQuery([
-        `</think>
-Adding to the existing file in the same session.
-<typescript>
-const existingContent = await mem.readFile('session-context.md');
-const updatedContent = existingContent + '\n\n## Second Update\n\nAdded in the same session.';
-await mem.updateFile('session-context.md', existingContent, updatedContent);
-</typescript>`,
-        `</think>
-File updated in session.
-<typescript>
-await mem.commitChanges('feat: update file in same session');
-</typescript>`,
-        `<reply>
-File updated in the same session context.
-</reply>`,
-      ]);
-
-      const secondResult = await handleUserQuery(
-        'Update the file in the same session',
-        mockConfig,
-        sessionId,
-        secondMockLLMQuery
-      );
-
-      expect(secondResult).toBe('File updated in the same session context.');
-
-      // Verify file has both updates
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const finalContent = await mem.readFile('session-context.md');
-      expect(finalContent).toContain('First file in this session');
-      expect(finalContent).toContain('Second Update');
-      expect(finalContent).toContain('Added in the same session');
-
-      // Verify git history shows both commits
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0].message).toBe('feat: update file in same session');
-      expect(log.all[1].message).toBe('feat: add first session file');
-    });
-  });
-});
-````
-
-## File: tests/integration/end-to-e2e.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  mock,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { StatusUpdate } from '../../src/types';
-
-describe('End-to-End Complete Flow Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-test-'));
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-      port: 3001,
-    };
-  });
-
-  beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  // Mock LLM responses for testing
-  const createMockLLMQuery = (responses: string[]) => {
-    let callCount = 0;
-    return mock(async (_history: unknown[], _config: unknown) => {
-      const response = responses[callCount] || responses[responses.length - 1];
-      callCount++;
-      return response;
-    });
-  };
-
-  describe('Complete Workflow Integration', () => {
-    it('should execute a complete project lifecycle', async () => {
-      const sessionId = 'project-lifecycle';
-
-      // Phase 1: Initialize project
-      const initMockLLMQuery = createMockLLMQuery([
-        `I'll initialize a new project with basic structure.
-<typescript>
-// Create project structure
-await mem.writeFile('package.json', JSON.stringify({
-  name: 'test-project',
-  version: '1.0.0',
-  description: 'A test project',
-  scripts: { start: 'node index.js', test: 'jest' }
-}, null, 2));
-
-await mem.writeFile('README.md', '# Test Project\n\nThis is a comprehensive test project.');
-await mem.writeFile('index.js', 'console.log("Hello, World!");');
-await mem.createDir('src');
-await mem.writeFile('src/app.js', '// Application logic');
-</typescript>`,
-        `Project initialized. Now commit the initial setup.
-<typescript>
-await mem.commitChanges('feat: initialize project with basic structure');
-</typescript>`,
-        `<reply>
-Project initialized successfully with package.json, README, main entry point, and source directory.
-</reply>`,
-      ]);
-
-      const initResult = await handleUserQuery(
-        'Initialize a new Node.js project',
-        mockConfig,
-        sessionId,
-        initMockLLMQuery
-      );
-
-      expect(initResult).toContain('Project initialized successfully');
-
-      // Phase 2: Add features
-      const featureMockLLMQuery = createMockLLMQuery([
-        `I'll add features to the existing project.
-<typescript>
-// Add feature files
-await mem.writeFile('src/utils.js', '// Utility functions\nexports.formatDate = (date) => date.toISOString();');
-await mem.writeFile('src/config.js', '// Configuration\nmodule.exports = { env: 'development', port: 3000 };');
-await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', '// Test utilities\nconst { formatDate } = require('../src/utils.js');');
-</typescript>`,
-        `Features added. Commit the new functionality.
-<typescript>
-await mem.commitChanges('feat: add utilities, config, and test structure');
-</typescript>`,
-        `<reply>
-Added utility functions, configuration, and test structure to the project.
-</reply>`,
-      ]);
-
-      const featureResult = await handleUserQuery(
-        'Add utilities and configuration to the project',
-        mockConfig,
-        sessionId,
-        featureMockLLMQuery
-      );
-
-      expect(featureResult).toContain('Added utility functions');
-
-      // Phase 3: Update existing files
-      const updateMockLLMQuery = createMockLLMQuery([
-        `I'll update the main application to use the new utilities.
-<typescript>
-// Update main file
-const indexContent = await mem.readFile('index.js');
-const updatedIndex = indexContent.replace(
-  'console.log("Hello, World!");',
-  'const { formatDate } = require("./src/utils.js");\nconsole.log("Current time:", formatDate(new Date()));'
-);
-await mem.updateFile('index.js', indexContent, updatedIndex);
-
-// Update README
-const readmeContent = await mem.readFile('README.md');
-const updatedReadme = readmeContent + '\n\n## Usage\n\nRun with: npm start';
-await mem.updateFile('README.md', readmeContent, updatedReadme);
-</typescript>`,
-        `Main application updated. Commit the improvements.
-<typescript>
-await mem.commitChanges('feat: integrate utilities and update documentation');
-</typescript>`,
-        `<reply>
-Updated the main application to use utilities and improved documentation.
-</reply>`,
-      ]);
-
-      const updateResult = await handleUserQuery(
-        'Update the main application to use the new utilities',
-        mockConfig,
-        sessionId,
-        updateMockLLMQuery
-      );
-
-      expect(updateResult).toContain('Updated the main application');
-
-      // Verify complete project state
-      const mem = createMemAPI(mockConfig as AppConfig);
-
-      // Check all expected files exist
-      const expectedFiles = [
-        'package.json',
-        'README.md',
-        'index.js',
-        'src/app.js',
-        'src/utils.js',
-        'src/config.js',
-        'tests/utils.test.js',
-      ];
-
-      for (const file of expectedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Verify file contents
-      const indexContent = await mem.readFile('index.js');
-      expect(indexContent).toContain('formatDate');
-      expect(indexContent).toContain('./src/utils.js');
-
-      const readmeContent = await mem.readFile('README.md');
-      expect(readmeContent).toContain('Usage');
-      expect(readmeContent).toContain('npm start');
-
-      // Verify git history shows all three commits
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(3);
-      expect(log.all[0].message).toBe(
-        'feat: integrate utilities and update documentation'
-      );
-      expect(log.all[1].message).toBe(
-        'feat: add utilities, config, and test structure'
-      );
-      expect(log.all[2].message).toBe(
-        'feat: initialize project with basic structure'
-      );
-    });
-
-    it('should handle complex file operations and git workflow', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      const complexMockLLMQuery = createMockLLMQuery([
-        `I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.
-<typescript>
-// Create multiple related files
-await mem.writeFile('docs/intro.md', '# Introduction\n\nProject introduction.');
-await mem.writeFile('docs/guide.md', '# User Guide\n\nDetailed user guide.');
-await mem.writeFile('docs/api.md', '# API Reference\n\nAPI documentation.');
-
-// Create a temporary file that will be renamed
-await mem.writeFile('docs/temp.md', '# Temporary\n\nThis will be renamed.');
-
-// Create a file that will be deleted
-await mem.writeFile('docs/obsolete.md', '# Obsolete\n\nThis will be deleted.');
-
-// List files to verify
-const docsFiles = await mem.listFiles('docs');
-console.log('Files created:', docsFiles);
-</typescript>`,
-        `Now I'll perform file operations: rename and delete.
-<typescript>
-// Rename temp.md to overview.md
-await mem.rename('docs/temp.md', 'docs/overview.md');
-
-// Delete the obsolete file
-await mem.deleteFile('docs/obsolete.md');
-
-// Update the introduction to reference the overview
-const introContent = await mem.readFile('docs/intro.md');
-const updatedIntro = introContent + '\n\nSee also: [[Overview]] for a project overview.';
-await mem.updateFile('docs/intro.md', introContent, updatedIntro);
-
-// Verify git staged files
-const stagedFiles = await mem.gitStagedFiles();
-console.log('Staged files:', stagedFiles);
-</typescript>`,
-        `File operations complete. Now commit and verify git operations.
-<typescript>
-await mem.commitChanges('feat: reorganize documentation structure');
-
-// Test git operations
-const gitDiff = await mem.gitDiff('docs/intro.md');
-const gitLog = await mem.gitLog('docs/', 5);
-
-console.log('Git diff for intro.md:', gitDiff);
-console.log('Git log for docs/:', gitLog);
-</typescript>`,
-        `<reply>
-Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Perform complex file operations with git workflow',
-        mockConfig,
-        'complex-ops-session',
-        complexMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(result).toContain(
-        'Successfully performed complex file operations'
-      );
-
-      // Verify status updates were captured throughout the process
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
-
-      // Verify final file state
-      const mem = createMemAPI(mockConfig as AppConfig);
-
-      // Files that should exist
-      const existingFiles = [
-        'docs/intro.md',
-        'docs/guide.md',
-        'docs/api.md',
-        'docs/overview.md',
-      ];
-      for (const file of existingFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Files that should not exist
-      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
-      for (const file of deletedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(false);
-      }
-
-      // Verify content was updated
-      const introContent = await mem.readFile('docs/intro.md');
-      expect(introContent).toContain('[[Overview]]');
-
-      // Verify git operations worked
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: reorganize documentation structure'
-      );
-    });
-
-    it('should handle error scenarios and recovery gracefully', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      const errorRecoveryMockLLMQuery = createMockLLMQuery([
-        `I'll attempt various operations to test error handling and recovery.
-<typescript>
-// This should fail - file doesn't exist
-try {
-  await mem.readFile('non-existent-config.json');
-} catch (error) {
-  console.log('Expected error caught:', error.message);
-}
-
-// This should also fail - invalid path traversal attempt
-try {
-  await mem.writeFile('../../../etc/malicious.txt', 'hack');
-} catch (error) {
-  console.log('Security error caught:', error.message);
-}
-
-// This should work - create the missing file
-await mem.writeFile('non-existent-config.json', JSON.stringify({
-  app: 'test',
-  version: '1.0.0'
-}, null, 2));
-</typescript>`,
-        `Now I'll test additional error scenarios.
-<typescript>
-// Try to update a file that doesn't exist
-try {
-  await mem.updateFile('missing.md', 'old content', 'new content');
-} catch (error) {
-  console.log('Update error caught:', error.message);
-  // Create the file instead
-  await mem.writeFile('missing.md', '# Created after error\n\nContent here.');
-}
-
-// Try to delete a file that doesn't exist
-try {
-  await mem.deleteFile('already-deleted.md');
-} catch (error) {
-  console.log('Delete error caught:', error.message);
-}
-</typescript>`,
-        `Error recovery completed. Now commit all successful operations.
-<typescript>
-await mem.commitChanges('feat: demonstrate error handling and recovery');
-</typescript>`,
-        `<reply>
-Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Test error handling and recovery scenarios',
-        mockConfig,
-        'error-test-session',
-        errorRecoveryMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(result).toContain(
-        'Successfully demonstrated comprehensive error handling'
-      );
-
-      // Verify error status updates were captured
-      const errorUpdates = statusUpdates.filter((u) => u.type === 'error');
-      expect(errorUpdates.length).toBeGreaterThan(0);
-
-      // Verify files that should exist after recovery
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const configExists = await mem.fileExists('non-existent-config.json');
-      expect(configExists).toBe(true);
-
-      const missingExists = await mem.fileExists('missing.md');
-      expect(missingExists).toBe(true);
-
-      // Verify content
-      const configContent = await mem.readFile('non-existent-config.json');
-      expect(configContent).toContain('test');
-      expect(configContent).toContain('1.0.0');
-
-      const missingContent = await mem.readFile('missing.md');
-      expect(missingContent).toContain('Created after error');
-
-      // Verify git commit was successful despite errors
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: demonstrate error handling and recovery'
-      );
-    });
-  });
-});
-````
-
-## File: tests/integration/think-act-commit.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  mock,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { StatusUpdate } from '../../src/types';
-
-describe('Think-Act-Commit Loop Integration Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-  let statusUpdates: StatusUpdate[] = [];
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-      port: 3000,
-    };
-  });
-
-  beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-
-    // Reset status updates
-    statusUpdates = [];
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  // Mock LLM responses for testing different scenarios
-  const createMockLLMQuery = (responses: string[]) => {
-    let callCount = 0;
-    return mock(async (_history: unknown[], _config: unknown) => {
-      const response = responses[callCount] || responses[responses.length - 1];
-      callCount++;
-      return response;
-    });
-  };
-
-  // Helper function to capture status updates
-  const captureStatusUpdate = (update: StatusUpdate) => {
-    statusUpdates.push(update);
-  };
-
-  describe('Complete Think-Act-Commit Flow', () => {
-    it('should execute a complete loop with file creation and commit', async () => {
-      // Mock LLM response sequence
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Think and Act (create file)
-        `<think>
-I need to create a new file and add some content to it.
-</think>
-<typescript>
-const fileName = 'test-file.md';
-const content = '# Test Document\n\nThis is a test file created during integration testing.';
-await mem.writeFile(fileName, content);
-</typescript>`,
-        // Second response: Commit and Reply
-        `<think>
-The file has been created successfully. Now I need to commit the changes and provide a final response.
-</think>
-<typescript>
-await mem.commitChanges('feat: add test document');
-</typescript>
-<reply>
-I've successfully created a new test document and committed the changes to your knowledge base.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Create a test document',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        "I've successfully created a new test document and committed the changes to your knowledge base."
-      );
-
-      // Verify status updates were captured
-      expect(statusUpdates.length).toBeGreaterThan(0);
-
-      // Verify at least one 'think' update
-      const thinkUpdates = statusUpdates.filter((u) => u.type === 'think');
-      expect(thinkUpdates.length).toBeGreaterThan(0);
-
-      // Verify at least one 'act' update
-      const actUpdates = statusUpdates.filter((u) => u.type === 'act');
-      expect(actUpdates.length).toBeGreaterThan(0);
-
-      // Verify file was actually created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('test-file.md');
-      expect(fileExists).toBe(true);
-
-      const fileContent = await mem.readFile('test-file.md');
-      expect(fileContent).toContain('# Test Document');
-      expect(fileContent).toContain('This is a test file');
-
-      // Verify git commit was made
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe('feat: add test document');
-    });
-
-    it('should handle file updates in the loop', async () => {
-      // Create initial file
-      const mem = createMemAPI(mockConfig as AppConfig);
-      await mem.writeFile(
-        'existing.md',
-        '# Original Content\n\nOriginal content here.'
-      );
-      await mem.commitChanges('feat: add original file');
-
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Think and Act (update file)
-        `<think>
-I need to update the existing file with new content.
-</think>
-<typescript>
-const fileName = 'existing.md';
-const existingContent = await mem.readFile(fileName);
-const updatedContent = existingContent.replace('Original content here.', 'Updated content here.');
-await mem.updateFile(fileName, existingContent, updatedContent);
-</typescript>`,
-        // Second response: Commit and Reply
-        `<think>
-The file has been updated successfully. Now I need to commit the changes.
-</think>
-<typescript>
-await mem.commitChanges('feat: update existing document');
-</typescript>
-<reply>
-I've successfully updated the existing document with new content and committed the changes.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Update the existing document',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        "I've successfully updated the existing document with new content and committed the changes."
-      );
-
-      // Verify file was updated
-      const updatedContent = await mem.readFile('existing.md');
-      expect(updatedContent).toContain('Updated content here.');
-
-      // Verify git commit was made
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0].message).toBe('feat: update existing document');
-    });
-
-    it('should handle errors during code execution', async () => {
-      const mockLLMQuery = createMockLLMQuery([
-        // Response with code that will throw an error
-        `<think>
-I'll try to read a file that doesn't exist to test error handling.
-</think>
-<typescript>
-// This should throw an error
-await mem.readFile('non-existent-file.md');
-</typescript>`,
-        // Recovery response
-        `<think>
-There was an error reading the file. I should create it instead.
-</think>
-<typescript>
-await mem.writeFile('non-existent-file.md', '# New File\n\nCreated after error.');
-</typescript>`,
-        // Final commit and reply
-        `<think>
-File created successfully. Now commit the changes.
-</think>
-<typescript>
-await mem.commitChanges('feat: create file after error recovery');
-</typescript>
-<reply>
-I encountered an error but recovered by creating the new file. Changes have been committed.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Try to read and then create a file',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'I encountered an error but recovered by creating the new file. Changes have been committed.'
-      );
-
-      // Verify error status update was captured
-      const errorUpdates = statusUpdates.filter((u) => u.type === 'error');
-      expect(errorUpdates.length).toBeGreaterThan(0);
-
-      // Verify file was eventually created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('non-existent-file.md');
-      expect(fileExists).toBe(true);
-    });
-
-    it('should handle directory operations and file listings', async () => {
-      const mockLLMQuery = createMockLLMQuery([
-        // Response that creates directory and files
-        `<think>
-I need to create a directory structure with multiple files.
-</think>
-<typescript>
-// Create a directory
-await mem.createDir('test-directory');
-
-// Create multiple files
-await mem.writeFile('test-directory/file1.md', '# File 1\n\nContent of file 1.');
-await mem.writeFile('test-directory/file2.md', '# File 2\n\nContent of file 2.');
-await mem.writeFile('test-directory/file3.md', '# File 3\n\nContent of file 3.');
-
-// List files to verify
-const files = await mem.listFiles('test-directory');
-console.log('Files created:', files);
-</typescript>`,
-        // Commit and reply
-        `<think>
-Directory and files created successfully. Now commit the changes.
-</think>
-<typescript>
-await mem.commitChanges('feat: create directory with multiple files');
-</typescript>
-<reply>
-I've created a new directory structure with three files and committed all the changes.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Create a directory with multiple files',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        "I've created a new directory structure with three files and committed all the changes."
-      );
-
-      // Verify directory and files were created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const dirExists = await mem.fileExists('test-directory');
-      expect(dirExists).toBe(true);
-
-      const files = await mem.listFiles('test-directory');
-      expect(files).toContain('file1.md');
-      expect(files).toContain('file2.md');
-      expect(files).toContain('file3.md');
-      expect(files.length).toBe(3);
-    });
-
-    it('should handle multiple operations in a single loop', async () => {
-      const mockLLMQuery = createMockLLMQuery([
-        // Response with multiple complex operations
-        `<think>
-I need to perform multiple operations: create files, update one, and verify with git operations.
-</think>
-<typescript>
-// Create initial files
-await mem.writeFile('project.md', '# My Project\n\nProject description here.');
-await mem.writeFile('notes.md', '# Notes\n\nInitial notes.');
-
-// Update the project file
-const projectContent = await mem.readFile('project.md');
-const updatedProject = projectContent + '\n\n## Status\n\nIn progress.';
-await mem.updateFile('project.md', projectContent, updatedProject);
-
-// Check git status before commit
-const stagedFiles = await mem.gitStagedFiles();
-console.log('Staged files before commit:', stagedFiles);
-</typescript>`,
-        // Commit and git log verification
-        `<think>
-Files created and updated. Now commit and verify git history.
-</think>
-<typescript>
-await mem.commitChanges('feat: add project files with updates');
-
-// Verify git log
-const log = await mem.gitLog('project.md', 2);
-console.log('Git log for project.md:', log);
-</typescript>`,
-        // Final reply
-        `<think>
-All operations completed successfully. Provide final summary.
-</think>
-<typescript>
-// No operations needed, just final reply
-</typescript>
-<reply>
-I've successfully created and updated multiple files, committed them with a proper message, and verified the git history. All operations completed in the Think-Act-Commit loop.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Perform multiple file operations with git verification',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        "I've successfully created and updated multiple files, committed them with a proper message, and verified the git history. All operations completed in the Think-Act-Commit loop."
-      );
-
-      // Verify files exist and have correct content
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const projectContent = await mem.readFile('project.md');
-      expect(projectContent).toContain('# My Project');
-      expect(projectContent).toContain('In progress.');
-
-      const notesContent = await mem.readFile('notes.md');
-      expect(notesContent).toContain('# Notes');
-
-      // Verify git operations
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe('feat: add project files with updates');
-    });
-  });
-
-  describe('Session Management', () => {
-    it('should maintain conversation context across multiple queries', async () => {
-      const sessionId = 'test-session-123';
-
-      // First query with file creation
-      const firstMockLLMQuery = createMockLLMQuery([
-        `<think>
-Creating the first file in the session.
-</think>
-<typescript>
-await mem.writeFile('session-test.md', '# Session Test\n\nFirst file in session.');
-</typescript>`,
-        `<think>
-Commit the first file.
-</think>
-<typescript>
-await mem.commitChanges('feat: add first session file');
-</typescript>`,
-        `<reply>
-First file created and committed in the session.
-</reply>`,
-      ]);
-
-      const firstResult = await handleUserQuery(
-        'Create first file',
-        mockConfig,
-        sessionId,
-        firstMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(firstResult).toBe(
-        'First file created and committed in the session.'
-      );
-
-      // Second query in the same session
-      const secondMockLLMQuery = createMockLLMQuery([
-        `<think>
-Adding to the existing file in the same session.
-</think>
-<typescript>
-const existingContent = await mem.readFile('session-test.md');
-const updatedContent = existingContent + '\n\n## Second Update\n\nAdded in second query.';
-await mem.updateFile('session-test.md', existingContent, updatedContent);
-</typescript>`,
-        `<think>
-Commit the update.
-</think>
-<typescript>
-await mem.commitChanges('feat: update session file');
-</typescript>`,
-        `<reply>
-File updated in the same session context.
-</reply>`,
-      ]);
-
-      const secondResult = await handleUserQuery(
-        'Update the file',
-        mockConfig,
-        sessionId,
-        secondMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(secondResult).toBe('File updated in the same session context.');
-
-      // Verify file has both updates
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const finalContent = await mem.readFile('session-test.md');
-      expect(finalContent).toContain('First file in session');
-      expect(finalContent).toContain('Second Update');
-    });
-  });
-});
-````
-
-## File: tests/integration/workflow-integration.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { StatusUpdate } from '../../src/types';
-
-describe('Workflow Integration Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-  let statusUpdates: StatusUpdate[];
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'recursa-workflow-test-')
-    );
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-      port: 3000,
-    };
-  });
-
-  beforeEach(async () => {
-    // Clear the directory completely
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-
-    // Reset status updates
-    statusUpdates = [];
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  // Mock LLM responses for testing different scenarios
-  const createMockLLMQuery = (responses: string[]) => {
-    let callCount = 0;
-    return async (_history: unknown[], _config: unknown) => {
-      const response = responses[callCount] || responses[responses.length - 1];
-      callCount++;
-      return response;
-    };
-  };
-
-  // Helper function to capture status updates
-  const captureStatusUpdate = (update: StatusUpdate) => {
-    statusUpdates.push(update);
-  };
-
-  describe('Complete Workflow Verification', () => {
-    it('should handle basic file creation workflow', async () => {
-      // Mock LLM response sequence with proper XML format
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Think and Act
-        `I'll create a simple test file to verify the workflow.
-<typescript>
-const fileName = 'workflow-test.md';
-const content = '# Workflow Test\n\nThis is a test file for the workflow integration.';
-await mem.writeFile(fileName, content);
-</typescript>`,
-        // Second response: Commit and Reply
-        `File created successfully. Now commit the changes.
-<typescript>
-await mem.commitChanges('feat: add workflow test file');
-</typescript>
-<reply>
-Successfully created and committed the workflow test file.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Create a workflow test file',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'Successfully created and committed the workflow test file.'
-      );
-
-      // Verify file was actually created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('workflow-test.md');
-      expect(fileExists).toBe(true);
-
-      const fileContent = await mem.readFile('workflow-test.md');
-      expect(fileContent).toContain('# Workflow Test');
-      expect(fileContent).toContain(
-        'This is a test file for the workflow integration'
-      );
-
-      // Verify git commit was made
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe('feat: add workflow test file');
-    });
-
-    it('should handle multi-step file operations', async () => {
-      // Mock LLM response sequence
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Create directory and files
-        `I'll create a directory structure with multiple files.
-<typescript>
-// Create directory
-await mem.createDir('project');
-
-// Create multiple files in the directory
-await mem.writeFile('project/README.md', '# Project README\n\nProject description here.');
-await mem.writeFile('project/main.js', 'console.log("Hello, World!");');
-await mem.writeFile('project/config.json', '{"name": "test", "version": "1.0.0"}');
-
-// List files to verify creation
-const files = await mem.listFiles('project');
-console.log('Files created:', files);
-</typescript>`,
-        // Second response: Commit and Reply
-        `All files created successfully. Now commit the project structure.
-<typescript>
-await mem.commitChanges('feat: create project structure with multiple files');
-</typescript>
-<reply>
-Successfully created a complete project structure with README, main file, and configuration.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Create a project structure',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'Successfully created a complete project structure with README, main file, and configuration.'
-      );
-
-      // Verify directory and files were created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const dirExists = await mem.fileExists('project');
-      expect(dirExists).toBe(true);
-
-      const files = await mem.listFiles('project');
-      expect(files).toContain('README.md');
-      expect(files).toContain('main.js');
-      expect(files).toContain('config.json');
-      expect(files.length).toBe(3);
-
-      // Verify file contents
-      const readmeContent = await mem.readFile('project/README.md');
-      expect(readmeContent).toContain('# Project README');
-
-      const mainContent = await mem.readFile('project/main.js');
-      expect(mainContent).toContain('console.log("Hello, World!");');
-
-      const configContent = await mem.readFile('project/config.json');
-      expect(configContent).toContain('test');
-      expect(configContent).toContain('1.0.0');
-
-      // Verify git commit
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: create project structure with multiple files'
-      );
-    });
-
-    it('should handle file modification workflow', async () => {
-      // Create initial file first
-      const mem = createMemAPI(mockConfig as AppConfig);
-      await mem.writeFile(
-        'modify-test.md',
-        '# Original Title\n\nOriginal content here.'
-      );
-      await mem.commitChanges('feat: add original file');
-
-      // Mock LLM response for modification
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Modify the file
-        `I'll modify the existing file by adding new content.
-<typescript>
-const fileName = 'modify-test.md';
-const existingContent = await mem.readFile(fileName);
-const newContent = existingContent + '\n\n## New Section\n\nThis content was added during modification.';
-await mem.updateFile(fileName, existingContent, newContent);
-</typescript>`,
-        // Second response: Commit and Reply
-        `File modified successfully. Now commit the changes.
-<typescript>
-await mem.commitChanges('feat: modify file with new section');
-</typescript>
-<reply>
-Successfully modified the file by adding a new section.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Modify the existing file',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        'Successfully modified the file by adding a new section.'
-      );
-
-      // Verify file was modified
-      const modifiedContent = await mem.readFile('modify-test.md');
-      expect(modifiedContent).toContain('# Original Title');
-      expect(modifiedContent).toContain('Original content here.');
-      expect(modifiedContent).toContain('## New Section');
-      expect(modifiedContent).toContain(
-        'This content was added during modification'
-      );
-
-      // Verify git history
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0].message).toBe('feat: modify file with new section');
-      expect(log.all[1].message).toBe('feat: add original file');
-    });
-
-    it('should demonstrate complete Think-Act-Commit loop', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      // Mock LLM response sequence demonstrating the complete loop
-      const mockLLMQuery = createMockLLMQuery([
-        // Think phase
-        `I need to create a comprehensive example that demonstrates the complete Think-Act-Commit loop.
-<typescript>
-// Create a detailed example file
-await mem.writeFile('loop-example.md', '# Complete Loop Example\n\nThis demonstrates the full workflow.');
-await mem.writeFile('loop-example.md', await mem.readFile('loop-example.md') + '\n\n## Steps\n\n1. Think\n2. Act\n3. Commit');
-</typescript>`,
-        // Commit phase
-        `Example created successfully. Now commit the demonstration.
-<typescript>
-await mem.commitChanges('feat: demonstrate complete Think-Act-Commit loop');
-</typescript>`,
-        // Final reply
-        `Complete workflow demonstrated successfully.
-<reply>
-I've successfully demonstrated the complete Think-Act-Commit loop by creating an example file and committing the changes.
-</reply>`,
-      ]);
-
-      // Execute the query
-      const result = await handleUserQuery(
-        'Demonstrate the complete Think-Act-Commit loop',
-        mockConfig,
-        undefined,
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        "I've successfully demonstrated the complete Think-Act-Commit loop by creating an example file and committing the changes."
-      );
-
-      // Verify the workflow was completed
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('loop-example.md');
-      expect(fileExists).toBe(true);
-
-      const content = await mem.readFile('loop-example.md');
-      expect(content).toContain('# Complete Loop Example');
-      expect(content).toContain('Think');
-      expect(content).toContain('Act');
-      expect(content).toContain('Commit');
-
-      // Verify git commit
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: demonstrate complete Think-Act-Commit loop'
-      );
-    });
-  });
-});
 ````
 
 ## File: tests/unit/parser.test.ts
@@ -2967,10 +1953,7 @@ const MIN_LOG_LEVEL: LogLevel =
   LOG_LEVEL_MAP[process.env.LOG_LEVEL?.toLowerCase() ?? 'info'] ??
   LogLevel.INFO;
 
-type LogContext = Record<
-  string,
-  string | number | boolean | null | undefined | Record<string, unknown>
->;
+type LogContext = Record<string, unknown>;
 
 export type Logger = {
   debug: (message: string, context?: LogContext) => void;
@@ -3109,681 +2092,80 @@ export interface LLMProvider {
 export type StreamingCallback = (chunk: string) => void;
 ````
 
-## File: tests/integration/end-to-end.test.ts
+## File: src/config.ts
 ````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  mock,
-} from 'bun:test';
-import { promises as fs } from 'fs';
+import 'dotenv/config';
+import { z } from 'zod';
 import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
+import fs from 'fs';
 
-describe('End-to-End HTTP Integration Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-  let app: Elysia;
-  let testPort: number;
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-test-'));
-    testPort = 3001; // Use different port for tests
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-      port: testPort,
-    };
-  });
-
-  beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-  });
-
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  // Mock LLM responses for testing
-  const createMockLLMQuery = (responses: string[]) => {
-    let callCount = 0;
-    return mock(async (_history: unknown[], _config: unknown) => {
-      const response = responses[callCount] || responses[responses.length - 1];
-      callCount++;
-      return response;
-    });
-  };
-
-  describe('HTTP API Integration', () => {
-    it('should handle a complete MCP request via HTTP', async () => {
-      // Mock the LLM query function
-      const mockLLMQuery = createMockLLMQuery([
-        // First response: Think and Act
-        `</think>
-I'll create a simple test file via the HTTP API.
-</think>
-<typescript>
-const fileName = 'api-test.md';
-const content = '# API Test\n\nThis file was created via the HTTP API endpoint.';
-await mem.writeFile(fileName, content);
-</typescript>`,
-        // Second response: Commit and Reply
-        `<think>
-File created successfully. Now I need to commit and respond.
-</think>
-<typescript>
-await mem.commitChanges('feat: add API test file');
-</typescript>
-<reply>
-I've successfully created a test file through the HTTP API and committed the changes.
-</reply>`,
-      ]);
-
-      // This test focuses on the handleUserQuery function directly,
-      // simulating an end-to-end agent workflow without the HTTP server layer.
-      const result = await handleUserQuery(
-        'Create a test file via HTTP API',
-        mockConfig,
-        'test-session-456',
-        mockLLMQuery
-      );
-
-      expect(result).toBe(
-        "I've successfully created a test file through the HTTP API and committed the changes."
-      );
-
-      // Verify the file was created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      const fileExists = await mem.fileExists('api-test.md');
-      expect(fileExists).toBe(true);
-
-      const fileContent = await mem.readFile('api-test.md');
-      expect(fileContent).toContain('# API Test');
-      expect(fileContent).toContain('HTTP API endpoint');
-
-      // Verify git commit
-      const git = simpleGit(tempDir);
-      const log = await git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe('feat: add API test file');
-    });
-
-    it('should handle streaming responses with status updates', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      const mockLLMQuery = createMockLLMQuery([
-        // First response with thinking
-        `</think>
-I'll demonstrate the streaming capabilities by creating multiple files and showing progress.
-</think>
-<typescript>
-// Create multiple files to demonstrate progress
-const files = [
-  { name: 'progress1.md', content: '# Progress 1\n\nFirst file in series.' },
-  { name: 'progress2.md', content: '# Progress 2\n\nSecond file in series.' },
-  { name: 'progress3.md', content: '# Progress 3\n\nThird file in series.' }
-];
-
-for (const file of files) {
-  await mem.writeFile(file.name, file.content);
-}
-</typescript>`,
-        // Second response: Commit and Reply
-        `<think>
-All files created successfully. Now commit and provide final summary.
-</think>
-<typescript>
-await mem.commitChanges('feat: add multiple progress files');
-</typescript>
-<reply>
-I've successfully created three files to demonstrate the streaming progress functionality. All changes have been committed.
-</reply>`,
-      ]);
-
-      // Execute with status updates
-      const result = await handleUserQuery(
-        'Demonstrate streaming with multiple files',
-        mockConfig,
-        'stream-test-session',
-        mockLLMQuery,
-        captureStatusUpdate
-      );
-
-      // Verify final response
-      expect(result).toBe(
-        "I've successfully created three files to demonstrate the streaming progress functionality. All changes have been committed."
-      );
-
-      // Verify status updates were captured
-      expect(statusUpdates.length).toBeGreaterThan(0);
-
-      // Check for different types of status updates
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
-
-      // Verify runId consistency
-      const runIds = [...new Set(statusUpdates.map((u) => u.runId))];
-      expect(runIds.length).toBe(1); // All updates should have same runId
-
-      // Verify files were created
-      const mem = createMemAPI(mockConfig as AppConfig);
-      for (let i = 1; i <= 3; i++) {
-        const fileExists = await mem.fileExists(`progress${i}.md`);
-        expect(fileExists).toBe(true);
-      }
-    });
-
-    it('should handle complex multi-turn conversations', async () => {
-      const sessionId = 'complex-conversation';
-
-      // First query: Create a project structure
-      const firstMockLLMQuery = createMockLLMQuery([
-        `</think>
-I'll create a project structure with README, main file, and configuration.
-</think>
-<typescript>
-// Create project structure
-await mem.writeFile('README.md', '# My Project\n\nThis is a test project.');
-await mem.writeFile('main.ts', '// Main entry point\nconsole.log("Hello, World!");');
-await mem.writeFile('config.json', '{"name": "test-project", "version": "1.0.0"}');
-await mem.createDir('src');
-await mem.writeFile('src/utils.ts', '// Utility functions');
-</typescript>`,
-        `</think>
-Project structure created. Now commit the initial setup.
-</think>
-<typescript>
-await mem.commitChanges('feat: initialize project structure');
-</typescript>`,
-        `<reply>
-I've created a complete project structure with README, main file, configuration, and a source directory with utilities.
-</reply>`,
-      ]);
-
-      const firstResult = await handleUserQuery(
-        'Create a new project structure',
-        mockConfig,
-        sessionId,
-        firstMockLLMQuery
-      );
-
-      expect(firstResult).toContain('created a complete project structure');
-
-      // Second query: Add more features to the existing project
-      const secondMockLLMQuery = createMockLLMQuery([
-        `</think>
-I'll enhance the existing project by adding tests and documentation.
-</think>
-<typescript>
-// Add tests and documentation
-await mem.createDir('tests');
-await mem.writeFile('tests/main.test.ts', '// Test for main functionality');
-await mem.writeFile('docs/api.md', '# API Documentation\n\nDetailed API docs here.');
-const readmeContent = await mem.readFile('README.md');
-await mem.updateFile(
-  'README.md',
-  readmeContent,
-  readmeContent + '\n\n## Testing\n\nRun tests with \`npm test\`.'
-);
-</typescript>`,
-        `<think>
-Enhanced project with tests and documentation. Commit the additions.
-`,
-      ]);
-
-      const secondResult = await handleUserQuery(
-        'Add tests and documentation',
-        mockConfig,
-        sessionId,
-        secondMockLLMQuery
-      );
-
-      expect(secondResult).toContain(
-        'Enhanced project with tests and documentation'
-      );
-    });
-  });
+const configSchema = z.object({
+  OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
+  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  LLM_MODEL: z
+    .string()
+    .default('anthropic/claude-3-haiku-20240307') // Sensible default for cost/speed
+    .optional(),
 });
-````
 
-## File: tests/integration/mcp-server-http.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  mock,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { createApp } from '../../src/server';
-import type { AppConfig } from '../../src/config';
+export type AppConfig = {
+  openRouterApiKey: string;
+  knowledgeGraphPath: string;
+  llmModel: string;
+};
 
-describe('MCP Server HTTP Integration Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-  let app: ReturnType<typeof createApp>;
-  let testPort: number;
-  let server: ReturnType<typeof createApp>;
+export const loadAndValidateConfig = (): AppConfig => {
+  const parseResult = configSchema.safeParse(process.env);
 
-  beforeAll(async () => {
-    // Create a temporary directory for the test knowledge graph
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-mcp-test-'));
-    testPort = 3001; // Use different port for tests
-
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-      port: testPort,
-    };
-
-    // Create a mock handleUserQuery function for testing
-    const mockHandleUserQuery = mock(async (query: string) => {
-      // config: AppConfig, sessionId?: string
-        return `Mock response for query: ${query}`;
-      }
+  if (!parseResult.success) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '❌ Invalid environment variables:',
+      parseResult.error.flatten().fieldErrors
     );
+    process.exit(1);
+  }
 
-    // Create the app instance
-    app = createApp(mockHandleUserQuery, mockConfig);
-  });
+  const { OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH, LLM_MODEL } =
+    parseResult.data;
 
-  beforeEach(async () => {
-    // Clear and reinitialize the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
+  // Perform runtime checks
+  let resolvedPath = KNOWLEDGE_GRAPH_PATH;
+  if (!path.isAbsolute(resolvedPath)) {
+    resolvedPath = path.resolve(process.cwd(), resolvedPath);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `KNOWLEDGE_GRAPH_PATH is not absolute. Resolved to: ${resolvedPath}`
+    );
+  }
 
-    // Initialize git repository
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-  });
-
-  afterAll(async () => {
-    // Clean up temporary directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-
-    // Close server if it's running
-    if (server) {
-      server.stop();
-    }
-  });
-
-  describe('HTTP API Endpoints', () => {
-    it('should respond to health check at root endpoint', async () => {
-      const response = await app.handle(new Request('http://localhost:3001/'));
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data).toEqual({
-        status: 'ok',
-        message: 'Recursa server is running',
-      });
-    });
-
-    it('should handle POST /mcp endpoint with valid request', async () => {
-      const requestBody = {
-        query: 'Create a test file',
-        sessionId: 'test-session-123',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data).toHaveProperty('runId');
-      expect(data).toHaveProperty('reply');
-      expect(data).toHaveProperty('streamingEndpoint');
-      expect(data.reply).toContain(
-        'Mock response for query: Create a test file'
-      );
-      expect(data.streamingEndpoint).toMatch(/^\/events\/[a-f0-9-]+$/);
-    });
-
-    it('should handle POST /mcp endpoint without sessionId', async () => {
-      const requestBody = {
-        query: 'Create a test file without session',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data).toHaveProperty('runId');
-      expect(data).toHaveProperty('reply');
-      expect(data).toHaveProperty('streamingEndpoint');
-    });
-
-    it('should reject POST /mcp with invalid JSON', async () => {
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: 'invalid json{',
-        })
-      );
-
-      expect(response.status).toBe(422); // Validation error
-    });
-
-    it('should reject POST /mcp with missing query field', async () => {
-      const requestBody = {
-        sessionId: 'test-session',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(422); // Validation error
-    });
-
-    it('should reject POST /mcp with empty query', async () => {
-      const requestBody = {
-        query: '',
-        sessionId: 'test-session',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(422); // Validation error
-    });
-
-    it('should reject POST /mcp with whitespace-only query', async () => {
-      const requestBody = {
-        query: '   \n\t   ',
-        sessionId: 'test-session',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(422); // Validation error
-    });
-  });
-
-  describe('Server-Sent Events (SSE)', () => {
-    it('should establish SSE connection for valid runId', async () => {
-      const testRunId = 'test-run-123';
-
-      const response = await app.handle(
-        new Request(`http://localhost:3001/events/${testRunId}`)
-      );
-
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Content-Type')).toBe('text/event-stream');
-      expect(response.headers.get('Cache-Control')).toBe('no-cache');
-      expect(response.headers.get('Connection')).toBe('keep-alive');
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
-    });
-
-    it('should send initial connection message via SSE', async () => {
-      const testRunId = 'test-run-456';
-
-      const response = await app.handle(
-        new Request(`http://localhost:3001/events/${testRunId}`)
-      );
-
-      expect(response.status).toBe(200);
-
-      // Read the SSE stream
-      const reader = response.body?.getReader();
-      expect(reader).toBeDefined();
-
-      if (reader) {
-        const { done, value } = await reader.read();
-        expect(done).toBe(false);
-
-        const text = new TextDecoder().decode(value);
-        expect(text).toContain('data: ');
-
-        // Parse the initial message
-        const dataMatch = text.match(/data: (.+)\n\n/);
-        expect(dataMatch).toBeDefined();
-
-        if (dataMatch) {
-          const initialMessage = JSON.parse(dataMatch[1]);
-          expect(initialMessage).toHaveProperty('type', 'think');
-          expect(initialMessage).toHaveProperty('runId', testRunId);
-          expect(initialMessage).toHaveProperty('timestamp');
-          expect(initialMessage).toHaveProperty(
-            'content',
-            'Connection established'
-          );
-        }
+  // In test environments, the path is created dynamically by the test runner,
+  // so we should skip this check. `bun test` automatically sets NODE_ENV=test.
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      const stats = fs.statSync(resolvedPath);
+      if (!stats.isDirectory()) {
+        throw new Error('is not a directory.');
       }
-    });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `❌ Error with KNOWLEDGE_GRAPH_PATH "${resolvedPath}": ${
+          (error as Error).message
+        }`
+      );
+      process.exit(1);
+    }
+  }
+
+  return Object.freeze({
+    openRouterApiKey: OPENROUTER_API_KEY,
+    knowledgeGraphPath: resolvedPath,
+    llmModel: LLM_MODEL!,
   });
+};
 
-  describe('Error Handling', () => {
-    it('should handle errors in MCP processing gracefully', async () => {
-      // Create a mock that throws an error
-      const mockHandleUserQuery = mock(async () => {
-        throw new Error('Test error');
-      });
-
-      const errorApp = createApp(mockHandleUserQuery, mockConfig);
-
-      const requestBody = {
-        query: 'This should cause an error',
-        sessionId: 'error-test-session',
-      };
-
-      const response = await errorApp.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      // Even with errors, the HTTP response should be successful
-      // but the response should indicate the error
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data).toHaveProperty('runId');
-      expect(data).toHaveProperty('reply');
-      expect(data.reply).toContain(
-        'An error occurred while processing your request.'
-      );
-    });
-
-    it('should handle 404 for unknown routes', async () => {
-      const response = await app.handle(
-        new Request('http://localhost:3001/unknown-route')
-      );
-      expect(response.status).toBe(404);
-    });
-
-    it('should reject unsupported HTTP methods for /mcp endpoint', async () => {
-      // GET method should be rejected
-      const getResponse = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'GET',
-        })
-      );
-      expect(getResponse.status).toBe(404); // Route not found for GET
-
-      // PUT method should be rejected
-      const putResponse = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: 'test' }),
-        })
-      );
-      expect(putResponse.status).toBe(404); // Route not found for PUT
-
-      // DELETE method should be rejected
-      const deleteResponse = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'DELETE',
-        })
-      );
-      expect(deleteResponse.status).toBe(404); // Route not found for DELETE
-    });
-  });
-
-  describe('Request/Response Headers', () => {
-    it('should include request ID in responses', async () => {
-      const requestBody = {
-        query: 'Test with headers',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      // The server should add a request ID header
-      expect(response.headers.get('X-Request-ID')).toBeDefined();
-      expect(response.headers.get('X-Request-ID')).toMatch(/^[a-f0-9-]+$/);
-    });
-
-    it('should handle requests with custom headers', async () => {
-      const requestBody = {
-        query: 'Test with custom headers',
-      };
-
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'test-agent/1.0',
-            'X-Custom-Header': 'custom-value',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(200);
-    });
-
-    it('should handle CORS headers for SSE endpoints', async () => {
-      const testRunId = 'cors-test-run';
-
-      const response = await app.handle(
-        new Request(`http://localhost:3001/events/${testRunId}`)
-      );
-
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
-      expect(response.headers.get('Access-Control-Allow-Headers')).toBe(
-        'Cache-Control'
-      );
-    });
-  });
-
-  describe('Content Type Handling', () => {
-    it('should reject requests with wrong content type', async () => {
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain',
-          },
-          body: JSON.stringify({ query: 'test' }),
-        })
-      );
-
-      // Elysia's parser is strict and will reject this.
-      expect(response.status).toBe(422);
-    });
-
-    it('should handle requests without content type header', async () => {
-      const response = await app.handle(
-        new Request('http://localhost:3001/mcp', {
-          method: 'POST',
-          body: JSON.stringify({ query: 'test' }),
-        })
-      );
-
-      // Elysia's parser is strict and will reject this without a Content-Type header.
-      expect(response.status).toBe(422);
-    });
-  });
-});
+export const config: AppConfig = loadAndValidateConfig();
 ````
 
 ## File: .env.example
@@ -3812,9 +2194,6 @@ SANDBOX_MEMORY_LIMIT=100
 # Optional: Git Configuration
 GIT_USER_NAME=Recursa Agent
 GIT_USER_EMAIL=recursa@local
-
-# Optional: Port for the Recursa server
-PORT=3000
 
 # Usage:
 # 1. Copy this file: cp .env.example .env
@@ -3999,7 +2378,7 @@ export const queryLLM = async (
       headers: {
         Authorization: `Bearer ${config.openRouterApiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': `http://localhost:${config.port}`,
+        'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
         'X-Title': 'Recursa',
       },
       body: JSON.stringify(requestBody),
@@ -4134,63 +2513,6 @@ export const parseLLMResponse = (response: string): ParsedLLMResponse => {
     typescript,
     reply,
   };
-};
-````
-
-## File: src/core/sandbox.ts
-````typescript
-import { VM, type VMOptions } from 'vm2';
-import type { MemAPI } from '../types/mem';
-import { logger } from '../lib/logger';
-
-/**
- * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
- * @param code The TypeScript code snippet to execute.
- * @param memApi The MemAPI instance to expose to the sandboxed code.
- * @returns The result of the code execution.
- */
-export const runInSandbox = async (
-  code: string,
-  memApi: MemAPI
-): Promise<unknown> => {
-  // Create a new, mutable object for the sandbox.
-  // The spread operator (`{ ...memApi }`) can fail to create a sufficiently
-  // mutable object for the vm2 sandbox, leading to "readonly property" errors.
-  // This manual construction is more robust.
-  const memApiCopy: { [K in keyof MemAPI]?: MemAPI[K] } = {};
-  for (const key of Object.keys(memApi) as Array<keyof MemAPI>) {
-    memApiCopy[key] = memApi[key];
-  }
-
-  const vm = new VM({
-    timeout: 10000, // 10 seconds
-    sandbox: {
-      mem: memApiCopy,
-    },
-    eval: false,
-    wasm: false,
-    fixAsync: true,
-    // Deny access to all node builtins by default.
-    require: {
-      builtin: [],
-    },
-  } as VMOptions);
-
-  // Wrap the user code in an async IIFE to allow top-level await.
-  const wrappedCode = `(async () => { ${code} })();`;
-
-  try {
-    logger.debug('Executing code in sandbox', { code: wrappedCode });
-    const result = await vm.run(wrappedCode);
-    logger.debug('Sandbox execution successful', { result });
-    return result;
-  } catch (error) {
-    logger.error('Error executing sandboxed code', error as Error, {
-      code,
-    });
-    // Re-throw a sanitized error to the agent loop
-    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
-  }
 };
 ````
 
@@ -4371,863 +2693,6 @@ export type MemAPI = {
 };
 ````
 
-## File: tests/e2e/agent-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  afterAll,
-  beforeAll,
-  beforeEach,
-} from 'bun:test';
-import { handleUserQuery } from '../../src/core/loop';
-import type { AppConfig } from '../../src/config';
-import type { ChatMessage } from '../../src/types';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { config as appConfig } from '../../src/config';
-
-// This is a test-scoped override for the LLM call.
-// It allows us to simulate the LLM's responses without making network requests.
-const createMockQueryLLM = (responses: string[]) => {
-  let callCount = 0;
-  return async (
-    _history: ChatMessage[],
-    _config: AppConfig
-  ): Promise<string> => {
-    // Return the next pre-canned XML response from the `responses` array.
-    const response = responses[callCount];
-    if (!response) {
-      throw new Error(
-        `Mock LLM called more times than expected (${callCount}).`
-      );
-    }
-    callCount++;
-    return response;
-  };
-};
-
-describe('Agent End-to-End Workflow', () => {
-  let testGraphPath: string;
-  let testConfig: AppConfig;
-
-  beforeAll(async () => {
-    // Set up a temporary directory for the knowledge graph.
-    testGraphPath = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-'));
-    testConfig = { ...appConfig, knowledgeGraphPath: testGraphPath };
-  });
-
-  afterAll(async () => {
-    // Clean up the temporary directory.
-    await fs.rm(testGraphPath, { recursive: true, force: true });
-  });
-
-  beforeEach(async () => {
-    // Clean up the graph directory between tests to ensure isolation.
-    await fs.rm(testGraphPath, { recursive: true, force: true });
-    await fs.mkdir(testGraphPath, { recursive: true });
-    const git = simpleGit(testGraphPath);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-
-    // Create a .gitignore file first
-    await fs.writeFile(
-      path.join(testGraphPath, '.gitignore'),
-      '*.log\nnode_modules/\n.env'
-    );
-
-    await git.add('.gitignore');
-    await git.commit('Initial commit');
-  });
-
-  it('should correctly handle the Dr. Aris Thorne example from the docs', async () => {
-    // 1. SETUP
-    // Define the multi-turn LLM responses as XML strings based on the example.
-    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
-<typescript>
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-if (!orgExists) {
-  await mem.writeFile(orgPath, '# AI Research Institute\\ntype:: organization\\n');
-}
-await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\\ntype:: person\\naffiliation:: [[AI Research Institute]]\\nfield:: [[Symbolic Reasoning]]');
-</typescript>`;
-    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>`;
-
-    // Create a mock LLM function for this specific test case.
-    const mockQueryLLM = createMockQueryLLM([turn1Response, turn2Response]);
-
-    // 2. EXECUTE
-    // Call the main loop with the user query and the mocked LLM function.
-    const query =
-      'I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation.';
-    const finalReply = await handleUserQuery(
-      query,
-      testConfig,
-      undefined,
-      mockQueryLLM
-    );
-
-    // 3. ASSERT
-    // Assert the final user-facing reply is correct.
-    expect(finalReply).toBe(
-      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
-    );
-
-    // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
-    const thornePath = path.join(testGraphPath, 'Dr. Aris Thorne.md');
-    const orgPath = path.join(testGraphPath, 'AI Research Institute.md');
-    await expect(fs.access(thornePath)).resolves.not.toThrow();
-    await expect(fs.access(orgPath)).resolves.not.toThrow();
-
-    // Verify file content. Read 'Dr. Aris Thorne.md' and check for `affiliation:: [[AI Research Institute]]`.
-    const thorneContent = await fs.readFile(thornePath, 'utf-8');
-    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
-    expect(thorneContent).toContain('field:: [[Symbolic Reasoning]]');
-
-    // Verify the git commit. Use `simple-git` to check the log of the test repo.
-    const git = simpleGit(testGraphPath);
-    const log = await git.log({ maxCount: 1 });
-    expect(log.latest?.message).toBe(
-      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
-    );
-  });
-});
-````
-
-## File: tests/e2e/mcp-server-complete.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  mock,
-} from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { createApp } from '../../src/server';
-import type { AppConfig } from '../../src/config';
-import { handleUserQuery } from '../../src/core/loop';
-import type { ChatMessage } from '../../src/types';
-
-describe('MCP Server Complete End-to-End Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-  let app: unknown;
-  let testPort: number;
-  let baseUrl: string;
-
-  beforeAll(async () => {
-    // Create a temporary directory for the test knowledge graph
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-test-'));
-    testPort = 3002; // Use a unique port for E2E tests
-
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'mock-test-api-key',
-      llmModel: 'mock-test-model',
-      port: testPort,
-    };
-
-    baseUrl = `http://localhost:${testPort}`;
-  });
-
-  beforeEach(async () => {
-    // Clear and reinitialize the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git repository
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'E2E Test User');
-    await git.addConfig('user.email', 'e2e-test@example.com');
-
-    // Create a .gitignore file first
-    await fs.writeFile(
-      path.join(tempDir, '.gitignore'),
-      '*.log\nnode_modules/\n.env'
-    );
-
-    await git.add('.gitignore');
-    await git.commit('Initial commit');
-  });
-
-  afterAll(async () => {
-    // Clean up temporary directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  describe('HTTP API Contract Tests', () => {
-    it('should handle complete MCP request lifecycle', async () => {
-      // Create a mock LLM that simulates the Think-Act-Commit loop
-      const mockLLMResponses = [
-        // Turn 1: Think and Act
-        `I'll create a new person entry for the test subject.
-<typescript>
-await mem.writeFile('Test Person.md', '# Test Person\\ntype:: person\\nfield:: [[Testing]]\\ncreated:: ' + new Date().toISOString());
-</typescript>`,
-        // Turn 2: Commit and Reply
-        `I'll save the changes to your knowledge base.
-<typescript>
-await mem.commitChanges('feat: Add Test Person entity');
-</typescript>
-<reply>
-I've successfully created a new entry for Test Person in your knowledge base.
-</reply>`,
-      ];
-
-      const mockQueryLLM = mock(
-        async (history: ChatMessage[], _config: AppConfig) => {
-          // Ensure history is an array
-          const historyArray = Array.isArray(history) ? history : [];
-          const responseCount = historyArray.filter(
-            (m) => m.role === 'assistant'
-          ).length;
-          return (
-            mockLLMResponses[responseCount] ||
-            mockLLMResponses[mockLLMResponses.length - 1]
-          );
-        }
-      );
-
-      // Create a version of handleUserQuery that uses our mocked LLM
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      // Make the MCP request
-      const requestBody = {
-        query: 'Create a new person entry for Test Person who works in Testing',
-        sessionId: 'e2e-test-session-1',
-      };
-
-      const response = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data).toHaveProperty('runId');
-      expect(data).toHaveProperty('reply');
-      expect(data).toHaveProperty('streamingEndpoint');
-      expect(data.reply).toContain(
-        'successfully created a new entry for Test Person'
-      );
-      expect(data.streamingEndpoint).toMatch(/^\/events\/[a-f0-9-]+$/);
-
-      // Verify the file was actually created
-      const testPersonPath = path.join(tempDir, 'Test Person.md');
-      expect(await fs.access(testPersonPath)).not.toThrow();
-
-      const content = await fs.readFile(testPersonPath, 'utf-8');
-      expect(content).toContain('# Test Person');
-      expect(content).toContain('type:: person');
-      expect(content).toContain('field:: [[Testing]]');
-
-      // Verify the git commit was created
-      const git = simpleGit(tempDir);
-      const log = await git.log({ maxCount: 1 });
-      expect(log.latest?.message).toBe('feat: Add Test Person entity');
-    });
-
-    it('should handle multi-step workflow with multiple file operations', async () => {
-      const mockLLMResponses = [
-        // Turn 1: Create organization and person with linking
-        `I'll create both the organization and person entries and link them together.
-<typescript>
-const orgPath = 'Test Organization.md';
-const orgExists = await mem.fileExists(orgPath);
-if (!orgExists) {
-  await mem.writeFile(orgPath, '# Test Organization\\ntype:: organization\\nindustry:: [[Technology]]\\nfounded:: 2020');
-}
-
-await mem.writeFile('John Doe.md', '# John Doe\\ntype:: person\\nrole:: Developer\\naffiliation:: [[Test Organization]]\\nskills:: [[JavaScript]], [[TypeScript]]');
-</typescript>`,
-        // Turn 2: Commit and Reply
-        `I'll save these changes to your knowledge base.
-<typescript>
-await mem.commitChanges('feat: Add Test Organization and John Doe with linked entities');
-</typescript>
-<reply>
-I've created entries for both Test Organization and John Doe, with proper linking between them.
-</reply>`,
-      ];
-
-      const mockQueryLLM = mock(
-        async (history: ChatMessage[], _config: AppConfig) => {
-          // Ensure history is an array
-          const historyArray = Array.isArray(history) ? history : [];
-          const responseCount = historyArray.filter(
-            (m) => m.role === 'assistant'
-          ).length;
-          return mockLLMResponses[responseCount];
-        }
-      );
-
-      // Create a version of handleUserQuery that uses our mocked LLM
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      const requestBody = {
-        query:
-          'Create entries for John Doe, a developer at Test Organization, and link them together',
-        sessionId: 'e2e-test-session-2',
-      };
-
-      const response = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data.reply).toContain(
-        'created entries for both Test Organization and John Doe'
-      );
-
-      // Verify both files were created
-      const orgPath = path.join(tempDir, 'Test Organization.md');
-      const personPath = path.join(tempDir, 'John Doe.md');
-
-      expect(await fs.access(orgPath)).not.toThrow();
-      expect(await fs.access(personPath)).not.toThrow();
-
-      // Verify content and linking
-      const orgContent = await fs.readFile(orgPath, 'utf-8');
-      expect(orgContent).toContain('# Test Organization');
-      expect(orgContent).toContain('type:: organization');
-
-      const personContent = await fs.readFile(personPath, 'utf-8');
-      expect(personContent).toContain('# John Doe');
-      expect(personContent).toContain('affiliation:: [[Test Organization]]');
-      expect(personContent).toContain(
-        'skills:: [[JavaScript]], [[TypeScript]]'
-      );
-
-      // Verify git commit
-      const git = simpleGit(tempDir);
-      const log = await git.log({ maxCount: 1 });
-      expect(log.latest?.message).toBe(
-        'feat: Add Test Organization and John Doe with linked entities'
-      );
-    });
-  });
-
-  describe('Server-Sent Events (SSE) Integration', () => {
-    it('should provide real-time status updates during processing', async () => {
-      const mockLLMResponses = [
-        // Turn 1: Multiple actions to generate status updates
-        `I'll analyze the request and create the necessary files.
-<typescript>
-await mem.writeFile('Status Test.md', '# Status Test\\ntype:: test\\nstatus:: in-progress');
-</typescript>`,
-        // Turn 2: Final commit
-        `I'll complete the operation now.
-<typescript>
-await mem.commitChanges('feat: Complete status test operation');
-</typescript>
-<reply>
-The status test operation has been completed successfully.
-</reply>`,
-      ];
-
-      const mockQueryLLM = mock(
-        async (history: ChatMessage[], _config: AppConfig) => {
-          // Ensure history is an array
-          const historyArray = Array.isArray(history) ? history : [];
-          const responseCount = historyArray.filter(
-            (m) => m.role === 'assistant'
-          ).length;
-          return mockLLMResponses[responseCount];
-        }
-      );
-
-      // Create a version of handleUserQuery that uses our mocked LLM
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      // Make the MCP request
-      const requestBody = {
-        query: 'Create a status test file and track the progress',
-        sessionId: 'e2e-sse-test',
-      };
-
-      const mcpResponse = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      const mcpData = await mcpResponse.json();
-      const { runId, streamingEndpoint } = mcpData;
-
-      // Connect to SSE endpoint
-      const sseResponse = await app.handle(
-        new Request(`${baseUrl}${streamingEndpoint}`)
-      );
-      expect(sseResponse.status).toBe(200);
-      expect(sseResponse.headers.get('Content-Type')).toBe('text/event-stream');
-
-      // Read SSE stream
-      const reader = sseResponse.body?.getReader();
-      expect(reader).toBeDefined();
-
-      if (reader) {
-        const decoder = new TextDecoder();
-        let sseData = '';
-
-        // Read all available data
-        try {
-          const startTime = Date.now();
-          const timeoutMs = 5000; // 5 second timeout
-          while (Date.now() - startTime < timeoutMs) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            sseData += decoder.decode(value);
-          }
-        } catch (error) {
-          // Stream may close, that's expected
-        }
-
-        // Parse SSE events
-        const events = sseData
-          .split('\n\n')
-          .filter((event) => event.startsWith('data: '));
-        expect(events.length).toBeGreaterThan(0);
-
-        // Verify we get the initial connection message
-        const initialEvent = JSON.parse(events[0].replace('data: ', ''));
-        expect(initialEvent.type).toBe('think');
-        expect(initialEvent.runId).toBe(runId);
-        expect(initialEvent.content).toBe('Connection established');
-      }
-    });
-  });
-
-  describe('Error Handling and Edge Cases', () => {
-    it('should handle LLM errors gracefully and return meaningful responses', async () => {
-      const mockQueryLLM = mock(
-        async (_history: ChatMessage[], _config: AppConfig) => {
-          throw new Error('LLM service unavailable');
-        }
-      );
-
-      // Create a version of handleUserQuery that uses our mocked LLM
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      const requestBody = {
-        query: 'This should trigger an error',
-        sessionId: 'error-test-session',
-      };
-
-      const response = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      // HTTP response should still be successful
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data).toHaveProperty('runId');
-      expect(data).toHaveProperty('reply');
-      expect(data.reply).toContain(
-        'An error occurred while processing your request'
-      );
-    });
-
-    it('should handle code execution errors in the sandbox', async () => {
-      const mockLLMResponses = [
-        // Turn 1: Invalid TypeScript code
-        `I'll try to execute some invalid code.
-<typescript>
-await mem.nonExistentFunction();
-</typescript>`,
-        // Turn 2: Handle the error and respond
-        `I'll respond with an error message.
-<reply>
-There was an error executing the code. Please check the syntax and try again.
-</reply>`,
-      ];
-
-      const mockQueryLLM = mock(
-        async (history: ChatMessage[], _config: AppConfig) => {
-          // Ensure history is an array
-          const historyArray = Array.isArray(history) ? history : [];
-          const responseCount = historyArray.filter(
-            (m) => m.role === 'assistant'
-          ).length;
-          return mockLLMResponses[responseCount];
-        }
-      );
-
-      // Create a version of handleUserQuery that uses our mocked LLM
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      const requestBody = {
-        query: 'Execute some invalid code',
-        sessionId: 'code-error-test',
-      };
-
-      const response = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        })
-      );
-
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data.reply).toContain('error');
-    });
-
-    it('should handle session management across multiple requests', async () => {
-      const mockLLMResponses = [
-        [
-          `I'll create the first file.
-<typescript>
-await mem.writeFile('Session Test 1.md', '# Session Test 1\\nsession:: first-request');
-</typescript>`,
-          `I'll commit the first file.
-<typescript>
-await mem.commitChanges('feat: Add first session test file');
-</typescript>
-<reply>
-First file created successfully.
-</reply>`,
-        ],
-        [
-          `I'll create a second related file.
-<typescript>
-await mem.writeFile('Session Test 2.md', '# Session Test 2\\nsession:: second-request\\nrelated:: [[Session Test 1]]');
-</typescript>`,
-          `I'll commit the second file.
-<typescript>
-await mem.commitChanges('feat: Add second session test file');
-</typescript>
-<reply>
-Second file created and linked to the first.
-</reply>`,
-        ],
-      ];
-
-      const mockQueryLLM = mock(
-        async (history: ChatMessage[], _config: AppConfig) => {
-          const historyArray = Array.isArray(history) ? history : [];
-
-          // Determine which request we're on by counting non-feedback user messages.
-          const userQueries = historyArray.filter(
-            (m) => m.role === 'user' && !m.content.startsWith('[Execution')
-          ).length;
-          const requestIndex = userQueries - 1;
-
-          // Determine which turn we're on for the current request.
-          const assistantResponses = historyArray.filter(
-            (m) => m.role === 'assistant'
-          ).length;
-          const turnIndex = assistantResponses - requestIndex * 2;
-
-          if (requestIndex < 0 || turnIndex < 0) {
-            throw new Error('Mock LLM logic failed to determine request/turn.');
-          }
-
-          return mockLLMResponses[requestIndex][turnIndex];
-        }
-      );
-
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      // First request
-      const firstResponse = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: 'Create the first session test file',
-            sessionId: 'session-persistence-test',
-          }),
-        })
-      );
-
-      expect(firstResponse.status).toBe(200);
-      const firstData = await firstResponse.json();
-      expect(firstData.reply).toContain('First file created successfully');
-
-      // Second request with same session ID
-      const secondResponse = await app.handle(
-        new Request(`${baseUrl}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: 'Create a second file in the same session',
-            sessionId: 'session-persistence-test',
-          }),
-        })
-      );
-
-      expect(secondResponse.status).toBe(200);
-      const secondData = await secondResponse.json();
-      expect(secondData.reply).toContain('Second file created and linked');
-
-      // Verify both files exist and are properly linked
-      const file1Path = path.join(tempDir, 'Session Test 1.md');
-      const file2Path = path.join(tempDir, 'Session Test 2.md');
-
-      expect(await fs.access(file1Path)).not.toThrow();
-      expect(await fs.access(file2Path)).not.toThrow();
-
-      const file2Content = await fs.readFile(file2Path, 'utf-8');
-      expect(file2Content).toContain('related:: [[Session Test 1]]');
-    });
-  });
-
-  describe('Performance and Load Testing', () => {
-    it('should handle concurrent requests efficiently', async () => {
-      const mockLLMResponses = [
-        `I'll create a quick test file.
-<typescript>
-await mem.writeFile('Concurrent Test.md', '# Concurrent Test\\ntimestamp:: ' + Date.now());
-</typescript>`,
-        `I'll commit the test file.
-<typescript>
-await mem.commitChanges('feat: Add concurrent test file');
-</typescript>
-<reply>
-Concurrent test completed successfully.
-</reply>`,
-      ];
-
-      const mockQueryLLM = mock(
-        async (history: ChatMessage[], _config: AppConfig) => {
-          // Ensure history is an array
-          const historyArray = Array.isArray(history) ? history : [];
-          const responseCount = historyArray.filter(
-            (m) => m.role === 'assistant'
-          ).length;
-          return mockLLMResponses[responseCount];
-        }
-      );
-
-      // Create a version of handleUserQuery that uses our mocked LLM
-      const mockedHandleUserQuery = (
-        query: string,
-        config: AppConfig,
-        sessionId?: string
-      ) => {
-        return handleUserQuery(query, config, sessionId, mockQueryLLM);
-      };
-
-      // Create app with the mocked handler
-      app = createApp(mockedHandleUserQuery, mockConfig as AppConfig);
-
-      // Create 5 concurrent requests
-      const concurrentRequests = Array.from({ length: 5 }, (_, i) =>
-        app.handle(
-          new Request(`${baseUrl}/mcp`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              query: `Create concurrent test file ${i + 1}`,
-              sessionId: `concurrent-session-${i + 1}`,
-            }),
-          })
-        )
-      );
-
-      // Wait for all requests to complete
-      const responses = await Promise.all(concurrentRequests);
-
-      // Verify all requests were successful
-      responses.forEach((response, _index) => {
-        expect(response.status).toBe(200);
-      });
-
-      // Verify all files were created
-      for (let i = 0; i < 5; i++) {
-        const filePath = path.join(tempDir, 'Concurrent Test.md');
-        expect(await fs.access(filePath)).not.toThrow();
-      }
-    });
-  });
-
-  describe('API Compliance and Validation', () => {
-    it('should strictly validate request schemas and return appropriate errors', async () => {
-      app = createApp(
-        mock(async () => 'mock response'),
-        mockConfig as AppConfig
-      );
-
-      // Test various invalid request formats
-      const invalidRequests = [
-        {
-          name: 'missing query field',
-          body: { sessionId: 'test' },
-          expectedStatus: 422,
-        },
-        {
-          name: 'empty query string',
-          body: { query: '', sessionId: 'test' },
-          expectedStatus: 422,
-        },
-        {
-          name: 'whitespace-only query',
-          body: { query: '   \n\t   ', sessionId: 'test' },
-          expectedStatus: 422,
-        },
-        {
-          name: 'null query',
-          body: { query: null, sessionId: 'test' },
-          expectedStatus: 422,
-        },
-      ];
-
-      for (const testCase of invalidRequests) {
-        const response = await app.handle(
-          new Request(`${baseUrl}/mcp`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(testCase.body),
-          })
-        );
-
-        expect(response.status).toBe(
-          testCase.expectedStatus,
-          `Expected status ${testCase.expectedStatus} for ${testCase.name}`
-        );
-      }
-    });
-
-    it('should handle malformed JSON requests gracefully', async () => {
-      app = createApp(
-        mock(async () => 'mock response'),
-        mockConfig as AppConfig
-      );
-
-      const malformedRequests = [
-        'invalid json{',
-        '{"query": "test", "sessionId": "test"', // missing closing brace
-        '{"query": "test", "sessionId":}', // invalid value
-        'query=test&sessionId=test', // form data instead of JSON
-      ];
-
-      for (const malformedBody of malformedRequests) {
-        const response = await app.handle(
-          new Request(`${baseUrl}/mcp`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: malformedBody,
-          })
-        );
-
-        expect(response.status).toBe(422);
-      }
-    });
-  });
-});
-````
-
 ## File: tests/integration/mem-api.test.ts
 ````typescript
 import {
@@ -5255,7 +2720,6 @@ describe('MemAPI Integration Tests', () => {
     knowledgeGraphPath: '', // This will be set in beforeAll,
     openRouterApiKey: 'test-key',
     llmModel: 'test-model',
-    port: 3000,
   };
 
   beforeAll(async () => {
@@ -5375,13 +2839,8 @@ describe('MemAPI Integration Tests', () => {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "openrouter-sdk": "^1.0.0",
-    "vm2": "^3.9.19",
     "simple-git": "^3.20.0",
-    "elysia": "^1.0.0",
-    "fast-xml-parser": "^4.3.6",
     "zod": "^3.23.8",
     "dotenv": "^16.4.5"
   },
@@ -5435,60 +2894,112 @@ describe('MemAPI Integration Tests', () => {
 
 ## File: src/core/mem-api/graph-ops.ts
 ````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
 import type { GraphQueryResult } from '../../types';
-
-// Note: These are complex and will require file system access and parsing logic.
+import { resolveSecurePath } from './secure-path';
+import { walk } from './fs-walker';
 
 export const queryGraph =
-  (_graphRoot: string) =>
-  async (_query: string): Promise<GraphQueryResult[]> => {
-    // Cheatsheet for implementation:
-    // 1. This is a complex function requiring a mini-parser for the query language.
-    // 2. Parse the query string into a structured format (e.g., an AST).
-    // 3. Use the local `walk` utility to iterate over all files in graphRoot.
-    // 4. For each file, check if it matches the query AST.
-    //    - `(property key:: value)`: Read file, find line with `key:: value`.
-    //    - `(outgoing-link [[Page]])`: Read file, find `[[Page]]`.
-    //    - `(AND ...)`: All sub-queries must match.
-    // 5. Aggregate results into the `QueryResult[]` format.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (query: string): Promise<GraphQueryResult[]> => {
+    // Basic property query parser: (property key:: value)
+    const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+    const match = query.trim().match(propertyRegex);
+
+    if (!match || !match[1] || !match[2]) {
+      // For now, only support property queries. Return empty for others.
+      return [];
+    }
+
+    const key = match[1];
+    const value = match[2];
+    const results: GraphQueryResult[] = [];
+
+    for await (const filePath of walk(graphRoot)) {
+      if (filePath.endsWith('.md')) {
+        const content = await fs.readFile(filePath, 'utf-8');
+        const lines = content.split('\n');
+        const matchingLines: string[] = [];
+        for (const line of lines) {
+          if (line.trim() === `${key.trim()}:: ${value.trim()}`) {
+            matchingLines.push(line);
+          }
+        }
+        if (matchingLines.length > 0) {
+          results.push({
+            filePath: path.relative(graphRoot, filePath),
+            matches: matchingLines,
+          });
+        }
+      }
+    }
+    return results;
   };
 
 export const getBacklinks =
-  (_graphRoot: string) =>
-  async (_filePath: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Normalize the `filePath` to its base name (e.g., 'My Page.md' -> 'My Page').
-    // 2. Construct the link pattern, e.g., `[[My Page]]`.
-    // 3. Use the local `walk` utility to iterate through all `.md` files in graphRoot.
-    // 4. For each file, read its content and check if it contains the link pattern.
-    // 5. If it does, add that file's path to the results array.
-    // 6. Return the array of file paths.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const targetBaseName = path.basename(filePath, path.extname(filePath));
+    const linkPattern = `[[${targetBaseName}]]`;
+    const backlinks: string[] = [];
+
+    for await (const currentFilePath of walk(graphRoot)) {
+      // Don't link to self
+      if (
+        path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)
+      ) {
+        continue;
+      }
+
+      if (currentFilePath.endsWith('.md')) {
+        try {
+          const content = await fs.readFile(currentFilePath, 'utf-8');
+          if (content.includes(linkPattern)) {
+            backlinks.push(path.relative(graphRoot, currentFilePath));
+          }
+        } catch (e) {
+          // Ignore files that can't be read
+        }
+      }
+    }
+    return backlinks;
   };
 
 export const getOutgoingLinks =
-  (_graphRoot: string) =>
-  async (_filePath: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Use `resolveSecurePath` to get the full, validated path for `filePath`.
-    // 2. Read the file content.
-    // 3. Use a regex like `/\[\[(.*?)\]\]/g` to find all wikilinks.
-    // 4. Extract the content from each match.
-    // 5. Return an array of unique link names.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const matches = content.matchAll(linkRegex);
+    const uniqueLinks = new Set<string>();
+
+    for (const match of matches) {
+      if (match[1]) {
+        uniqueLinks.add(match[1]);
+      }
+    }
+    return Array.from(uniqueLinks);
   };
 
 export const searchGlobal =
-  (_graphRoot: string) =>
-  async (_query: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Use the local `walk` utility to iterate through all text-based files in graphRoot.
-    // 2. For each file, read its content.
-    // 3. Perform a case-insensitive search for the `query` string.
-    // 4. If a match is found, add the file path to the results.
-    // 5. Return the array of matching file paths.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    const matchingFiles: string[] = [];
+    const lowerCaseQuery = query.toLowerCase();
+
+    for await (const filePath of walk(graphRoot)) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.toLowerCase().includes(lowerCaseQuery)) {
+          matchingFiles.push(path.relative(graphRoot, filePath));
+        }
+      } catch (e) {
+        // Ignore binary files or files that can't be read
+      }
+    }
+    return matchingFiles;
   };
 ````
 
@@ -5540,6 +3051,226 @@ export const getTokenCountForPaths =
       })
     );
   };
+````
+
+## File: tests/e2e/agent-workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  afterAll,
+  beforeAll,
+  beforeEach,
+} from 'bun:test';
+import { handleUserQuery } from '../../src/core/loop';
+import type { AppConfig } from '../../src/config';
+import type { ChatMessage } from '../../src/types';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import simpleGit from 'simple-git';
+import { config as appConfig } from '../../src/config';
+
+// This is a test-scoped override for the LLM call.
+// It allows us to simulate the LLM's responses without making network requests.
+const createMockQueryLLM = (responses: string[]) => {
+  let callCount = 0;
+  return async (
+    _history: ChatMessage[],
+    _config: AppConfig
+  ): Promise<string> => {
+    // Return the next pre-canned XML response from the `responses` array.
+    const response = responses[callCount];
+    if (!response) {
+      throw new Error(
+        `Mock LLM called more times than expected (${callCount}).`
+      );
+    }
+    callCount++;
+    return response;
+  };
+};
+
+describe('Agent End-to-End Workflow', () => {
+  let testGraphPath: string;
+  let testConfig: AppConfig;
+
+  beforeAll(async () => {
+    // Set up a temporary directory for the knowledge graph.
+    testGraphPath = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-'));
+    testConfig = { ...appConfig, knowledgeGraphPath: testGraphPath };
+  });
+
+  afterAll(async () => {
+    // Clean up the temporary directory.
+    await fs.rm(testGraphPath, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    // Clean up the graph directory between tests to ensure isolation.
+    await fs.rm(testGraphPath, { recursive: true, force: true });
+    await fs.mkdir(testGraphPath, { recursive: true });
+    const git = simpleGit(testGraphPath);
+    await git.init();
+    await git.addConfig('user.name', 'Test User');
+    await git.addConfig('user.email', 'test@example.com');
+
+    // Create a .gitignore file first
+    await fs.writeFile(
+      path.join(testGraphPath, '.gitignore'),
+      '*.log\nnode_modules/\n.env'
+    );
+
+    await git.add('.gitignore');
+    await git.commit('Initial commit');
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example from the docs', async () => {
+    // 1. SETUP
+    // Define the multi-turn LLM responses as XML strings based on the example.
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+if (!orgExists) {
+  await mem.writeFile(orgPath, '# AI Research Institute\ntype:: organization\n');
+}
+await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]');
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>`;
+
+    // Create a mock LLM function for this specific test case.
+    const mockQueryLLM = createMockQueryLLM([turn1Response, turn2Response]);
+
+    // 2. EXECUTE
+    // Call the main loop with the user query and the mocked LLM function.
+    const query =
+      'I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation.';
+    const finalReply = await handleUserQuery(
+      query,
+      testConfig,
+      undefined,
+      mockQueryLLM
+    );
+
+    // 3. ASSERT
+    // Assert the final user-facing reply is correct.
+    expect(finalReply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
+    const thornePath = path.join(testGraphPath, 'Dr. Aris Thorne.md');
+    const orgPath = path.join(testGraphPath, 'AI Research Institute.md');
+    
+    // Use fileExists pattern instead of fs.access()
+    const checkFileExists = async (filePath: string) => {
+      try {
+        await fs.access(filePath);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    
+    expect(await checkFileExists(thornePath)).toBe(true);
+    expect(await checkFileExists(orgPath)).toBe(true);
+
+    // Verify file content. Read 'Dr. Aris Thorne.md' and check for `affiliation:: [[AI Research Institute]]`.
+    const thorneContent = await fs.readFile(thornePath, 'utf-8');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+    expect(thorneContent).toContain('field:: [[Symbolic Reasoning]]');
+
+    // Verify the git commit. Use `simple-git` to check the log of the test repo.
+    const git = simpleGit(testGraphPath);
+    const log = await git.log({ maxCount: 1 });
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+});
+````
+
+## File: src/core/sandbox.ts
+````typescript
+import { createContext, runInContext } from 'node:vm';
+import type { MemAPI } from '../types/mem';
+import { logger } from '../lib/logger';
+
+/**
+ * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
+ * @param code The TypeScript code snippet to execute.
+ * @param memApi The MemAPI instance to expose to the sandboxed code.
+ * @returns The result of the code execution.
+ */
+export const runInSandbox = async (
+  code: string,
+  memApi: MemAPI
+): Promise<unknown> => {
+  // Create a sandboxed context with the mem API and only essential globals
+  const context = createContext({
+    mem: memApi,
+    // Essential JavaScript globals
+    console: {
+      log: (...args: unknown[]) =>
+        logger.info('Sandbox console.log', { arguments: args }),
+      error: (...args: unknown[]) =>
+        logger.error('Sandbox console.error', undefined, {
+          arguments: args,
+        }),
+      warn: (...args: unknown[]) =>
+        logger.warn('Sandbox console.warn', { arguments: args }),
+    },
+    // Promise and async support
+    Promise,
+    setTimeout: (fn: () => void, delay: number) => {
+      if (delay > 1000) {
+        throw new Error('Timeout too long');
+      }
+      return setTimeout(fn, Math.min(delay, 10000));
+    },
+    clearTimeout,
+    // Basic types and constructors
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Date,
+    Math,
+    JSON,
+    RegExp,
+    Error,
+  });
+
+  // Wrap the user code in an async IIFE to allow top-level await.
+  const wrappedCode = `(async () => {
+    ${code}
+  })()`;
+
+  try {
+    logger.debug('Executing code in sandbox', { code });
+    const result = await runInContext(wrappedCode, context, {
+      timeout: 10000, // 10 seconds
+      displayErrors: true,
+    });
+    logger.debug('Sandbox execution successful', { result, type: typeof result });
+    return result;
+  } catch (error) {
+    logger.error('Error executing sandboxed code', error as Error, {
+      code,
+    });
+    // Re-throw a sanitized error to the agent loop
+    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
+  }
+};
 ````
 
 ## File: repomix.config.json
@@ -5706,13 +3437,19 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { runInSandbox } from '../core/sandbox.js';
 import type { MemAPI } from '../types/mem.js';
 import type { MCPTool, MCPResource } from '../types/mcp.js';
+import type { AppConfig } from '../config.js';
+import type { handleUserQuery } from '../core/loop.js';
+import type { StatusUpdate } from '../types/loop.js';
+import type { EventEmitter } from '../lib/event-emitter.js';
 
 export const createMCPHandler = (
   memApi: MemAPI,
-  knowledgeGraphPath: string
+  knowledgeGraphPath: string,
+  config: AppConfig,
+  handleQuery: typeof handleUserQuery,
+  emitter: EventEmitter<Record<string, StatusUpdate>>
 ) => {
   const server = new Server(
     {
@@ -5733,113 +3470,26 @@ export const createMCPHandler = (
 
   const tools: MCPTool[] = [
     {
-      name: 'execute_code',
-      description: 'Execute TypeScript code in the sandbox',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          code: {
-            type: 'string',
-            description: 'TypeScript code to execute',
-          },
-        },
-        required: ['code'],
-      },
-    },
-    {
-      name: 'read_file',
-      description: 'Read a file from the knowledge graph',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to read',
-          },
-        },
-        required: ['filePath'],
-      },
-    },
-    {
-      name: 'write_file',
-      description: 'Write content to a file in the knowledge graph',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to write',
-          },
-          content: {
-            type: 'string',
-            description: 'Content to write to the file',
-          },
-        },
-        required: ['filePath', 'content'],
-      },
-    },
-    {
-      name: 'update_file',
-      description: 'Update a file in the knowledge graph',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to update',
-          },
-          oldContent: {
-            type: 'string',
-            description: 'Content to replace',
-          },
-          newContent: {
-            type: 'string',
-            description: 'New content',
-          },
-        },
-        required: ['filePath', 'oldContent', 'newContent'],
-      },
-    },
-    {
-      name: 'commit_changes',
-      description: 'Commit changes to git',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          message: {
-            type: 'string',
-            description: 'Commit message',
-          },
-        },
-        required: ['message'],
-      },
-    },
-    {
-      name: 'query_graph',
-      description: 'Query the knowledge graph',
+      name: 'process_query',
+      description: 'Processes a high-level user query by running the agent loop.',
       inputSchema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'Graph query string',
+            description: 'The user query to process.',
           },
-        },
-        required: ['query'],
-      },
-    },
-    {
-      name: 'search_global',
-      description: 'Search across all files',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
+          sessionId: {
             type: 'string',
-            description: 'Search query',
+            description: 'An optional session ID to maintain context.',
+          },
+          runId: {
+            type: 'string',
+            description:
+              'A unique ID for this execution run, used for notifications.',
           },
         },
-        required: ['query'],
+        required: ['query', 'runId'],
       },
     },
   ];
@@ -5885,102 +3535,49 @@ export const createMCPHandler = (
 
     try {
       switch (name) {
-        case 'execute_code': {
-          const code = String(args.code);
-          const result = await runInSandbox(code, memApi);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result),
-              },
-            ],
-          };
-        }
-
-        case 'read_file': {
-          const filePath = String(args.filePath);
-          const content = await memApi.readFile(filePath);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: content,
-              },
-            ],
-          };
-        }
-
-        case 'write_file': {
-          const filePath = String(args.filePath);
-          const content = String(args.content);
-          const success = await memApi.writeFile(filePath, content);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ success }),
-              },
-            ],
-          };
-        }
-
-        case 'update_file': {
-          const filePath = String(args.filePath);
-          const oldContent = String(args.oldContent);
-          const newContent = String(args.newContent);
-          const success = await memApi.updateFile(
-            filePath,
-            oldContent,
-            newContent
-          );
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ success }),
-              },
-            ],
-          };
-        }
-
-        case 'commit_changes': {
-          const message = String(args.message);
-          const hash = await memApi.commitChanges(message);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ hash }),
-              },
-            ],
-          };
-        }
-
-        case 'query_graph': {
+        case 'process_query': {
           const query = String(args.query);
-          const results = await memApi.queryGraph(query);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(results),
-              },
-            ],
-          };
-        }
+          const runId = String(args.runId);
+          const sessionId = args.sessionId ? String(args.sessionId) : undefined;
 
-        case 'search_global': {
-          const query = String(args.query);
-          const results = await memApi.searchGlobal(query);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(results),
-              },
-            ],
+          // This callback will be passed to the agent loop to emit status updates.
+          const onStatusUpdate = (update: StatusUpdate) => {
+            emitter.emit(runId, update);
           };
+
+          // This listener forwards emitted events as MCP notifications for this run.
+          const listener = (update: StatusUpdate) => {
+            server.notification({
+              method: 'tool/status',
+              params: {
+                runId,
+                status: update,
+              },
+            });
+          };
+          emitter.on(runId, listener);
+
+          try {
+            const finalReply = await handleQuery(
+              query,
+              config,
+              sessionId,
+              undefined,
+              onStatusUpdate
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ reply: finalReply, runId }),
+                },
+              ],
+            };
+          } finally {
+            // Ensure the listener is cleaned up regardless of success or failure.
+            emitter.off(runId, listener);
+          }
         }
 
         default:
@@ -6229,171 +3826,36 @@ export const handleUserQuery = async (
 
 ## File: src/server.ts
 ````typescript
-import { Elysia, t } from 'elysia';
+import { createMCPHandler } from './api/mcp.handler.js';
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
-import { randomUUID } from 'crypto';
-import { config as appConfig } from './config.js';
-import type { StatusUpdate } from './types';
+import { config } from './config.js';
+import { createMemAPI } from './core/mem-api/index.js';
+import { EventEmitter } from './lib/event-emitter.js';
+import type { StatusUpdate } from './types/loop.js';
 
-export const createApp = (
-  handleQuery: typeof handleUserQuery,
-  config: typeof appConfig
-) => {
-  const app = new Elysia()
-    // --- Setup request-scoped context ---
-    .decorate('requestId', '')
-    .decorate('startTime', 0)
-    // --- Middleware: Request Logging ---
-    .onRequest(({ set, store }) => {
-      const requestId = randomUUID();
-      set.headers['X-Request-ID'] = requestId;
-      (store as { requestId: string }).requestId = requestId;
-    })
-    .onBeforeHandle(({ request, store }) => {
-      (store as { startTime: number }).startTime = Date.now();
-      logger.info('Request received', {
-        reqId: (store as { requestId: string }).requestId,
-        method: request.method,
-        path: new URL(request.url).pathname,
-      });
-    })
-    .onAfterHandle(({ request, store }) => {
-      const duration = Date.now() - (store as { startTime: number }).startTime;
-      logger.info('Request completed', {
-        reqId: (store as { requestId: string }).requestId,
-        method: request.method,
-        path: new URL(request.url).pathname,
-        duration: `${duration}ms`,
-      });
-    })
-    // --- Error Handling ---
-    .onError(({ code, error, set, store }) => {
-      logger.error('An error occurred', error as Error, {
-        reqId: (store as { requestId: string })?.requestId || 'unknown',
-        code,
-      });
+const main = async () => {
+  logger.info('Starting Recursa MCP Server...');
 
-      // Set appropriate status codes based on error type
-      switch (code) {
-        case 'VALIDATION':
-          set.status = 422;
-          return {
-            error: 'Validation Error',
-            message: error.message,
-            details: error.all || [],
-          };
-        case 'NOT_FOUND':
-          set.status = 404;
-          return {
-            error: 'Not Found',
-            message: error.message || 'Resource not found',
-          };
-        case 'PARSE':
-          set.status = 422; // Changed from 400 to 422 for malformed JSON
-          return {
-            error: 'Validation Error',
-            message: 'Invalid JSON format',
-          };
-        default:
-          set.status = 500;
-          return {
-            error: 'Internal Server Error',
-            message: 'An unexpected error occurred',
-          };
-      }
-    })
-    // --- Routes ---
-    .get('/', () => ({ status: 'ok', message: 'Recursa server is running' }))
-    .post(
-      '/mcp',
-      async ({ body, set }) => {
-        const { query, sessionId } = body;
-        const runId = randomUUID();
+  // 1. Initialize dependencies
+  const emitter = new EventEmitter<Record<string, StatusUpdate>>();
+  const memApi = createMemAPI(config);
 
-        try {
-          // NOTE: For a simple non-streaming implementation, we await the final result.
-          // A production implementation should use WebSockets or SSE to stream back messages.
-          const finalReply = await handleQuery(query, config, sessionId, undefined);
+  // 2. Create the MCP handler, injecting dependencies
+  const { server, transport } = createMCPHandler(
+    memApi,
+    config.knowledgeGraphPath,
+    config,
+    handleUserQuery,
+    emitter
+  );
 
-          return {
-            runId,
-            reply: finalReply,
-            sessionId: sessionId || runId,
-            streamingEndpoint: `/events/${runId}`,
-          };
-        } catch (error) {
-          logger.error('Error processing user query', error as Error, {
-            runId,
-            sessionId,
-            query: (query || '').substring(0, 100) + '...',
-          });
+  // 3. Start listening for requests over stdio
+  await transport.start();
+  await server.connect(transport);
 
-          // Return a graceful error response instead of throwing
-          return {
-            runId,
-            reply: 'An error occurred while processing your request. The LLM service may be unavailable. Please try again later.',
-            sessionId: sessionId || runId,
-            streamingEndpoint: `/events/${runId}`,
-          };
-        }
-      },
-      {
-        body: t.Object({
-          query: t.String({
-            // Use a pattern to ensure at least one non-whitespace character.
-            // This is more robust than `minLength` after a transform.
-            pattern: '.*\\S.*',
-            transform: (value: string) => value.trim(),
-            error: 'Query must be a non-empty string.',
-          }),
-          sessionId: t.Optional(t.String()),
-        }),
-      }
-    )
-    .get('/events/:runId', ({ params: { runId } }) => {
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            const initialUpdate: StatusUpdate = {
-              type: 'think',
-              runId: runId,
-              timestamp: Date.now(),
-              content: 'Connection established',
-            };
-            const initialData = `data: ${JSON.stringify(initialUpdate)}\n\n`;
-            controller.enqueue(new TextEncoder().encode(initialData));
-
-            // In a real implementation, you would subscribe to an event emitter
-            // for this runId. For the test, we can just close it.
-            const timeout = setTimeout(() => {
-              controller.close();
-            }, 500);
-
-            // Cleanup if client disconnects
-            return () => clearTimeout(timeout);
-          },
-        }),
-        {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Cache-Control',
-          },
-        }
-      );
-    });
-  return app;
+  logger.info('Recursa MCP Server is running and listening on stdio.');
 };
 
-if (process.env.NODE_ENV !== 'test') {
-  const app = createApp(handleUserQuery, appConfig);
-  app.listen(appConfig.port);
-
-  logger.info(
-    `🦊 Recursa server is running at http://${app.server?.hostname}:${app.server?.port}`
-  );
-}
+main();
 ````

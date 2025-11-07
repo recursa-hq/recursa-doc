@@ -23,7 +23,6 @@ describe('MemAPI Integration Tests', () => {
     knowledgeGraphPath: '', // This will be set in beforeAll,
     openRouterApiKey: 'test-key',
     llmModel: 'test-model',
-    port: 3000,
   };
 
   beforeAll(async () => {

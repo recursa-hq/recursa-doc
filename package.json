@@ -15,13 +15,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "openrouter-sdk": "^1.0.0",
-    "vm2": "^3.9.19",
     "simple-git": "^3.20.0",
-    "elysia": "^1.0.0",
-    "fast-xml-parser": "^4.3.6",
     "zod": "^3.23.8",
     "dotenv": "^16.4.5"
   },

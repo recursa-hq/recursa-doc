@@ -75,9 +75,9 @@ export const commitChanges =
       // Return the commit hash
       if (result.commit) {
         return result.commit;
-      } else {
-        throw new Error('No commit hash returned from git commit');
       }
+      // If result.commit is empty or null, it means no changes were committed. This is not an error.
+      return 'No changes to commit.';
     } catch (error) {
       throw new Error(`Failed to commit changes: ${(error as Error).message}`);
     }

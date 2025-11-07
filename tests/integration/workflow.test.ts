@@ -16,7 +16,7 @@ import { createMemAPI } from '../../src/core/mem-api';
 import type { AppConfig } from '../../src/config';
 import type { StatusUpdate } from '../../src/types';
 
-describe('End-to-End Complete Flow Tests', () => {
+describe('Agent Workflow Integration Tests', () => {
   let tempDir: string;
   let mockConfig: AppConfig;
 
@@ -26,7 +26,6 @@ describe('End-to-End Complete Flow Tests', () => {
       knowledgeGraphPath: tempDir,
       openRouterApiKey: 'test-api-key',
       llmModel: 'test-model',
-      port: 3001,
     };
   });
 

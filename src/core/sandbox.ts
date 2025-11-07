@@ -17,9 +17,14 @@ export const runInSandbox = async (
     mem: memApi,
     // Essential JavaScript globals
     console: {
-      log: (...args: unknown[]) => logger.info('Sandbox console.log', args),
-      error: (...args: unknown[]) => logger.error('Sandbox console.error', args),
-      warn: (...args: unknown[]) => logger.warn('Sandbox console.warn', args),
+      log: (...args: unknown[]) =>
+        logger.info('Sandbox console.log', { arguments: args }),
+      error: (...args: unknown[]) =>
+        logger.error('Sandbox console.error', undefined, {
+          arguments: args,
+        }),
+      warn: (...args: unknown[]) =>
+        logger.warn('Sandbox console.warn', { arguments: args }),
     },
     // Promise and async support
     Promise,
@@ -44,31 +49,12 @@ export const runInSandbox = async (
   });
 
   // Wrap the user code in an async IIFE to allow top-level await.
-  // Only escape newlines within string literals to avoid syntax errors
-  const escapedCode = code.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, (match, content) => {
-    return `'${content.replace(/\n/g, '\\n')}'`;
-  }).replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, (match, content) => {
-    return `"${content.replace(/\n/g, '\\n')}"`;
-  });
-  
   const wrappedCode = `(async () => {
-    try {
-      // Helper function to unescape newlines
-      const unescape = (str) => str.replace(/\\\\n/g, '\\n');
-      const memWriteFile = mem.writeFile;
-      mem.writeFile = async (path, content) => memWriteFile(path, unescape(content));
-      
-      ${escapedCode}
-    } catch (error) {
-      throw new Error('Code execution error: ' + error.message);
-    }
-  })()`;
+    ${code}
+  })();`;
 
   try {
-    logger.debug('Executing code in sandbox', { 
-      wrappedCode,
-      originalCode: code 
-    });
+    logger.debug('Executing code in sandbox', { code });
     const result = await runInContext(wrappedCode, context, {
       timeout: 10000, // 10 seconds
       displayErrors: true,
