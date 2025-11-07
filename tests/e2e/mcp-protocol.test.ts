@@ -13,10 +13,64 @@ import os from 'os';
 import type { Subprocess } from 'bun';
 import { randomUUID } from 'crypto';
 
+// MCP Protocol Types
+interface MCPMessage {
+  id: string;
+  method: string;
+  params?: Record<string, unknown>;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+interface MCPInitializeRequest extends MCPMessage {
+  method: 'initialize';
+  params: {
+    protocolVersion: string;
+    clientInfo: {
+      name: string;
+      version: string;
+    };
+  };
+}
+
+interface MCPInitializeResponse extends MCPMessage {
+  result: {
+    serverInfo: {
+      name: string;
+      version: string;
+    };
+  };
+}
+
+interface MCPListToolsRequest extends MCPMessage {
+  method: 'list-tools';
+  params?: Record<string, unknown>;
+}
+
+interface MCPListToolsResponse extends MCPMessage {
+  result: {
+    tools: MCPTool[];
+  };
+}
+
+interface MCPTool {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
 // Helper to read newline-delimited JSON from a stream
 async function* readMessages(
   stream: ReadableStream<Uint8Array>
-): AsyncGenerator<any> {
+): AsyncGenerator<MCPMessage> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -32,8 +86,8 @@ async function* readMessages(
     for (const line of lines) {
       if (line.trim()) {
         try {
-          yield JSON.parse(line);
-        } catch (e) {
+          yield JSON.parse(line) as MCPMessage;
+        } catch (e: unknown) {
           console.error('Failed to parse JSON line:', line);
         }
       }
@@ -85,7 +139,7 @@ describe('MCP Protocol E2E Test', () => {
 
     // 1. Send initialize request
     const initRequestId = randomUUID();
-    const initRequest = {
+    const initRequest: MCPInitializeRequest = {
       id: initRequestId,
       method: 'initialize',
       params: {
@@ -98,12 +152,13 @@ describe('MCP Protocol E2E Test', () => {
     // 2. Await and verify initialize response
     const initResponse = await reader.next();
     expect(initResponse.done).toBe(false);
-    expect(initResponse.value.id).toBe(initRequestId);
-    expect(initResponse.value.result.serverInfo.name).toBe('recursa-server');
+    const initResponseValue = initResponse.value as MCPInitializeResponse;
+    expect(initResponseValue.id).toBe(initRequestId);
+    expect(initResponseValue.result.serverInfo.name).toBe('recursa-server');
 
     // 3. Send list-tools request
     const listToolsRequestId = randomUUID();
-    const listToolsRequest = {
+    const listToolsRequest: MCPListToolsRequest = {
       id: listToolsRequestId,
       method: 'list-tools',
       params: {},
@@ -113,11 +168,12 @@ describe('MCP Protocol E2E Test', () => {
     // 4. Await and verify list-tools response
     const listToolsResponse = await reader.next();
     expect(listToolsResponse.done).toBe(false);
-    expect(listToolsResponse.value.id).toBe(listToolsRequestId);
-    expect(listToolsResponse.value.result.tools).toBeArray();
-    expect(listToolsResponse.value.result.tools.length).toBeGreaterThan(0);
-    const processQueryTool = listToolsResponse.value.result.tools.find(
-      (t: any) => t.name === 'process_query'
+    const listToolsResponseValue = listToolsResponse.value as MCPListToolsResponse;
+    expect(listToolsResponseValue.id).toBe(listToolsRequestId);
+    expect(listToolsResponseValue.result.tools).toBeArray();
+    expect(listToolsResponseValue.result.tools.length).toBeGreaterThan(0);
+    const processQueryTool = listToolsResponseValue.result.tools.find(
+      (t: MCPTool) => t.name === 'process_query'
     );
     expect(processQueryTool).toBeDefined();
     expect(processQueryTool.description).toBeString();
