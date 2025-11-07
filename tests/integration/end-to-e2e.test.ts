@@ -100,7 +100,7 @@ await mem.commitChanges('feat: initialize project with basic structure');
 <typescript>
 // Add feature files
 await mem.writeFile('src/utils.js', '// Utility functions\nexports.formatDate = (date) => date.toISOString();');
-await mem.writeFile('src/config.js', '// Configuration\nmodule.exports = { env: 'development', port: 3000 };');
+await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
 await mem.createDir('tests');
 await mem.writeFile('tests/utils.test.js', '// Test utilities\nconst { formatDate } = require('../src/utils.js');');
 </typescript>`,
