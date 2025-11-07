@@ -27,7 +27,7 @@ export type MemAPI = {
     oldContent: string,
     newContent: string
   ) => Promise<boolean>;
-  deleteFile: (filePath: string) => Promise<boolean>;
+  deletePath: (filePath: string) => Promise<boolean>;
   rename: (oldPath: string, newPath: string) => Promise<boolean>;
   fileExists: (filePath: string) => Promise<boolean>;
   createDir: (directoryPath: string) => Promise<boolean>;
@@ -39,8 +39,8 @@ export type MemAPI = {
     fromCommit?: string,
     toCommit?: string
   ) => Promise<string>;
-  gitLog: (filePath: string, maxCommits?: number) => Promise<LogEntry[]>;
-  gitStagedFiles: () => Promise<string[]>;
+  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
+  getChangedFiles: () => Promise<string[]>;
   commitChanges: (message: string) => Promise<string>;
 
   // Intelligent Graph Operations

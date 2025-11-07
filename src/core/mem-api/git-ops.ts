@@ -27,22 +27,27 @@ export const gitDiff =
 
 export const gitLog =
   (git: SimpleGit) =>
-  async (filePath: string, maxCommits = 5): Promise<LogEntry[]> => {
+  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
     try {
-      const result = await git.log({ file: filePath, maxCount: maxCommits });
+      const options = {
+        maxCount: maxCommits,
+        ...(filePath ? { file: filePath } : {}),
+      };
+      const result = await git.log(options);
       return result.all.map((entry) => ({
         hash: entry.hash,
         message: entry.message,
         date: entry.date,
       }));
     } catch (error) {
+      const target = filePath || 'repository';
       throw new Error(
-        `Failed to get git log for ${filePath}: ${(error as Error).message}`
+        `Failed to get git log for ${target}: ${(error as Error).message}`
       );
     }
   };
 
-export const gitStagedFiles =
+export const getChangedFiles =
   (git: SimpleGit) => async (): Promise<string[]> => {
     try {
       const status = await git.status();
@@ -57,7 +62,7 @@ export const gitStagedFiles =
       return Array.from(allFiles);
     } catch (error) {
       throw new Error(
-        `Failed to get staged files: ${(error as Error).message}`
+        `Failed to get changed files: ${(error as Error).message}`
       );
     }
   };

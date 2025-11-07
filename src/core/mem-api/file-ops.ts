@@ -71,7 +71,7 @@ export const updateFile =
     }
   };
 
-export const deleteFile =
+export const deletePath =
   (graphRoot: string) =>
   async (filePath: string): Promise<boolean> => {
     const fullPath = resolveSecurePath(graphRoot, filePath);
@@ -81,7 +81,7 @@ export const deleteFile =
       return true;
     } catch (error) {
       throw new Error(
-        `Failed to delete file ${filePath}: ${(error as Error).message}`
+        `Failed to delete path ${filePath}: ${(error as Error).message}`
       );
     }
   };

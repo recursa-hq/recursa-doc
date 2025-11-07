@@ -26,7 +26,7 @@ export const createMemAPI = (config: AppConfig): MemAPI => {
     readFile: fileOps.readFile(graphRoot),
     writeFile: fileOps.writeFile(graphRoot),
     updateFile: fileOps.updateFile(graphRoot),
-    deleteFile: fileOps.deleteFile(graphRoot),
+    deletePath: fileOps.deletePath(graphRoot),
     rename: fileOps.rename(graphRoot),
     fileExists: fileOps.fileExists(graphRoot),
     createDir: fileOps.createDir(graphRoot),
@@ -35,7 +35,7 @@ export const createMemAPI = (config: AppConfig): MemAPI => {
     // Git-Native Operations
     gitDiff: gitOps.gitDiff(git),
     gitLog: gitOps.gitLog(git),
-    gitStagedFiles: gitOps.gitStagedFiles(git),
+    getChangedFiles: gitOps.getChangedFiles(git),
     commitChanges: gitOps.commitChanges(git),
 
     // Intelligent Graph Operations

@@ -4,38 +4,76 @@ import type { GraphQueryResult } from '../../types';
 import { resolveSecurePath } from './secure-path';
 import { walk } from './fs-walker';
 
+type PropertyCondition = {
+  type: 'property';
+  key: string;
+  value: string;
+};
+
+type Condition = PropertyCondition; // For future expansion
+
+const parseCondition = (conditionStr: string): Condition | null => {
+  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+  const match = conditionStr.trim().match(propertyRegex);
+  if (match && match[1] && match[2]) {
+    return {
+      type: 'property',
+      key: match[1].trim(),
+      value: match[2].trim(),
+    };
+  }
+  return null;
+};
+
+const checkCondition = (content: string, condition: Condition): string[] => {
+  const matches: string[] = [];
+  if (condition.type === 'property') {
+    const lines = content.split('\n');
+    for (const line of lines) {
+      if (line.trim() === `${condition.key}:: ${condition.value}`) {
+        matches.push(line);
+      }
+    }
+  }
+  return matches;
+};
+
 export const queryGraph =
   (graphRoot: string) =>
   async (query: string): Promise<GraphQueryResult[]> => {
-    // Basic property query parser: (property key:: value)
-    const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-    const match = query.trim().match(propertyRegex);
+    const conditionStrings = query.split(/ AND /i);
+    const conditions = conditionStrings
+      .map(parseCondition)
+      .filter((c): c is Condition => c !== null);
 
-    if (!match || !match[1] || !match[2]) {
-      // For now, only support property queries. Return empty for others.
+    if (conditions.length === 0) {
       return [];
     }
 
-    const key = match[1];
-    const value = match[2];
     const results: GraphQueryResult[] = [];
 
     for await (const filePath of walk(graphRoot)) {
-      if (filePath.endsWith('.md')) {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const lines = content.split('\n');
-        const matchingLines: string[] = [];
-        for (const line of lines) {
-          if (line.trim() === `${key.trim()}:: ${value.trim()}`) {
-            matchingLines.push(line);
-          }
-        }
+      if (!filePath.endsWith('.md')) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const allMatchingLines: string[] = [];
+      let allConditionsMet = true;
+
+      for (const condition of conditions) {
+        const matchingLines = checkCondition(content, condition);
         if (matchingLines.length > 0) {
-          results.push({
-            filePath: path.relative(graphRoot, filePath),
-            matches: matchingLines,
-          });
+          allMatchingLines.push(...matchingLines);
+        } else {
+          allConditionsMet = false;
+          break;
         }
+      }
+
+      if (allConditionsMet) {
+        results.push({
+          filePath: path.relative(graphRoot, filePath),
+          matches: allMatchingLines,
+        });
       }
     }
     return results;
