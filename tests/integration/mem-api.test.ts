@@ -2,49 +2,28 @@ import {
   describe,
   it,
   expect,
-  beforeAll,
-  afterAll,
   beforeEach,
+  afterEach,
 } from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
+import { 
+  createTestHarness, 
+  cleanupTestHarness, 
+  resetTestHarness,
+  type TestHarnessState 
+} from '../TestHarness';
 import type { MemAPI } from '../../src/types';
 
 describe('MemAPI Integration Tests', () => {
-  let tempDir: string;
+  let harness: TestHarnessState;
   let mem: MemAPI;
 
-  // Provide a full mock config
-  const mockConfig: AppConfig = {
-    knowledgeGraphPath: '', // This will be set in beforeAll,
-    openRouterApiKey: 'test-key',
-    llmModel: 'test-model',
-  };
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-test-'));
-    mockConfig.knowledgeGraphPath = tempDir;
-  });
-
   beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-    // Init git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
-    // Create the mem API instance for this test, it's now AppConfig
-    mem = createMemAPI(mockConfig as AppConfig);
+    harness = await createTestHarness();
+    mem = harness.mem;
   });
 
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
   });
 
   it('should write, read, and check existence of a file', async () => {
@@ -162,7 +141,9 @@ No links here.
     const nextContent = 'version 3';
 
     // Simulate another process changing the file
-    await fs.writeFile(path.join(tempDir, filePath), 'version 2.5');
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    await fs.writeFile(path.join(harness.tempDir, filePath), 'version 2.5');
 
     // The update should fail because 'currentContent' ("version 2") no longer matches the file on disk ("version 2.5")
     await expect(

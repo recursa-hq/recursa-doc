@@ -8,31 +8,11 @@ import {
 } from 'bun:test';
 import { handleUserQuery } from '../../src/core/loop';
 import { type AppConfig, loadAndValidateConfig } from '../../src/config';
-import type { ChatMessage } from '../../src/types';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
-
-// This is a test-scoped override for the LLM call.
-// It allows us to simulate the LLM's responses without making network requests.
-const createMockQueryLLM = (responses: string[]) => {
-  let callCount = 0;
-  return async (
-    _history: ChatMessage[],
-    _config: AppConfig
-  ): Promise<string> => {
-    // Return the next pre-canned XML response from the `responses` array.
-    const response = responses[callCount];
-    if (!response) {
-      throw new Error(
-        `Mock LLM called more times than expected (${callCount}).`
-      );
-    }
-    callCount++;
-    return response;
-  };
-};
+import { createMockQueryLLM } from '../lib/test-harness';
 
 describe('Agent End-to-End Workflow', () => {
   let appConfig: AppConfig;

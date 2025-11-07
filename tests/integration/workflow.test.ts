@@ -15,7 +15,7 @@ import { handleUserQuery } from '../../src/core/loop';
 import { createMemAPI } from '../../src/core/mem-api';
 import type { AppConfig } from '../../src/config';
 import type { StatusUpdate } from '../../src/types';
-
+import { createMockLLMQueryWithSpy } from '../lib/test-harness';
 describe('Agent Workflow Integration Tests', () => {
   let tempDir: string;
   let mockConfig: AppConfig;
@@ -45,22 +45,12 @@ describe('Agent Workflow Integration Tests', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  // Mock LLM responses for testing
-  const createMockLLMQuery = (responses: string[]) => {
-    let callCount = 0;
-    return mock(async (_history: unknown[], _config: unknown) => {
-      const response = responses[callCount] || responses[responses.length - 1];
-      callCount++;
-      return response;
-    });
-  };
-
   describe('Complete Workflow Integration', () => {
     it('should execute a complete project lifecycle', async () => {
       const sessionId = 'project-lifecycle';
 
       // Phase 1: Initialize project
-      const initMockLLMQuery = createMockLLMQuery([
+      const initMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll initialize a new project with basic structure.</think>
 <typescript>
 // Create project structure
@@ -94,7 +84,7 @@ await mem.commitChanges('feat: initialize project with basic structure');
       expect(initResult).toContain('Project initialized successfully');
 
       // Phase 2: Add features
-      const featureMockLLMQuery = createMockLLMQuery([
+      const featureMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll add features to the existing project.</think>
 <typescript>
 // Add feature files
@@ -121,7 +111,7 @@ await mem.commitChanges('feat: add utilities, config, and test structure');
       expect(featureResult).toContain('Added utility functions');
 
       // Phase 3: Update existing files
-      const updateMockLLMQuery = createMockLLMQuery([
+      const updateMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll update the main application to use the new utilities.</think>
 <typescript>
 // Update main file
@@ -204,7 +194,7 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
         statusUpdates.push(update);
       };
 
-      const complexMockLLMQuery = createMockLLMQuery([
+      const complexMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
 <typescript>
 // Create multiple related files
@@ -316,7 +306,7 @@ Successfully performed complex file operations including creating multiple docum
         statusUpdates.push(update);
       };
 
-      const errorRecoveryMockLLMQuery = createMockLLMQuery([
+      const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll attempt various operations to test error handling and recovery.</think>
 <typescript>
 // This should fail - file doesn't exist
