@@ -28,7 +28,6 @@ const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
   llmModel: 'anthropic/claude-3-haiku-20240307',
-  port: 3000,
 };
 
 const mockHistory: ChatMessage[] = [
@@ -54,7 +53,7 @@ describe('LLM Module', () => {
           headers: {
             Authorization: 'Bearer test-api-key',
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
+            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
             'X-Title': 'Recursa',
           },
           body: JSON.stringify({

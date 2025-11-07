@@ -7,13 +7,19 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { runInSandbox } from '../core/sandbox.js';
 import type { MemAPI } from '../types/mem.js';
 import type { MCPTool, MCPResource } from '../types/mcp.js';
+import type { AppConfig } from '../config.js';
+import type { handleUserQuery } from '../core/loop.js';
+import type { StatusUpdate } from '../types/loop.js';
+import type { EventEmitter } from '../lib/event-emitter.js';
 
 export const createMCPHandler = (
   memApi: MemAPI,
-  knowledgeGraphPath: string
+  knowledgeGraphPath: string,
+  config: AppConfig,
+  handleQuery: typeof handleUserQuery,
+  emitter: EventEmitter<Record<string, StatusUpdate>>
 ) => {
   const server = new Server(
     {
@@ -34,113 +40,26 @@ export const createMCPHandler = (
 
   const tools: MCPTool[] = [
     {
-      name: 'execute_code',
-      description: 'Execute TypeScript code in the sandbox',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          code: {
-            type: 'string',
-            description: 'TypeScript code to execute',
-          },
-        },
-        required: ['code'],
-      },
-    },
-    {
-      name: 'read_file',
-      description: 'Read a file from the knowledge graph',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to read',
-          },
-        },
-        required: ['filePath'],
-      },
-    },
-    {
-      name: 'write_file',
-      description: 'Write content to a file in the knowledge graph',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to write',
-          },
-          content: {
-            type: 'string',
-            description: 'Content to write to the file',
-          },
-        },
-        required: ['filePath', 'content'],
-      },
-    },
-    {
-      name: 'update_file',
-      description: 'Update a file in the knowledge graph',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to update',
-          },
-          oldContent: {
-            type: 'string',
-            description: 'Content to replace',
-          },
-          newContent: {
-            type: 'string',
-            description: 'New content',
-          },
-        },
-        required: ['filePath', 'oldContent', 'newContent'],
-      },
-    },
-    {
-      name: 'commit_changes',
-      description: 'Commit changes to git',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          message: {
-            type: 'string',
-            description: 'Commit message',
-          },
-        },
-        required: ['message'],
-      },
-    },
-    {
-      name: 'query_graph',
-      description: 'Query the knowledge graph',
+      name: 'process_query',
+      description: 'Processes a high-level user query by running the agent loop.',
       inputSchema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'Graph query string',
+            description: 'The user query to process.',
           },
-        },
-        required: ['query'],
-      },
-    },
-    {
-      name: 'search_global',
-      description: 'Search across all files',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
+          sessionId: {
             type: 'string',
-            description: 'Search query',
+            description: 'An optional session ID to maintain context.',
+          },
+          runId: {
+            type: 'string',
+            description:
+              'A unique ID for this execution run, used for notifications.',
           },
         },
-        required: ['query'],
+        required: ['query', 'runId'],
       },
     },
   ];
@@ -186,102 +105,49 @@ export const createMCPHandler = (
 
     try {
       switch (name) {
-        case 'execute_code': {
-          const code = String(args.code);
-          const result = await runInSandbox(code, memApi);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result),
-              },
-            ],
-          };
-        }
-
-        case 'read_file': {
-          const filePath = String(args.filePath);
-          const content = await memApi.readFile(filePath);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: content,
-              },
-            ],
-          };
-        }
-
-        case 'write_file': {
-          const filePath = String(args.filePath);
-          const content = String(args.content);
-          const success = await memApi.writeFile(filePath, content);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ success }),
-              },
-            ],
-          };
-        }
-
-        case 'update_file': {
-          const filePath = String(args.filePath);
-          const oldContent = String(args.oldContent);
-          const newContent = String(args.newContent);
-          const success = await memApi.updateFile(
-            filePath,
-            oldContent,
-            newContent
-          );
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ success }),
-              },
-            ],
-          };
-        }
-
-        case 'commit_changes': {
-          const message = String(args.message);
-          const hash = await memApi.commitChanges(message);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ hash }),
-              },
-            ],
-          };
-        }
-
-        case 'query_graph': {
+        case 'process_query': {
           const query = String(args.query);
-          const results = await memApi.queryGraph(query);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(results),
-              },
-            ],
-          };
-        }
+          const runId = String(args.runId);
+          const sessionId = args.sessionId ? String(args.sessionId) : undefined;
 
-        case 'search_global': {
-          const query = String(args.query);
-          const results = await memApi.searchGlobal(query);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(results),
-              },
-            ],
+          // This callback will be passed to the agent loop to emit status updates.
+          const onStatusUpdate = (update: StatusUpdate) => {
+            emitter.emit(runId, update);
           };
+
+          // This listener forwards emitted events as MCP notifications for this run.
+          const listener = (update: StatusUpdate) => {
+            server.notification({
+              method: 'tool/status',
+              params: {
+                runId,
+                status: update,
+              },
+            });
+          };
+          emitter.on(runId, listener);
+
+          try {
+            const finalReply = await handleQuery(
+              query,
+              config,
+              sessionId,
+              undefined,
+              onStatusUpdate
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ reply: finalReply, runId }),
+                },
+              ],
+            };
+          } finally {
+            // Ensure the listener is cleaned up regardless of success or failure.
+            emitter.off(runId, listener);
+          }
         }
 
         default:

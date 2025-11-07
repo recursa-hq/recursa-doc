@@ -10,14 +10,12 @@ const configSchema = z.object({
     .string()
     .default('anthropic/claude-3-haiku-20240307') // Sensible default for cost/speed
     .optional(),
-  PORT: z.coerce.number().int().positive().default(3000),
 });
 
 export type AppConfig = {
   openRouterApiKey: string;
   knowledgeGraphPath: string;
   llmModel: string;
-  port: number;
 };
 
 export const loadAndValidateConfig = (): AppConfig => {
@@ -32,7 +30,7 @@ export const loadAndValidateConfig = (): AppConfig => {
     process.exit(1);
   }
 
-  const { OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH, LLM_MODEL, PORT } =
+  const { OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH, LLM_MODEL } =
     parseResult.data;
 
   // Perform runtime checks
@@ -68,7 +66,6 @@ export const loadAndValidateConfig = (): AppConfig => {
     openRouterApiKey: OPENROUTER_API_KEY,
     knowledgeGraphPath: resolvedPath,
     llmModel: LLM_MODEL!,
-    port: PORT,
   });
 };
 

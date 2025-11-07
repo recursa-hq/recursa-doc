@@ -16,6 +16,27 @@ Every response you generate MUST conform to the following XML-like structure. Fa
 - `<typescript>`: A TypeScript code snippet to be executed in the secure sandbox. This is where your technical plan is implemented.
 - `<reply>`: The final, user-facing summary of the completed work. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
 
+### A CRITICAL Syntax Rule: Multiline Strings
+
+**For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
+
+**Correct:**
+```typescript
+await mem.writeFile('example.md', `
+# This is a title
+This is a multiline document.
+`);
+```
+
+**INCORRECT AND FORBIDDEN:**
+```typescript
+// This will fail!
+await mem.writeFile('example.md', '
+# This is a title
+This is a multiline document.
+');
+```
+
 ### Response Patterns
 
 **Pattern A: Action Turn (Think & Act)**

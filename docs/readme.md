@@ -4,7 +4,7 @@
 
 **TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
 
-Forget wrestling with databases or opaque cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
 
 ---
 
@@ -35,15 +35,15 @@ Recursa is a local, stateless server that acts as a bridge between your chat cli
 ```mermaid
 graph TD
     subgraph Your Local Machine
-        A[AI Chat Client <br> e.g., Claude Desktop]
+        A[MCP Client <br> e.g., your script, or a compatible editor]
         B[Recursa MCP Server <br> (This Project)]
         C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
 
-        A -- 1. User Query via MCP --> B
+        A -- 1. User Query via Stdio --> B
         B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
         B -- 3. Executes Sandboxed Code --> C
         C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply --> A
+        B -- 5. Final Reply & Notifications --> A
     end
 
     subgraph Cloud Service
@@ -54,8 +54,8 @@ graph TD
     style B fill:#fff2cc,stroke:#333,stroke-width:2px
 ```
 
-1.  **Query via MCP:** Your chat client sends a message to the local Recursa server.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM.
+1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
+2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
 3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
 4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
 5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
@@ -154,10 +154,10 @@ LLM_MODEL="anthropic/claude-3-sonnet-20240229"
 ### 3. Running the Server
 
 ```bash
-npm start
+bun run start
 ```
 
-You'll see a confirmation that the server is running and ready to accept connections from your MCP client.
+This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
 
 ## 🗺️ Roadmap
 

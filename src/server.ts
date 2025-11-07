@@ -1,167 +1,32 @@
-import { Elysia, t } from 'elysia';
+import { createMCPHandler } from './api/mcp.handler.js';
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
-import { randomUUID } from 'crypto';
-import { config as appConfig } from './config.js';
-import type { StatusUpdate } from './types';
+import { config } from './config.js';
+import { createMemAPI } from './core/mem-api/index.js';
+import { EventEmitter } from './lib/event-emitter.js';
+import type { StatusUpdate } from './types/loop.js';
 
-export const createApp = (
-  handleQuery: typeof handleUserQuery,
-  config: typeof appConfig
-) => {
-  const app = new Elysia()
-    // --- Setup request-scoped context ---
-    .decorate('requestId', '')
-    .decorate('startTime', 0)
-    // --- Middleware: Request Logging ---
-    .onRequest(({ set, store }) => {
-      const requestId = randomUUID();
-      set.headers['X-Request-ID'] = requestId;
-      (store as { requestId: string }).requestId = requestId;
-    })
-    .onBeforeHandle(({ request, store }) => {
-      (store as { startTime: number }).startTime = Date.now();
-      logger.info('Request received', {
-        reqId: (store as { requestId: string }).requestId,
-        method: request.method,
-        path: new URL(request.url).pathname,
-      });
-    })
-    .onAfterHandle(({ request, store }) => {
-      const duration = Date.now() - (store as { startTime: number }).startTime;
-      logger.info('Request completed', {
-        reqId: (store as { requestId: string }).requestId,
-        method: request.method,
-        path: new URL(request.url).pathname,
-        duration: `${duration}ms`,
-      });
-    })
-    // --- Error Handling ---
-    .onError(({ code, error, set, store }) => {
-      logger.error('An error occurred', error as Error, {
-        reqId: (store as { requestId: string })?.requestId || 'unknown',
-        code,
-      });
+const main = async () => {
+  logger.info('Starting Recursa MCP Server...');
 
-      // Set appropriate status codes based on error type
-      switch (code) {
-        case 'VALIDATION':
-          set.status = 422;
-          return {
-            error: 'Validation Error',
-            message: error.message,
-            details: error.all || [],
-          };
-        case 'NOT_FOUND':
-          set.status = 404;
-          return {
-            error: 'Not Found',
-            message: error.message || 'Resource not found',
-          };
-        case 'PARSE':
-          set.status = 422; // Changed from 400 to 422 for malformed JSON
-          return {
-            error: 'Validation Error',
-            message: 'Invalid JSON format',
-          };
-        default:
-          set.status = 500;
-          return {
-            error: 'Internal Server Error',
-            message: 'An unexpected error occurred',
-          };
-      }
-    })
-    // --- Routes ---
-    .get('/', () => ({ status: 'ok', message: 'Recursa server is running' }))
-    .post(
-      '/mcp',
-      async ({ body, set }) => {
-        const { query, sessionId } = body;
-        const runId = randomUUID();
+  // 1. Initialize dependencies
+  const emitter = new EventEmitter<Record<string, StatusUpdate>>();
+  const memApi = createMemAPI(config);
 
-        try {
-          // NOTE: For a simple non-streaming implementation, we await the final result.
-          // A production implementation should use WebSockets or SSE to stream back messages.
-          const finalReply = await handleQuery(query, config, sessionId, undefined);
+  // 2. Create the MCP handler, injecting dependencies
+  const { server, transport } = createMCPHandler(
+    memApi,
+    config.knowledgeGraphPath,
+    config,
+    handleUserQuery,
+    emitter
+  );
 
-          return {
-            runId,
-            reply: finalReply,
-            sessionId: sessionId || runId,
-            streamingEndpoint: `/events/${runId}`,
-          };
-        } catch (error) {
-          logger.error('Error processing user query', error as Error, {
-            runId,
-            sessionId,
-            query: (query || '').substring(0, 100) + '...',
-          });
+  // 3. Start listening for requests over stdio
+  await transport.start();
+  await server.connect(transport);
 
-          // Return a graceful error response instead of throwing
-          return {
-            runId,
-            reply: 'An error occurred while processing your request. The LLM service may be unavailable. Please try again later.',
-            sessionId: sessionId || runId,
-            streamingEndpoint: `/events/${runId}`,
-          };
-        }
-      },
-      {
-        body: t.Object({
-          query: t.String({
-            // Use a pattern to ensure at least one non-whitespace character.
-            // This is more robust than `minLength` after a transform.
-            pattern: '.*\\S.*',
-            transform: (value: string) => value.trim(),
-            error: 'Query must be a non-empty string.',
-          }),
-          sessionId: t.Optional(t.String()),
-        }),
-      }
-    )
-    .get('/events/:runId', ({ params: { runId } }) => {
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            const initialUpdate: StatusUpdate = {
-              type: 'think',
-              runId: runId,
-              timestamp: Date.now(),
-              content: 'Connection established',
-            };
-            const initialData = `data: ${JSON.stringify(initialUpdate)}\n\n`;
-            controller.enqueue(new TextEncoder().encode(initialData));
-
-            // In a real implementation, you would subscribe to an event emitter
-            // for this runId. For the test, we can just close it.
-            const timeout = setTimeout(() => {
-              controller.close();
-            }, 500);
-
-            // Cleanup if client disconnects
-            return () => clearTimeout(timeout);
-          },
-        }),
-        {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Cache-Control',
-          },
-        }
-      );
-    });
-  return app;
+  logger.info('Recursa MCP Server is running and listening on stdio.');
 };
 
-if (process.env.NODE_ENV !== 'test') {
-  const app = createApp(handleUserQuery, appConfig);
-  app.listen(appConfig.port);
-
-  logger.info(
-    `🦊 Recursa server is running at http://${app.server?.hostname}:${app.server?.port}`
-  );
-}
+main();

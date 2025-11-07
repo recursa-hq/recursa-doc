@@ -1,3 +1,5 @@
+I dont think the implementation met spec
+
 === DONE
 
 before asking next AI developer to finish the todo blueprint ,

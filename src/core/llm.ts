@@ -78,7 +78,7 @@ export const queryLLM = async (
       headers: {
         Authorization: `Bearer ${config.openRouterApiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': `http://localhost:${config.port}`,
+        'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
         'X-Title': 'Recursa',
       },
       body: JSON.stringify(requestBody),

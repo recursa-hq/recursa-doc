@@ -1,55 +1,107 @@
+import { promises as fs } from 'fs';
+import path from 'path';
 import type { GraphQueryResult } from '../../types';
-
-// Note: These are complex and will require file system access and parsing logic.
+import { resolveSecurePath } from './secure-path';
+import { walk } from './fs-walker';
 
 export const queryGraph =
-  (_graphRoot: string) =>
-  async (_query: string): Promise<GraphQueryResult[]> => {
-    // Cheatsheet for implementation:
-    // 1. This is a complex function requiring a mini-parser for the query language.
-    // 2. Parse the query string into a structured format (e.g., an AST).
-    // 3. Use the local `walk` utility to iterate over all files in graphRoot.
-    // 4. For each file, check if it matches the query AST.
-    //    - `(property key:: value)`: Read file, find line with `key:: value`.
-    //    - `(outgoing-link [[Page]])`: Read file, find `[[Page]]`.
-    //    - `(AND ...)`: All sub-queries must match.
-    // 5. Aggregate results into the `QueryResult[]` format.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (query: string): Promise<GraphQueryResult[]> => {
+    // Basic property query parser: (property key:: value)
+    const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+    const match = query.trim().match(propertyRegex);
+
+    if (!match || !match[1] || !match[2]) {
+      // For now, only support property queries. Return empty for others.
+      return [];
+    }
+
+    const key = match[1];
+    const value = match[2];
+    const results: GraphQueryResult[] = [];
+
+    for await (const filePath of walk(graphRoot)) {
+      if (filePath.endsWith('.md')) {
+        const content = await fs.readFile(filePath, 'utf-8');
+        const lines = content.split('\n');
+        const matchingLines: string[] = [];
+        for (const line of lines) {
+          if (line.trim() === `${key.trim()}:: ${value.trim()}`) {
+            matchingLines.push(line);
+          }
+        }
+        if (matchingLines.length > 0) {
+          results.push({
+            filePath: path.relative(graphRoot, filePath),
+            matches: matchingLines,
+          });
+        }
+      }
+    }
+    return results;
   };
 
 export const getBacklinks =
-  (_graphRoot: string) =>
-  async (_filePath: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Normalize the `filePath` to its base name (e.g., 'My Page.md' -> 'My Page').
-    // 2. Construct the link pattern, e.g., `[[My Page]]`.
-    // 3. Use the local `walk` utility to iterate through all `.md` files in graphRoot.
-    // 4. For each file, read its content and check if it contains the link pattern.
-    // 5. If it does, add that file's path to the results array.
-    // 6. Return the array of file paths.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const targetBaseName = path.basename(filePath, path.extname(filePath));
+    const linkPattern = `[[${targetBaseName}]]`;
+    const backlinks: string[] = [];
+
+    for await (const currentFilePath of walk(graphRoot)) {
+      // Don't link to self
+      if (
+        path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)
+      ) {
+        continue;
+      }
+
+      if (currentFilePath.endsWith('.md')) {
+        try {
+          const content = await fs.readFile(currentFilePath, 'utf-8');
+          if (content.includes(linkPattern)) {
+            backlinks.push(path.relative(graphRoot, currentFilePath));
+          }
+        } catch (e) {
+          // Ignore files that can't be read
+        }
+      }
+    }
+    return backlinks;
   };
 
 export const getOutgoingLinks =
-  (_graphRoot: string) =>
-  async (_filePath: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Use `resolveSecurePath` to get the full, validated path for `filePath`.
-    // 2. Read the file content.
-    // 3. Use a regex like `/\[\[(.*?)\]\]/g` to find all wikilinks.
-    // 4. Extract the content from each match.
-    // 5. Return an array of unique link names.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const matches = content.matchAll(linkRegex);
+    const uniqueLinks = new Set<string>();
+
+    for (const match of matches) {
+      if (match[1]) {
+        uniqueLinks.add(match[1]);
+      }
+    }
+    return Array.from(uniqueLinks);
   };
 
 export const searchGlobal =
-  (_graphRoot: string) =>
-  async (_query: string): Promise<string[]> => {
-    // Cheatsheet for implementation:
-    // 1. Use the local `walk` utility to iterate through all text-based files in graphRoot.
-    // 2. For each file, read its content.
-    // 3. Perform a case-insensitive search for the `query` string.
-    // 4. If a match is found, add the file path to the results.
-    // 5. Return the array of matching file paths.
-    throw new Error('Not implemented');
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    const matchingFiles: string[] = [];
+    const lowerCaseQuery = query.toLowerCase();
+
+    for await (const filePath of walk(graphRoot)) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.toLowerCase().includes(lowerCaseQuery)) {
+          matchingFiles.push(path.relative(graphRoot, filePath));
+        }
+      } catch (e) {
+        // Ignore binary files or files that can't be read
+      }
+    }
+    return matchingFiles;
   };

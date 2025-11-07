@@ -33,10 +33,7 @@ const MIN_LOG_LEVEL: LogLevel =
   LOG_LEVEL_MAP[process.env.LOG_LEVEL?.toLowerCase() ?? 'info'] ??
   LogLevel.INFO;
 
-type LogContext = Record<
-  string,
-  string | number | boolean | null | undefined | Record<string, unknown>
->;
+type LogContext = Record<string, unknown>;
 
 export type Logger = {
   debug: (message: string, context?: LogContext) => void;
