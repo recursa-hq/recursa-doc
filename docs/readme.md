@@ -177,10 +177,11 @@ Recursa is designed to be hacked on. Contributions are welcome!
 
 To add a new tool (e.g., `mem.searchWeb(query)`):
 
-1.  Implement the function's logic in `src/core/MemAPI.ts`.
-2.  Expose the new function on the `mem` object in `src/core/Sandbox.ts`.
-3.  Update `tools.md` and `system-prompt.md` to document the new function and provide examples of how the LLM should use it.
-4.  Open a Pull Request!
+1.  Implement the function's logic in a file within `src/core/mem-api/`.
+2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
+3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
+4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
+5.  Open a Pull Request!
 
 ## 📜 License
 

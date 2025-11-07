@@ -10,18 +10,33 @@ type PropertyCondition = {
   value: string;
 };
 
-type Condition = PropertyCondition; // For future expansion
+type OutgoingLinkCondition = {
+  type: 'outgoing-link';
+  target: string;
+};
+
+type Condition = PropertyCondition | OutgoingLinkCondition;
 
 const parseCondition = (conditionStr: string): Condition | null => {
   const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-  const match = conditionStr.trim().match(propertyRegex);
-  if (match && match[1] && match[2]) {
+  let match = conditionStr.trim().match(propertyRegex);
+  if (match?.[1] && match[2]) {
     return {
       type: 'property',
       key: match[1].trim(),
       value: match[2].trim(),
     };
   }
+
+  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
+  match = conditionStr.trim().match(linkRegex);
+  if (match?.[1]) {
+    return {
+      type: 'outgoing-link',
+      target: match[1].trim(),
+    };
+  }
+
   return null;
 };
 
@@ -33,6 +48,15 @@ const checkCondition = (content: string, condition: Condition): string[] => {
       if (line.trim() === `${condition.key}:: ${condition.value}`) {
         matches.push(line);
       }
+    }
+  } else if (condition.type === 'outgoing-link') {
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const outgoingLinks = new Set(
+      Array.from(content.matchAll(linkRegex), (m) => m[1])
+    );
+    if (outgoingLinks.has(condition.target)) {
+      // Return a generic match since we don't have a specific line
+      matches.push(`[[${condition.target}]]`);
     }
   }
   return matches;
