@@ -6,7 +6,7 @@ import { parseLLMResponse } from './parser';
 import { runInSandbox } from './sandbox';
 import { createMemAPI } from './mem-api';
 import { randomUUID } from 'crypto';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 
 // A mock in-memory session store. In a real app, this might be Redis, a DB, or a file store.
@@ -14,7 +14,7 @@ const sessionHistories: Record<string, ChatMessage[]> = {};
 
 let systemPromptMessage: ChatMessage | null = null;
 
-const getSystemPrompt = (): ChatMessage => {
+const getSystemPrompt = async (): Promise<ChatMessage> => {
   // This function reads the system prompt from disk on its first call and caches it.
   // This is a form of lazy-loading and ensures the file is read only once.
   if (systemPromptMessage) {
@@ -25,8 +25,8 @@ const getSystemPrompt = (): ChatMessage => {
     // Resolve the path to 'docs/system-prompt.md' from the project root.
     const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
 
-    // Read the file content synchronously.
-    const systemPromptContent = fs.readFileSync(promptPath, 'utf-8');
+    // Read the file content asynchronously.
+    const systemPromptContent = await fs.readFile(promptPath, 'utf-8');
 
     // Create the ChatMessage object and store it in `systemPromptMessage`.
     systemPromptMessage = {
@@ -38,12 +38,13 @@ const getSystemPrompt = (): ChatMessage => {
     return systemPromptMessage;
   } catch (error) {
     // If file read fails, log a critical error and exit, as the agent cannot run without it.
-    logger.error('Failed to load system prompt file', error as Error, {
+    const errorMessage = 'Failed to load system prompt file';
+    logger.error(errorMessage, error as Error, {
       path: path.resolve(process.cwd(), 'docs/system-prompt.md'),
     });
 
-    // Exit the process with a non-zero code to indicate failure
-    process.exit(1);
+    // Throw an error to be caught by the server's main function
+    throw new Error(errorMessage, { cause: error });
   }
 };
 
@@ -68,9 +69,9 @@ export const handleUserQuery = async (
 
   // Initialize or retrieve session history
   if (!sessionHistories[currentSessionId]) {
-    sessionHistories[currentSessionId] = [getSystemPrompt()];
+    sessionHistories[currentSessionId] = [await getSystemPrompt()];
   }
-  
+
   const history = sessionHistories[currentSessionId];
   history.push({ role: 'user', content: query });
 
@@ -162,9 +163,7 @@ export const handleUserQuery = async (
           // Safely serialize result for logging
           result: JSON.stringify(executionResult, null, 2),
         });
-        const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(
-          executionResult
-        )}`;
+        const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(executionResult)}`;
         context.history.push({ role: 'user', content: feedback });
 
         // Send success status update
@@ -180,7 +179,9 @@ export const handleUserQuery = async (
         }
       } catch (e) {
         logger.error('Code execution failed', e as Error, { runId });
-        const feedback = `[Execution Error]: ${(e as Error).message}`;
+        const feedback = `[Execution Error]: Your code failed to execute. Error: ${
+          (e as Error).message
+        }. You must analyze this error and correct your code in the next turn.`;
         context.history.push({ role: 'user', content: feedback });
 
         // Send error status update

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import path from 'path';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
@@ -18,7 +18,7 @@ export type AppConfig = {
   llmModel: string;
 };
 
-export const loadAndValidateConfig = (): AppConfig => {
+export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   const parseResult = configSchema.safeParse(process.env);
 
   if (!parseResult.success) {
@@ -47,7 +47,7 @@ export const loadAndValidateConfig = (): AppConfig => {
   // so we should skip this check. `bun test` automatically sets NODE_ENV=test.
   if (process.env.NODE_ENV !== 'test') {
     try {
-      const stats = fs.statSync(resolvedPath);
+      const stats = await fs.stat(resolvedPath);
       if (!stats.isDirectory()) {
         throw new Error('is not a directory.');
       }
@@ -68,5 +68,3 @@ export const loadAndValidateConfig = (): AppConfig => {
     llmModel: LLM_MODEL!,
   });
 };
-
-export const config: AppConfig = loadAndValidateConfig();
