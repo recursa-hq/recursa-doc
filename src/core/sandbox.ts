@@ -3,54 +3,26 @@ import type { MemAPI } from '../types/mem';
 import { logger } from '../lib/logger';
 
 /**
- * Preprocesses code to fix common syntax issues from LLM output.
- * This handles malformed strings, mismatched quotes, and other common issues.
- * @param code The raw TypeScript code from the LLM
- * @returns The preprocessed, syntactically valid code
+ * Preprocesses code to fix common syntax issues from LLM output. The primary
+ * issue is multiline strings in single/double quotes, which are invalid in
+ * JS/TS and should be template literals.
+ * @param code The raw TypeScript code from the LLM.
+ * @returns The preprocessed code.
  */
 const preprocessCode = (code: string): string => {
-  let processedCode = code;
+  // Fix multiline strings in single quotes: '...\n...' -> `...\n...`
+  const singleQuotePattern = /'((?:[^'\\]|\\.)*?\n(?:[^'\\]|\\.)*?)'/g;
+  let processedCode = code.replace(
+    singleQuotePattern,
+    (_match, content) => `\`${content.replace(/`/g, '\\`')}\``
+  );
 
-  // Step 1: Fix mixed quote types (most critical issue)
-  // Look for patterns where string starts with one quote type and ends with another
-  // This handles cases like: 'string` or `string' or "string`
-  const mixedQuotePattern = /(['"`])([^'"`\\]*?)(['"`])(?=\s|[;,.)\]}]|$)/g;
-  processedCode = processedCode.replace(mixedQuotePattern, (match, startQuote, content, endQuote) => {
-    if (startQuote !== endQuote) {
-      // If quotes don't match, convert to backticks and escape content
-      const escapedContent = content.replace(/`/g, '\\`');
-      return `\`${escapedContent}\``;
-    }
-    return match;
-  });
-
-  // Step 2: Skip the simple malformed patterns as they conflict with other steps
-  // The mixed quote pattern in Step 1 should handle these cases more carefully
-
-  // Step 3: Fix multiline strings in single/double quotes (convert to template literals)
-  const multilineStringPattern = /(['"])([^'"\\\n]*\n[^'"\\]*?)\1/g;
-  processedCode = processedCode.replace(multilineStringPattern, (match, quote, content) => {
-    const escapedContent = content.replace(/`/g, '\\`');
-    return `\`${escapedContent}\``;
-  });
-
-  // Step 4: Fix unterminated strings - look for opening quotes without closing quotes
-  // This is critical for the EOF errors we're seeing
-  const unterminatedPatterns = [
-    // Pattern: 'string without closing quote, followed by end of line or comma/semicolon
-    { regex: /'([^'\n]*?)(?=\n|,|;|$)/g, replacement: (match: string, content: string) => `\`${content}\`` },
-    // Pattern: `string without closing quote, followed by end of line or comma/semicolon  
-    { regex: /`([^`\n]*?)(?=\n|,|;|$)/g, replacement: (match: string, content: string) => `\`${content}\`` },
-    // Pattern: "string without closing quote, followed by end of line or comma/semicolon
-    { regex: /"([^"\n]*?)(?=\n|,|;|$)/g, replacement: (match: string, content: string) => `\`${content}\`` },
-  ];
-
-  unterminatedPatterns.forEach(({ regex, replacement }) => {
-    processedCode = processedCode.replace(regex, replacement);
-  });
-
-  // Step 5: Skip the aggressive replacements that are causing issues
-  // The previous steps should handle most cases correctly
+  // Fix multiline strings in double quotes: "...\n..." -> `...\n...`
+  const doubleQuotePattern = /"((?:[^"\\]|\\.)*?\n(?:[^"\\]|\\.)*?)"/g;
+  processedCode = processedCode.replace(
+    doubleQuotePattern,
+    (_match, content) => `\`${content.replace(/`/g, '\\`')}\``
+  );
 
   return processedCode;
 };
@@ -65,59 +37,8 @@ export const runInSandbox = async (
   code: string,
   memApi: MemAPI
 ): Promise<unknown> => {
-  // Simple preprocessing to fix only the most critical syntax errors
-  // that prevent the code from running at all
-  let preprocessedCode = code;
-  
-  // Fix multiline strings in single quotes - these cause EOF errors
-  // Pattern: 'content\ncontent' -> `content\ncontent`
-  const multilineStringPattern = /'([^']*\n[^']*)'/g;
-  preprocessedCode = preprocessedCode.replace(multilineStringPattern, (match, content) => {
-    // Escape any backticks in the content
-    const escapedContent = content.replace(/`/g, '\\`');
-    return `\`${escapedContent}\``;
-  });
-  
-  // Fix the most common issue: mixed quotes in string literals
-  // Pattern: 'content` or `content' -> `content`
-  const mixedQuotePatterns = [
-    // Single quote followed by backtick (more aggressive)
-    {
-      regex: /'([^'\n]+)`/g,
-      replacement: (match: string, content: string) => {
-        // Fix if it doesn't contain quotes
-        if (content && !content.includes("'") && !content.includes("`")) {
-          return `\`${content}\``;
-        }
-        return match;
-      }
-    },
-    // Backtick followed by single quote (more aggressive)
-    {
-      regex: /`([^`\n]+)'/g,
-      replacement: (match: string, content: string) => {
-        if (content && !content.includes("'") && !content.includes("`")) {
-          return `\`${content}\``;
-        }
-        return match;
-      }
-    },
-    // Pattern: `content', (backtick, content, single quote, comma)
-    {
-      regex: /`([^`\n]+)',/g,
-      replacement: (match: string, content: string) => {
-        if (content && !content.includes("'") && !content.includes("`")) {
-          return `\`${content}\`,`;
-        }
-        return match;
-      }
-    },
-  ];
-  
-  mixedQuotePatterns.forEach(({ regex, replacement }) => {
-    preprocessedCode = preprocessedCode.replace(regex, replacement);
-  });
-
+  // Preprocess the code to fix common LLM-generated syntax errors.
+  const preprocessedCode = preprocessCode(code);
   // Create a sandboxed context with the mem API and only essential globals
   const context = createContext({
     mem: memApi,

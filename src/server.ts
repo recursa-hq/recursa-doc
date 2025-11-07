@@ -3,14 +3,14 @@ import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
 import { config } from './config.js';
 import { createMemAPI } from './core/mem-api/index.js';
-import { EventEmitter } from './lib/event-emitter.js';
+import { createEmitter } from './lib/events.js';
 import type { StatusUpdate } from './types/loop.js';
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
 
   // 1. Initialize dependencies
-  const emitter = new EventEmitter<Record<string, StatusUpdate>>();
+  const emitter = createEmitter<Record<string, StatusUpdate>>();
   const memApi = createMemAPI(config);
 
   // 2. Create the MCP handler, injecting dependencies

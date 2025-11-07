@@ -120,4 +120,28 @@ describe('MemAPI Integration Tests', () => {
     const emptyFiles = await mem.listFiles('empty');
     expect(emptyFiles).toEqual([]);
   });
+
+  it('should query the graph with multiple conditions', async () => {
+    const pageAContent = `
+# Page A
+prop:: value
+
+Link to [[Page B]].
+    `;
+    const pageBContent = `
+# Page B
+prop:: other
+
+No links here.
+    `;
+
+    await mem.writeFile('PageA.md', pageAContent);
+    await mem.writeFile('PageB.md', pageBContent);
+
+    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
+    const results = await mem.queryGraph(query);
+
+    expect(results.length).toBe(1);
+    expect(results[0].filePath).toBe('PageA.md');
+  });
 });

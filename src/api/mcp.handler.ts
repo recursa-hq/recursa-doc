@@ -12,14 +12,14 @@ import type { MCPTool, MCPResource } from '../types/mcp.js';
 import type { AppConfig } from '../config.js';
 import type { handleUserQuery } from '../core/loop.js';
 import type { StatusUpdate } from '../types/loop.js';
-import type { EventEmitter } from '../lib/event-emitter.js';
+import type { Emitter } from '../lib/events.js';
 
 export const createMCPHandler = (
   memApi: MemAPI,
   knowledgeGraphPath: string,
   config: AppConfig,
   handleQuery: typeof handleUserQuery,
-  emitter: EventEmitter<Record<string, StatusUpdate>>
+  emitter: Emitter<Record<string, StatusUpdate>>
 ) => {
   const server = new Server(
     {
