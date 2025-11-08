@@ -18,7 +18,9 @@ import * as utilOps from './util-ops';
  * @returns A complete MemAPI object ready to be used by the sandbox.
  */
 export const createMemAPI = (config: AppConfig): MemAPI => {
-  const git = simpleGit(config.knowledgeGraphPath);
+  const git = simpleGit(config.knowledgeGraphPath)
+    .addConfig('user.name', config.gitUserName)
+    .addConfig('user.email', config.gitUserEmail);
   const graphRoot = config.knowledgeGraphPath;
 
   return {

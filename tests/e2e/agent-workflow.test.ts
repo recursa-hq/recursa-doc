@@ -28,6 +28,8 @@ describe('Agent End-to-End Workflow', () => {
     harness = await createTestHarness({
       apiKey: appConfig.openRouterApiKey,
       model: appConfig.llmModel,
+      gitUserName: appConfig.gitUserName,
+      gitEmail: appConfig.gitUserEmail,
     });
   });
 

@@ -10,7 +10,8 @@ import { logger } from '../lib/logger';
  */
 export const runInSandbox = async (
   code: string,
-  memApi: MemAPI
+  memApi: MemAPI,
+  timeout = 10000
 ): Promise<unknown> => {
   // Create a sandboxed context with the mem API and only essential globals
   const context = createContext({
@@ -54,9 +55,9 @@ export const runInSandbox = async (
   })();`;
 
   try {
-    logger.debug('Executing code in sandbox', { code });
+    logger.debug('Executing code in sandbox', { code, timeout });
     const result = await runInContext(wrappedCode, context, {
-      timeout: 10000, // 10 seconds
+      timeout, // Use provided timeout
       displayErrors: true,
     });
     logger.debug('Sandbox execution successful', {

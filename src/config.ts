@@ -10,12 +10,24 @@ const configSchema = z.object({
     .string()
     .default('anthropic/claude-3-haiku-20240307') // Sensible default for cost/speed
     .optional(),
+  LLM_TEMPERATURE: z.coerce.number().default(0.7).optional(),
+  LLM_MAX_TOKENS: z.coerce.number().default(4000).optional(),
+  SANDBOX_TIMEOUT: z.coerce.number().default(10000).optional(),
+  SANDBOX_MEMORY_LIMIT: z.coerce.number().default(100).optional(),
+  GIT_USER_NAME: z.string().default('Recursa Agent').optional(),
+  GIT_USER_EMAIL: z.string().default('recursa@local').optional(),
 });
 
 export type AppConfig = {
   openRouterApiKey: string;
   knowledgeGraphPath: string;
   llmModel: string;
+  llmTemperature: number;
+  llmMaxTokens: number;
+  sandboxTimeout: number;
+  sandboxMemoryLimit: number;
+  gitUserName: string;
+  gitUserEmail: string;
 };
 
 export const loadAndValidateConfig = async (): Promise<AppConfig> => {
@@ -30,8 +42,17 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     process.exit(1);
   }
 
-  const { OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH, LLM_MODEL } =
-    parseResult.data;
+  const {
+    OPENROUTER_API_KEY,
+    KNOWLEDGE_GRAPH_PATH,
+    LLM_MODEL,
+    LLM_TEMPERATURE,
+    LLM_MAX_TOKENS,
+    SANDBOX_TIMEOUT,
+    SANDBOX_MEMORY_LIMIT,
+    GIT_USER_NAME,
+    GIT_USER_EMAIL,
+  } = parseResult.data;
 
   // Perform runtime checks
   let resolvedPath = KNOWLEDGE_GRAPH_PATH;
@@ -66,5 +87,11 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     openRouterApiKey: OPENROUTER_API_KEY,
     knowledgeGraphPath: resolvedPath,
     llmModel: LLM_MODEL!,
+    llmTemperature: LLM_TEMPERATURE!,
+    llmMaxTokens: LLM_MAX_TOKENS!,
+    sandboxTimeout: SANDBOX_TIMEOUT!,
+    sandboxMemoryLimit: SANDBOX_MEMORY_LIMIT!,
+    gitUserName: GIT_USER_NAME!,
+    gitUserEmail: GIT_USER_EMAIL!,
   });
 };
