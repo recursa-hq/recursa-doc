@@ -10,7 +10,7 @@ import {
   cleanupTestHarness, 
   resetTestHarness,
   type TestHarnessState 
-} from '../TestHarness';
+} from '../lib/test-harness';
 import type { MemAPI } from '../../src/types';
 
 describe('MemAPI Integration Tests', () => {

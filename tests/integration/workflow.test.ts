@@ -2,47 +2,28 @@ import {
   describe,
   it,
   expect,
-  beforeAll,
-  afterAll,
   beforeEach,
-  mock,
+  afterEach,
 } from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
 import { handleUserQuery } from '../../src/core/loop';
 import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
+import simpleGit from 'simple-git';
 import type { StatusUpdate } from '../../src/types';
-import { createMockLLMQueryWithSpy } from '../lib/test-harness';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockLLMQueryWithSpy,
+  type TestHarnessState,
+} from '../lib/test-harness';
 describe('Agent Workflow Integration Tests', () => {
-  let tempDir: string;
-  let mockConfig: AppConfig;
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-e2e-test-'));
-    mockConfig = {
-      knowledgeGraphPath: tempDir,
-      openRouterApiKey: 'test-api-key',
-      llmModel: 'test-model',
-    };
-  });
+  let harness: TestHarnessState;
 
   beforeEach(async () => {
-    // Clear the directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Initialize git
-    const git = simpleGit(tempDir);
-    await git.init();
-    await git.addConfig('user.name', 'Test User');
-    await git.addConfig('user.email', 'test@example.com');
+    harness = await createTestHarness();
   });
 
-  afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
   });
 
   describe('Complete Workflow Integration', () => {
@@ -76,7 +57,7 @@ await mem.commitChanges('feat: initialize project with basic structure');
 
       const initResult = await handleUserQuery(
         'Initialize a new Node.js project',
-        mockConfig,
+        harness.mockConfig,
         sessionId,
         initMockLLMQuery
       );
@@ -103,7 +84,7 @@ await mem.commitChanges('feat: add utilities, config, and test structure');
 
       const featureResult = await handleUserQuery(
         'Add utilities and configuration to the project',
-        mockConfig,
+        harness.mockConfig,
         sessionId,
         featureMockLLMQuery
       );
@@ -137,7 +118,7 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
 
       const updateResult = await handleUserQuery(
         'Update the main application to use the new utilities',
-        mockConfig,
+        harness.mockConfig,
         sessionId,
         updateMockLLMQuery
       );
@@ -145,7 +126,7 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
       expect(updateResult).toContain('Updated the main application');
 
       // Verify complete project state
-      const mem = createMemAPI(mockConfig as AppConfig);
+      const mem = harness.mem;
 
       // Check all expected files exist
       const expectedFiles = [
@@ -173,8 +154,7 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
       expect(readmeContent).toContain('npm start');
 
       // Verify git history shows all three commits
-      const git = simpleGit(tempDir);
-      const log = await git.log();
+      const log = await harness.git.log();
       expect(log.all.length).toBe(3);
       expect(log.all[0].message).toBe(
         'feat: integrate utilities and update documentation'
@@ -248,7 +228,7 @@ Successfully performed complex file operations including creating multiple docum
 
       const result = await handleUserQuery(
         'Perform complex file operations with git workflow',
-        mockConfig,
+        harness.mockConfig,
         'complex-ops-session',
         complexMockLLMQuery,
         captureStatusUpdate
@@ -265,7 +245,7 @@ Successfully performed complex file operations including creating multiple docum
       expect(types.has('act')).toBe(true);
 
       // Verify final file state
-      const mem = createMemAPI(mockConfig as AppConfig);
+      const mem = harness.mem;
 
       // Files that should exist
       const existingFiles = [
@@ -291,8 +271,7 @@ Successfully performed complex file operations including creating multiple docum
       expect(introContent).toContain('[[Overview]]');
 
       // Verify git operations worked
-      const git = simpleGit(tempDir);
-      const log = await git.log();
+      const log = await harness.git.log();
       expect(log.all.length).toBe(1);
       expect(log.all[0].message).toBe(
         'feat: reorganize documentation structure'
@@ -359,7 +338,7 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
 
       const result = await handleUserQuery(
         'Test error handling and recovery scenarios',
-        mockConfig,
+        harness.mockConfig,
         'error-test-session',
         errorRecoveryMockLLMQuery,
         captureStatusUpdate
@@ -374,7 +353,7 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
       expect(errorUpdates.length).toBeGreaterThan(0);
 
       // Verify files that should exist after recovery
-      const mem = createMemAPI(mockConfig as AppConfig);
+      const mem = harness.mem;
       const configExists = await mem.fileExists('non-existent-config.json');
       expect(configExists).toBe(true);
 
@@ -390,8 +369,7 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
       expect(missingContent).toContain('Created after error');
 
       // Verify git commit was successful despite errors
-      const git = simpleGit(tempDir);
-      const log = await git.log();
+      const log = await harness.git.log();
       expect(log.all.length).toBe(1);
       expect(log.all[0].message).toBe(
         'feat: demonstrate error handling and recovery'
