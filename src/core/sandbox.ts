@@ -59,7 +59,10 @@ export const runInSandbox = async (
       timeout: 10000, // 10 seconds
       displayErrors: true,
     });
-    logger.debug('Sandbox execution successful', { result, type: typeof result });
+    logger.debug('Sandbox execution successful', {
+      result,
+      type: typeof result,
+    });
     return result;
   } catch (error) {
     logger.error('Error executing sandboxed code', error as Error, { code });

@@ -1,10 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { handleUserQuery } from '../../src/core/loop';
 import { createMemAPI } from '../../src/core/mem-api';
 import simpleGit from 'simple-git';

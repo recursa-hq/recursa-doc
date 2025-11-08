@@ -22,7 +22,7 @@ export const createEmitter = <
   Events extends EventMap = EventMap,
 >(): Emitter<Events> => {
   // Listeners are stored in a Map within the closure
-  const listeners = new Map<keyof Events, Listener<Events[keyof Events]>[]>();
+  const listeners = new Map<keyof Events, Array<Listener<unknown>>>();
 
   const on = <K extends keyof Events>(
     event: K,
@@ -31,7 +31,7 @@ export const createEmitter = <
     if (!listeners.has(event)) {
       listeners.set(event, []);
     }
-    listeners.get(event)?.push(listener);
+    listeners.get(event)?.push(listener as Listener<unknown>);
   };
 
   const off = <K extends keyof Events>(
@@ -44,14 +44,14 @@ export const createEmitter = <
     }
     listeners.set(
       event,
-      eventListeners.filter((l) => l !== listener)
+      eventListeners.filter((l) => l !== (listener as Listener<unknown>))
     );
   };
 
   const emit = <K extends keyof Events>(event: K, data: Events[K]): void => {
     listeners.get(event)?.forEach((listener) => {
       try {
-        listener(data);
+        (listener as Listener<Events[K]>)(data);
       } catch (e: unknown) {
         // eslint-disable-next-line no-console
         console.error(`Error in event listener for ${String(event)}`, e);

@@ -168,7 +168,8 @@ describe('MCP Protocol E2E Test', () => {
     // 4. Await and verify list-tools response
     const listToolsResponse = await reader.next();
     expect(listToolsResponse.done).toBe(false);
-    const listToolsResponseValue = listToolsResponse.value as MCPListToolsResponse;
+    const listToolsResponseValue =
+      listToolsResponse.value as MCPListToolsResponse;
     expect(listToolsResponseValue.id).toBe(listToolsRequestId);
     expect(listToolsResponseValue.result.tools).toBeArray();
     expect(listToolsResponseValue.result.tools.length).toBeGreaterThan(0);

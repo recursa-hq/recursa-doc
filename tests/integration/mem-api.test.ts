@@ -1,15 +1,9 @@
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from 'bun:test';
-import { 
-  createTestHarness, 
-  cleanupTestHarness, 
+  createTestHarness,
+  cleanupTestHarness,
   resetTestHarness,
-  type TestHarnessState 
+  type TestHarnessState,
 } from '../lib/test-harness';
 import type { MemAPI } from '../../src/types';
 

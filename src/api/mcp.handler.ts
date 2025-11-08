@@ -41,7 +41,8 @@ export const createMCPHandler = (
   const tools: MCPTool[] = [
     {
       name: 'process_query',
-      description: 'Processes a high-level user query by running the agent loop.',
+      description:
+        'Processes a high-level user query by running the agent loop.',
       inputSchema: {
         type: 'object',
         properties: {

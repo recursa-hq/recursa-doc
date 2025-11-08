@@ -1,4 +1,5 @@
 # Directory Structure
+
 ```
 docs/
   readme.md
@@ -63,7 +64,8 @@ tsconfig.tsbuildinfo
 # Files
 
 ## File: src/core/mem-api/fs-walker.ts
-````typescript
+
+```typescript
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -82,10 +84,11 @@ export async function* walk(dir: string): AsyncGenerator<string> {
     }
   }
 }
-````
+```
 
 ## File: src/lib/events.ts
-````typescript
+
+```typescript
 type Listener<T = unknown> = (data: T) => void;
 
 // Define a generic type for the emitter's event map
@@ -165,10 +168,11 @@ export const createEmitter = <
     once,
   };
 };
-````
+```
 
 ## File: src/types/loop.ts
-````typescript
+
+```typescript
 import type { MemAPI } from './mem';
 import type { ChatMessage } from './llm';
 
@@ -194,10 +198,11 @@ export type ExecutionContext = {
   // Optional callback for real-time status updates
   onStatusUpdate?: (update: StatusUpdate) => void;
 };
-````
+```
 
 ## File: tests/e2e/mcp-protocol.test.ts
-````typescript
+
+```typescript
 import {
   describe,
   it,
@@ -332,10 +337,11 @@ describe('MCP Protocol E2E Test', () => {
     await writer.end();
   }, 20000); // Increase timeout for spawning process
 });
-````
+```
 
 ## File: .dockerignore
-````
+
+```
 # Git
 .git
 .gitignore
@@ -361,10 +367,11 @@ yarn-debug.log*
 # Docker
 Dockerfile
 .dockerignore
-````
+```
 
 ## File: Dockerfile
-````dockerfile
+
+```dockerfile
 # ---- Base Stage ----
 # Use the official Bun image as a base.
 # It includes all the necessary tooling.
@@ -404,10 +411,11 @@ EXPOSE 3000
 
 # The command to run the application
 CMD ["bun", "run", "src/server.ts"]
-````
+```
 
 ## File: src/core/mem-api/secure-path.ts
-````typescript
+
+```typescript
 import path from 'path';
 
 /**
@@ -428,10 +436,11 @@ export const resolveSecurePath = (
   }
   return resolvedPath;
 };
-````
+```
 
 ## File: tests/integration/workflow.test.ts
-````typescript
+
+```typescript
 import {
   describe,
   it,
@@ -843,10 +852,11 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
     });
   });
 });
-````
+```
 
 ## File: .eslintrc.json
-````json
+
+```json
 {
   "parser": "@typescript-eslint/parser",
   "extends": [
@@ -871,10 +881,11 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
     "no-console": "warn"
   }
 }
-````
+```
 
 ## File: .prettierrc.json
-````json
+
+```json
 {
   "semi": true,
   "trailingComma": "es5",
@@ -883,9 +894,10 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
   "tabWidth": 2,
   "endOfLine": "lf"
 }
-````
+```
 
 ## File: docs/system-prompt.md
+
 ````markdown
 # Recursa Agent System Prompt
 
@@ -910,14 +922,19 @@ Every response you generate MUST conform to the following XML-like structure. Fa
 **For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
 
 **Correct:**
+
 ```typescript
-await mem.writeFile('example.md', `
+await mem.writeFile(
+  'example.md',
+  `
 # This is a title
 This is a multiline document.
-`);
+`
+);
 ```
 
 **INCORRECT AND FORBIDDEN:**
+
 ```typescript
 // This will fail!
 await mem.writeFile('example.md', '
@@ -1038,7 +1055,8 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 ````
 
 ## File: src/types/sandbox.ts
-````typescript
+
+```typescript
 export interface SandboxOptions {
   timeout?: number;
   memoryLimit?: number;
@@ -1067,10 +1085,11 @@ export interface ExecutionConstraints {
   allowedModules: string[];
   forbiddenAPIs: string[];
 }
-````
+```
 
 ## File: tests/unit/llm.test.ts
-````typescript
+
+```typescript
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
 import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
 import type { AppConfig } from '../../src/config';
@@ -1244,10 +1263,11 @@ describe('LLM Module', () => {
     });
   });
 });
-````
+```
 
 ## File: tests/unit/parser.test.ts
-````typescript
+
+```typescript
 import { describe, it, expect } from 'bun:test';
 import { parseLLMResponse } from '../../src/core/parser';
 
@@ -1320,18 +1340,20 @@ describe('LLM Response Parser', () => {
     });
   });
 });
-````
+```
 
 ## File: .env.test
-````
+
+```
 # Test Environment Configuration
 OPENROUTER_API_KEY="mock-test-api-key"
 KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
 LLM_MODEL="mock-test-model"
-````
+```
 
 ## File: relay.config.json
-````json
+
+```json
 {
   "$schema": "https://relay.noca.pro/schema.json",
   "projectId": "doc",
@@ -1361,14 +1383,16 @@ LLM_MODEL="mock-test-model"
     "gitBranchTemplate": "gitCommitMsg"
   }
 }
-````
+```
 
 ## File: tsconfig.tsbuildinfo
-````
+
+```
 {"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
-````
+```
 
 ## File: docs/readme.md
+
 ````markdown
 # Recursa: The Git-Native Memory Layer for Local-First LLMs
 
@@ -1563,7 +1587,8 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 ````
 
 ## File: docs/rules.md
-````markdown
+
+```markdown
 codebase compliance rules;
 
 1. No OOP, only HOFs
@@ -1572,10 +1597,11 @@ codebase compliance rules;
 4. [e2e|integration|unit]/[domain].test.ts files & dirs
 5. Bun tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
 6. DRY
-````
+```
 
 ## File: docs/tools.md
-````markdown
+
+```markdown
 # TOOLS.md: Recursa Sandboxed API (`mem` Object)
 
 The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
@@ -1586,16 +1612,16 @@ The Large Language Model is granted access to the `mem` object, which contains a
 
 These are the fundamental building blocks for manipulating the Logseq/Obsidian graph structure.
 
-| Method               | Signature                                                                      | Returns             | Description                                                                                                                        |
-| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                          |
-| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories.           |
+| Method               | Signature                                                                      | Returns             | Description                                                                                                                                                                                                                                                                                                                              |
+| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                                                                                                                                                                                                                                |
+| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories.                                                                                                                                                                                                                 |
 | **`mem.updateFile`** | `(filePath: string, oldContent: string, newContent: string): Promise<boolean>` | `Promise<boolean>`  | **Performs an atomic Compare-and-Swap.** Replaces the entire file content with `newContent` ONLY IF the current content exactly matches `oldContent`. This prevents race conditions and overwriting other changes. **Usage:** Read a file, transform its content in your code, then call `updateFile` with the original and new content. |
-| **`mem.deletePath`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or directory recursively.                                                                               |
-| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                        |
-| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                           |
-| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                               |
-| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                    |
+| **`mem.deletePath`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or directory recursively.                                                                                                                                                                                                                                                                                     |
+| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                                                                                                                                                                                                                              |
+| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                                                                                                                                                                                                                                 |
+| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                                                                                                                                                                                                                                     |
+| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                                                                                                                                                                                                                          |
 
 ---
 
@@ -1603,12 +1629,12 @@ These are the fundamental building blocks for manipulating the Logseq/Obsidian g
 
 These tools leverage the Git repository tracking the knowledge graph, allowing the agent to audit its own memory and understand historical context.
 
-| Method                   | Signature                                                                                              | Returns               | Description                                                                                                                                                |
-| :----------------------- | :----------------------------------------------------------------------------------------------------- | :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.gitDiff`**        | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.**  |
-| **`mem.gitLog`**         | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                 |
-| **`mem.getChangedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists all files that have been created, modified, staged, or deleted in the working tree. Provides a complete view of pending changes.                      |
-| **`mem.commitChanges`**  | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.    |
+| Method                    | Signature                                                                                              | Returns               | Description                                                                                                                                               |
+| :------------------------ | :----------------------------------------------------------------------------------------------------- | :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.gitDiff`**         | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.** |
+| **`mem.gitLog`**          | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                |
+| **`mem.getChangedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists all files that have been created, modified, staged, or deleted in the working tree. Provides a complete view of pending changes.                    |
+| **`mem.commitChanges`**   | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.   |
 
 ---
 
@@ -1646,10 +1672,11 @@ General-purpose operations for the sandbox environment.
 | **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
 | **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
 | **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
-````
+```
 
 ## File: src/types/index.ts
-````typescript
+
+```typescript
 export * from './mem.js';
 export * from './git.js';
 export * from './sandbox.js';
@@ -1687,10 +1714,11 @@ export interface EnvironmentVariables {
   GIT_USER_NAME?: string;
   GIT_USER_EMAIL?: string;
 }
-````
+```
 
 ## File: src/types/llm.ts
-````typescript
+
+```typescript
 export type ParsedLLMResponse = {
   think?: string;
   typescript?: string;
@@ -1734,10 +1762,11 @@ export interface LLMProvider {
 }
 
 export type StreamingCallback = (chunk: string) => void;
-````
+```
 
 ## File: .gitignore
-````
+
+```
 # Dependencies
 /node_modules
 /.pnp
@@ -1783,10 +1812,11 @@ lerna-debug.log*
 # Worktrees (from original)
 worktrees/*/node_modules/
 worktrees/*/.git/
-````
+```
 
 ## File: src/core/mem-api/index.ts
-````typescript
+
+```typescript
 import type { MemAPI } from '../../types';
 import type { AppConfig } from '../../config';
 import simpleGit from 'simple-git';
@@ -1844,10 +1874,11 @@ export const createMemAPI = (config: AppConfig): MemAPI => {
     getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
   };
 };
-````
+```
 
 ## File: src/core/mem-api/state-ops.ts
-````typescript
+
+```typescript
 import type { SimpleGit } from 'simple-git';
 
 // Note: These functions map to specific git commands for state management.
@@ -1888,10 +1919,11 @@ export const discardChanges =
     // 3. Return true on success.
     return true;
   };
-````
+```
 
 ## File: src/lib/logger.ts
-````typescript
+
+```typescript
 import 'dotenv/config';
 
 // Cheatsheet for implementation:
@@ -1976,10 +2008,11 @@ const createLoggerInternal = (baseContext: LogContext = {}): Logger => {
 export const createLogger = (): Logger => createLoggerInternal();
 
 export const logger = createLogger();
-````
+```
 
 ## File: src/types/git.ts
-````typescript
+
+```typescript
 export interface GitOptions {
   baseDir?: string;
 }
@@ -2011,10 +2044,11 @@ export type GitCommand =
   | 'log'
   | 'diff'
   | 'branch';
-````
+```
 
 ## File: src/types/mcp.ts
-````typescript
+
+```typescript
 import type { Resource } from '@modelcontextprotocol/sdk/types.js';
 
 export interface MCPInitializeRequest {
@@ -2088,10 +2122,11 @@ export interface MCPServerConfig {
   version: string;
   description?: string;
 }
-````
+```
 
 ## File: tsconfig.json
-````json
+
+```json
 {
   "compilerOptions": {
     "target": "ES2022",
@@ -2118,10 +2153,11 @@ export interface MCPServerConfig {
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
-````
+```
 
 ## File: src/core/mem-api/file-ops.ts
-````typescript
+
+```typescript
 import { promises as fs } from 'fs';
 import path from 'path';
 import { resolveSecurePath } from './secure-path';
@@ -2274,10 +2310,11 @@ export const listFiles =
       );
     }
   };
-````
+```
 
 ## File: src/core/mem-api/git-ops.ts
-````typescript
+
+```typescript
 import type { SimpleGit } from 'simple-git';
 import type { LogEntry } from '../../types';
 
@@ -2367,10 +2404,11 @@ export const commitChanges =
       throw new Error(`Failed to commit changes: ${(error as Error).message}`);
     }
   };
-````
+```
 
 ## File: src/core/mem-api/util-ops.ts
-````typescript
+
+```typescript
 import { promises as fs } from 'fs';
 import type { PathTokenCount } from '../../types';
 import { resolveSecurePath } from './secure-path';
@@ -2417,10 +2455,11 @@ export const getTokenCountForPaths =
       })
     );
   };
-````
+```
 
 ## File: src/core/llm.ts
-````typescript
+
+```typescript
 import type { AppConfig } from '../config';
 import { logger } from '../lib/logger';
 import type { ChatMessage } from '../types';
@@ -2562,10 +2601,11 @@ export const queryLLM = async (
 export const queryLLMWithRetries = withRetry(
   queryLLM as (...args: unknown[]) => Promise<unknown>
 );
-````
+```
 
 ## File: src/core/parser.ts
-````typescript
+
+```typescript
 import type { ParsedLLMResponse } from '../types';
 
 /**
@@ -2591,10 +2631,11 @@ export const parseLLMResponse = (response: string): ParsedLLMResponse => {
     reply: extractTagContent('reply'),
   };
 };
-````
+```
 
 ## File: src/types/mem.ts
-````typescript
+
+```typescript
 import type { LogEntry } from './git';
 
 // --- Knowledge Graph & Git ---
@@ -2656,10 +2697,11 @@ export type MemAPI = {
   getTokenCount: (filePath: string) => Promise<number>;
   getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
 };
-````
+```
 
 ## File: src/config.ts
-````typescript
+
+```typescript
 import 'dotenv/config';
 import { z } from 'zod';
 import path from 'path';
@@ -2730,10 +2772,11 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     llmModel: LLM_MODEL!,
   });
 };
-````
+```
 
 ## File: .env.example
-````
+
+```
 # Recursa MCP Server Configuration
 # Copy this file to .env and update the values
 
@@ -2766,10 +2809,11 @@ GIT_USER_EMAIL=recursa@local
 # 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
 # 4. Source the file: source .env
 # 5. Run the server: bun run start
-````
+```
 
 ## File: package.json
-````json
+
+```json
 {
   "name": "recursa-server",
   "version": "0.1.0",
@@ -2808,10 +2852,11 @@ GIT_USER_EMAIL=recursa@local
   },
   "license": "MIT"
 }
-````
+```
 
 ## File: tests/e2e/agent-workflow.test.ts
-````typescript
+
+```typescript
 import {
   describe,
   it,
@@ -2927,7 +2972,7 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
     const thornePath = path.join(testGraphPath, 'Dr. Aris Thorne.md');
     const orgPath = path.join(testGraphPath, 'AI Research Institute.md');
-    
+
     // Use fileExists pattern instead of fs.access()
     const checkFileExists = async (filePath: string) => {
       try {
@@ -2937,7 +2982,7 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
         return false;
       }
     };
-    
+
     expect(await checkFileExists(thornePath)).toBe(true);
     expect(await checkFileExists(orgPath)).toBe(true);
 
@@ -2954,10 +2999,11 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     );
   });
 });
-````
+```
 
 ## File: repomix.config.json
-````json
+
+```json
 {
   "$schema": "https://repomix.com/schemas/latest/schema.json",
   "input": {
@@ -3006,10 +3052,11 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     "encoding": "o200k_base"
   }
 }
-````
+```
 
 ## File: tasks.md
-````markdown
+
+```markdown
 # Recursa Project Tasks
 
 ## Core Infrastructure Tasks
@@ -3107,10 +3154,11 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 - **status**: CLAIMED
 - **job-id**: job-aff105b8
 - **depends-on**: [task-1, task-2, task-3, task-4, task-5, task-6, task-7, task-8, task-9, task-10]
-````
+```
 
 ## File: src/core/mem-api/graph-ops.ts
-````typescript
+
+```typescript
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { GraphQueryResult } from '../../types';
@@ -3225,9 +3273,7 @@ export const getBacklinks =
 
     for await (const currentFilePath of walk(graphRoot)) {
       // Don't link to self
-      if (
-        path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)
-      ) {
+      if (path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)) {
         continue;
       }
 
@@ -3280,10 +3326,11 @@ export const searchGlobal =
     }
     return matchingFiles;
   };
-````
+```
 
 ## File: tests/integration/mem-api.test.ts
-````typescript
+
+```typescript
 import {
   describe,
   it,
@@ -3460,10 +3507,11 @@ No links here.
     expect(readContent2).toBe('version 2.5');
   });
 });
-````
+```
 
 ## File: src/core/loop.ts
-````typescript
+
+```typescript
 import type { AppConfig } from '../config';
 import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
 import { logger } from '../lib/logger';
@@ -3560,7 +3608,7 @@ export const handleUserQuery = async (
 
     // **Parse**
     const parsedResponse = parseLLMResponse(llmResponseStr);
-    
+
     // Debug logging to see what was parsed
     logger.info('Parsed LLM response', {
       runId,
@@ -3570,7 +3618,7 @@ export const handleUserQuery = async (
         reply: !!parsedResponse.reply,
       },
     });
-    
+
     if (
       !parsedResponse.think &&
       !parsedResponse.typescript &&
@@ -3605,7 +3653,7 @@ export const handleUserQuery = async (
     // **Act**
     if (parsedResponse.typescript) {
       logger.info('Executing TypeScript code', { runId });
-      
+
       // Send action status update via callback if available
       if (onStatusUpdate) {
         const actUpdate: StatusUpdate = {
@@ -3674,10 +3722,11 @@ export const handleUserQuery = async (
   logger.warn('Loop finished without a reply', { runId, turns: MAX_TURNS });
   return 'The agent finished its work without providing a final response.';
 };
-````
+```
 
 ## File: src/api/mcp.handler.ts
-````typescript
+
+```typescript
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -3721,7 +3770,8 @@ export const createMCPHandler = (
   const tools: MCPTool[] = [
     {
       name: 'process_query',
-      description: 'Processes a high-level user query by running the agent loop.',
+      description:
+        'Processes a high-level user query by running the agent loop.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3859,10 +3909,11 @@ export const createMCPHandler = (
     transport: new StdioServerTransport(),
   };
 };
-````
+```
 
 ## File: src/core/sandbox.ts
-````typescript
+
+```typescript
 import { createContext, runInContext } from 'node:vm';
 import type { MemAPI } from '../types/mem';
 import { logger } from '../lib/logger';
@@ -3924,7 +3975,10 @@ export const runInSandbox = async (
       timeout: 10000, // 10 seconds
       displayErrors: true,
     });
-    logger.debug('Sandbox execution successful', { result, type: typeof result });
+    logger.debug('Sandbox execution successful', {
+      result,
+      type: typeof result,
+    });
     return result;
   } catch (error) {
     logger.error('Error executing sandboxed code', error as Error, { code });
@@ -3932,10 +3986,11 @@ export const runInSandbox = async (
     throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
   }
 };
-````
+```
 
 ## File: src/server.ts
-````typescript
+
+```typescript
 import { createMCPHandler } from './api/mcp.handler.js';
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
@@ -3976,4 +4031,4 @@ const main = async () => {
 };
 
 main();
-````
+```
