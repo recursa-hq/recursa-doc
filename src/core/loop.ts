@@ -156,7 +156,8 @@ export const handleUserQuery = async (
         logger.info('Running code in sandbox', { runId });
         const executionResult = await runInSandbox(
           parsedResponse.typescript,
-          context.memAPI
+          context.memAPI,
+          config.sandboxTimeout
         );
         logger.info('Code executed successfully', {
           runId,

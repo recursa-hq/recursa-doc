@@ -3,6 +3,7 @@ import path from 'path';
 import type { GraphQueryResult } from '../../types';
 import { resolveSecurePath } from './secure-path';
 import { walk } from './fs-walker';
+import { createIgnoreFilter } from '../../lib/gitignore-parser';
 
 type PropertyCondition = {
   type: 'property';
@@ -75,8 +76,9 @@ export const queryGraph =
     }
 
     const results: GraphQueryResult[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
 
-    for await (const filePath of walk(graphRoot)) {
+    for await (const filePath of walk(graphRoot, isIgnored)) {
       if (!filePath.endsWith('.md')) continue;
 
       const content = await fs.readFile(filePath, 'utf-8');
@@ -109,8 +111,9 @@ export const getBacklinks =
     const targetBaseName = path.basename(filePath, path.extname(filePath));
     const linkPattern = `[[${targetBaseName}]]`;
     const backlinks: string[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
 
-    for await (const currentFilePath of walk(graphRoot)) {
+    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
       // Don't link to self
       if (path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)) {
         continue;
@@ -152,8 +155,9 @@ export const searchGlobal =
   async (query: string): Promise<string[]> => {
     const matchingFiles: string[] = [];
     const lowerCaseQuery = query.toLowerCase();
+    const isIgnored = await createIgnoreFilter(graphRoot);
 
-    for await (const filePath of walk(graphRoot)) {
+    for await (const filePath of walk(graphRoot, isIgnored)) {
       try {
         const content = await fs.readFile(filePath, 'utf-8');
         if (content.toLowerCase().includes(lowerCaseQuery)) {

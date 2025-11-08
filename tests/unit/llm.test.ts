@@ -28,6 +28,12 @@ const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
   llmModel: 'anthropic/claude-3-haiku-20240307',
+  llmTemperature: 0.7,
+  llmMaxTokens: 4000,
+  sandboxTimeout: 10000,
+  sandboxMemoryLimit: 100,
+  gitUserName: 'Test User',
+  gitUserEmail: 'test@example.com',
 };
 
 const mockHistory: ChatMessage[] = [

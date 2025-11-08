@@ -67,8 +67,8 @@ export const queryLLM = async (
   const requestBody = {
     model: config.llmModel,
     messages: history,
-    temperature: 0.7,
-    max_tokens: 4000,
+    temperature: config.llmTemperature,
+    max_tokens: config.llmMaxTokens,
   };
 
   try {
