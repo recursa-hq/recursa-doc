@@ -117,7 +117,7 @@ export const resetTestHarness = async (
 
   // Re-initialize git
   await harness.git.init();
-  
+
   // Optionally recreate .gitignore
   if (withGitignore) {
     await fs.writeFile(
@@ -141,7 +141,7 @@ export const withTestHarness = <T>(
 ) => {
   return async (): Promise<T> => {
     const harness = await createTestHarness(options);
-    
+
     try {
       return await testFn(harness);
     } finally {
@@ -161,7 +161,7 @@ export const createMultipleTestHarnesses = async (
   options: TestHarnessOptions = {}
 ): Promise<TestHarnessState[]> => {
   const harnesses: TestHarnessState[] = [];
-  
+
   try {
     for (let i = 0; i < count; i++) {
       const harness = await createTestHarness({
@@ -170,7 +170,7 @@ export const createMultipleTestHarnesses = async (
       });
       harnesses.push(harness);
     }
-    
+
     return harnesses;
   } catch (error) {
     // Cleanup any created harnesses if an error occurs
@@ -191,7 +191,7 @@ export const createTestFiles = async (
   const promises = Object.entries(files).map(async ([filePath, content]) => {
     await harness.mem.writeFile(filePath, content);
   });
-  
+
   await Promise.all(promises);
 };
 
@@ -204,27 +204,29 @@ export const verifyTestFiles = async (
   harness: TestHarnessState,
   expectedFiles: Record<string, string>
 ): Promise<void> => {
-  const promises = Object.entries(expectedFiles).map(async ([filePath, expectedContent]) => {
-    const exists = await harness.mem.fileExists(filePath);
-    if (!exists) {
-      throw new Error(`Expected file ${filePath} does not exist`);
+  const promises = Object.entries(expectedFiles).map(
+    async ([filePath, expectedContent]) => {
+      const exists = await harness.mem.fileExists(filePath);
+      if (!exists) {
+        throw new Error(`Expected file ${filePath} does not exist`);
+      }
+
+      const actualContent = await harness.mem.readFile(filePath);
+      if (!actualContent.includes(expectedContent)) {
+        throw new Error(
+          `File ${filePath} does not contain expected content: "${expectedContent}"`
+        );
+      }
     }
-    
-    const actualContent = await harness.mem.readFile(filePath);
-    if (!actualContent.includes(expectedContent)) {
-      throw new Error(
-        `File ${filePath} does not contain expected content: "${expectedContent}"`
-      );
-    }
-  });
-  
+  );
+
   await Promise.all(promises);
 };
 
 /**
  * Creates a mock LLM query function for testing purposes.
  * This replaces the duplicate Mock LLM utilities found across different test files.
- * 
+ *
  * @param responses - Array of predefined responses to return in sequence
  * @returns A mock function that simulates LLM responses
  */
@@ -249,7 +251,7 @@ export const createMockQueryLLM = (responses: string[]) => {
 /**
  * Creates a mock LLM query function using Bun's mock for testing with spies.
  * This is useful when you need to track call counts, arguments, etc.
- * 
+ *
  * @param responses - Array of predefined responses to return in sequence
  * @returns A Bun mock function that simulates LLM responses
  */
@@ -265,7 +267,9 @@ export const createMockLLMQueryWithSpy = (responses: string[]) => {
 /**
  * Default mock configuration for tests
  */
-export const createMockConfig = (overrides: Partial<AppConfig> = {}): AppConfig => ({
+export const createMockConfig = (
+  overrides: Partial<AppConfig> = {}
+): AppConfig => ({
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
   llmModel: 'anthropic/claude-3-haiku-20240307',
@@ -275,11 +279,16 @@ export const createMockConfig = (overrides: Partial<AppConfig> = {}): AppConfig 
 /**
  * Default mock chat history for tests
  */
-export const createMockHistory = (customMessages: Partial<ChatMessage>[] = []): ChatMessage[] => [
+export const createMockHistory = (
+  customMessages: Partial<ChatMessage>[] = []
+): ChatMessage[] => [
   { role: 'system', content: 'You are a helpful assistant.' },
   { role: 'user', content: 'Hello, world!' },
-  ...customMessages.map(msg => ({
-    role: msg.role || 'user',
-    content: msg.content || '',
-  } as ChatMessage)),
+  ...customMessages.map(
+    (msg) =>
+      ({
+        role: msg.role || 'user',
+        content: msg.content || '',
+      }) as ChatMessage
+  ),
 ];

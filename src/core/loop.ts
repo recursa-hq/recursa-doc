@@ -94,7 +94,7 @@ export const handleUserQuery = async (
 
     // **Parse**
     const parsedResponse = parseLLMResponse(llmResponseStr);
-    
+
     // Debug logging to see what was parsed
     logger.info('Parsed LLM response', {
       runId,
@@ -104,7 +104,7 @@ export const handleUserQuery = async (
         reply: !!parsedResponse.reply,
       },
     });
-    
+
     if (
       !parsedResponse.think &&
       !parsedResponse.typescript &&
@@ -139,7 +139,7 @@ export const handleUserQuery = async (
     // **Act**
     if (parsedResponse.typescript) {
       logger.info('Executing TypeScript code', { runId });
-      
+
       // Send action status update via callback if available
       if (onStatusUpdate) {
         const actUpdate: StatusUpdate = {

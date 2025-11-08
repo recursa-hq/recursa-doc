@@ -112,9 +112,7 @@ export const getBacklinks =
 
     for await (const currentFilePath of walk(graphRoot)) {
       // Don't link to self
-      if (
-        path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)
-      ) {
+      if (path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)) {
         continue;
       }
 

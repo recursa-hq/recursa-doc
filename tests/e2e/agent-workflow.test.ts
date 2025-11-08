@@ -78,7 +78,7 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
     const thorneExists = await harness.mem.fileExists('Dr. Aris Thorne.md');
     const orgExists = await harness.mem.fileExists('AI Research Institute.md');
-    
+
     expect(thorneExists).toBe(true);
     expect(orgExists).toBe(true);
 
