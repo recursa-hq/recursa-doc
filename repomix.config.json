@@ -36,7 +36,8 @@
       "agent-spawner.claude.md",
       "agent-spawner.droid.md",
       "AGENTS.md",
-      "repo"
+      "repo",
+      "prompt"
     ]
   },
   "security": {
