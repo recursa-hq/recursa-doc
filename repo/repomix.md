@@ -276,38 +276,6 @@ EXPOSE 3000
 CMD ["bun", "run", "src/server.ts"]
 ````
 
-## File: src/core/mem-api/fs-walker.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-
-/**
- * Asynchronously and recursively walks a directory, yielding the full path of each file.
- * @param dir The directory to walk.
- * @param isIgnored Optional function to determine if a path should be ignored.
- * @returns An async generator that yields file paths.
- */
-export async function* walk(
-  dir: string,
-  isIgnored: (path: string) => boolean = () => false
-): AsyncGenerator<string> {
-  for await (const d of await fs.opendir(dir)) {
-    const entry = path.join(dir, d.name);
-    
-    // Skip ignored entries
-    if (isIgnored(entry)) {
-      continue;
-    }
-    
-    if (d.isDirectory()) {
-      yield* walk(entry, isIgnored);
-    } else if (d.isFile()) {
-      yield entry;
-    }
-  }
-}
-````
-
 ## File: src/core/mem-api/secure-path.ts
 ````typescript
 import path from 'path';
@@ -398,6 +366,38 @@ export type ExecutionContext = {
   "printWidth": 80,
   "tabWidth": 2,
   "endOfLine": "lf"
+}
+````
+
+## File: src/core/mem-api/fs-walker.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+
+/**
+ * Asynchronously and recursively walks a directory, yielding the full path of each file.
+ * @param dir The directory to walk.
+ * @param isIgnored Optional function to determine if a path should be ignored.
+ * @returns An async generator that yields file paths.
+ */
+export async function* walk(
+  dir: string,
+  isIgnored: (path: string) => boolean = () => false
+): AsyncGenerator<string> {
+  for await (const d of await fs.opendir(dir)) {
+    const entry = path.join(dir, d.name);
+    
+    // Skip ignored entries
+    if (isIgnored(entry)) {
+      continue;
+    }
+    
+    if (d.isDirectory()) {
+      yield* walk(entry, isIgnored);
+    } else if (d.isFile()) {
+      yield entry;
+    }
+  }
 }
 ````
 
@@ -709,6 +709,574 @@ describe('MCP Protocol E2E Test', () => {
     await writer.end();
   }, 20000); // Increase timeout for spawning process
 });
+````
+
+## File: tests/unit/parser.test.ts
+````typescript
+import { describe, it, expect } from 'bun:test';
+import { parseLLMResponse } from '../../src/core/parser';
+
+describe('LLM Response Parser', () => {
+  it('should parse a full, valid response', () => {
+    const xml = `<think>Thinking about stuff.</think><typescript>console.log("hello");</typescript><reply>All done!</reply>`;
+    const result = parseLLMResponse(xml);
+    expect(result).toEqual({
+      think: 'Thinking about stuff.',
+      typescript: 'console.log("hello");',
+      reply: 'All done!',
+    });
+  });
+
+  it('should parse a partial response (think/act)', () => {
+    const xml = `<think>Let me write a file.</think><typescript>await mem.writeFile('a.txt', 'hi');</typescript>`;
+    const result = parseLLMResponse(xml);
+    expect(result).toEqual({
+      think: 'Let me write a file.',
+      typescript: "await mem.writeFile('a.txt', 'hi');",
+      reply: undefined,
+    });
+  });
+
+  it('should handle extra whitespace and newlines', () => {
+    const xml = `
+      <think>
+        I need to think about this...
+        With newlines.
+      </think>
+      <typescript>
+        const x = 1;
+      </typescript>
+    `;
+    const result = parseLLMResponse(xml);
+    expect(result).toEqual({
+      think: `I need to think about this...\n        With newlines.`,
+      typescript: 'const x = 1;',
+      reply: undefined,
+    });
+  });
+
+  it('should return an object with undefined for missing tags', () => {
+    const xml = `<reply>Just a reply.</reply>`;
+    const result = parseLLMResponse(xml);
+    expect(result).toEqual({
+      think: undefined,
+      typescript: undefined,
+      reply: 'Just a reply.',
+    });
+  });
+
+  it('should handle an empty string', () => {
+    const xml = '';
+    const result = parseLLMResponse(xml);
+    expect(result).toEqual({
+      think: undefined,
+      typescript: undefined,
+      reply: undefined,
+    });
+  });
+
+  it('should handle tags in a different order', () => {
+    const xml = `<reply>Final answer.</reply><think>One last thought.</think>`;
+    const result = parseLLMResponse(xml);
+    expect(result).toEqual({
+      think: 'One last thought.',
+      typescript: undefined,
+      reply: 'Final answer.',
+    });
+  });
+});
+````
+
+## File: .env.test
+````
+# Test Environment Configuration
+OPENROUTER_API_KEY="mock-test-api-key"
+KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
+LLM_MODEL="mock-test-model"
+````
+
+## File: relay.config.json
+````json
+{
+  "$schema": "https://relay.noca.pro/schema.json",
+  "projectId": "doc",
+  "core": {
+    "logLevel": "info",
+    "enableNotifications": true,
+    "watchConfig": false
+  },
+  "watcher": {
+    "clipboardPollInterval": 2000,
+    "preferredStrategy": "auto",
+    "enableBulkProcessing": false,
+    "bulkSize": 5,
+    "bulkTimeout": 30000
+  },
+  "patch": {
+    "approvalMode": "manual",
+    "approvalOnErrorCount": 0,
+    "linter": "",
+    "preCommand": "",
+    "postCommand": "",
+    "minFileChanges": 0
+  },
+  "git": {
+    "autoGitBranch": false,
+    "gitBranchPrefix": "relay/",
+    "gitBranchTemplate": "gitCommitMsg"
+  }
+}
+````
+
+## File: docs/readme.md
+````markdown
+# Recursa: The Git-Native Memory Layer for Local-First LLMs
+
+**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
+
+**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
+
+Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+
+---
+
+## The Problem: Agent Amnesia & The RAG Ceiling
+
+You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
+
+1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
+2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
+3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
+
+Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
+
+## The Recursa Philosophy: Core Features
+
+Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
+
+- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
+- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
+- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
+- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
+
+## How It Works: Architecture
+
+Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
+
+```mermaid
+graph TD
+    subgraph Your Local Machine
+        A[MCP Client <br> e.g., your script, or a compatible editor]
+        B[Recursa MCP Server <br> (This Project)]
+        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
+
+        A -- 1. User Query via Stdio --> B
+        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
+        B -- 3. Executes Sandboxed Code --> C
+        C -- 4. Reads/Writes .md files --> C
+        B -- 5. Final Reply & Notifications --> A
+    end
+
+    subgraph Cloud Service
+        D
+    end
+
+    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
+    style B fill:#fff2cc,stroke:#333,stroke-width:2px
+```
+
+1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
+2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
+3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
+4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
+5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
+
+## An Agent in Action: Example Workflow
+
+**Scenario:** An agent is asked to learn about a new person.
+
+**1. User Query:**
+"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
+
+**2. Turn 1: The agent communicates its intent and acts efficiently.**
+The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
+
+**LLM Response (Turn 1):**
+
+```xml
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
+<typescript>
+// Perform all logic in one block for maximum efficiency.
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    '# AI Research Institute\ntype:: organization\n'
+  );
+}
+
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
+);
+</typescript>
+```
+
+_Recursa executes the code and confirms success to the LLM._
+
+**3. Turn 2: The agent saves its work and replies to the user.**
+Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
+
+**LLM Response (Turn 2):**
+
+```xml
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>
+```
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
+- An [OpenRouter.ai](https://openrouter.ai/) API Key
+
+### 1. Installation
+
+```bash
+git clone https://github.com/your-username/recursa.git
+cd recursa
+npm install
+```
+
+### 2. Configuration
+
+Create a `.env` file in the root of the project by copying the example:
+
+```bash
+cp .env.example .env
+```
+
+Now, edit your `.env` file with your details:
+
+```env
+# Your OpenRouter API Key
+OPENROUTER_API_KEY="sk-or-..."
+
+# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
+KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# The model you want to use from OpenRouter
+LLM_MODEL="anthropic/claude-3-sonnet-20240229"
+```
+
+### 3. Running the Server
+
+```bash
+bun run start
+```
+
+This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
+
+## 🗺️ Roadmap
+
+Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
+
+- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
+- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
+- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
+- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
+- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
+
+## 🧑‍💻 Contributing
+
+Recursa is designed to be hacked on. Contributions are welcome!
+
+### Adding New Tools
+
+To add a new tool (e.g., `mem.searchWeb(query)`):
+
+1.  Implement the function's logic in a file within `src/core/mem-api/`.
+2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
+3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
+4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
+5.  Open a Pull Request!
+
+## 📜 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+**Stop building infrastructure. Start building intelligence.**
+````
+
+## File: docs/rules.md
+````markdown
+codebase compliance rules;
+
+1. No OOP, only HOFs
+2. Use bun.sh and e2e type safe TypeScript
+3. No unknown or any type
+4. [e2e|integration|unit]/[domain].test.ts files & dirs
+5. Bun tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
+6. DRY
+````
+
+## File: docs/system-prompt.md
+````markdown
+# Recursa Agent System Prompt
+
+You are Recursa, a Git-Native AI agent. Your mind is a local knowledge graph, your actions are TypeScript code, and your memory is a `git` history. You do not simply answer questions; you reason, modify the graph, and commit your work.
+
+Your entire existence is defined by the **Think-Act-Commit** loop.
+
+---
+
+## 1. CRITICAL: Response Format
+
+Every response you generate MUST conform to the following XML-like structure. Failure to adhere to this format will break the execution loop.
+
+### Core Tags
+
+- `<think>`: **A user-facing status update.** A short, non-technical sentence describing the action you are about to take. This is shown to the user in real-time. **This tag is mandatory in every turn.**
+- `<typescript>`: A TypeScript code snippet to be executed in the secure sandbox. This is where your technical plan is implemented.
+- `<reply>`: The final, user-facing summary of the completed work. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
+
+### A CRITICAL Syntax Rule: Multiline Strings
+
+**For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
+
+**Correct:**
+
+```typescript
+await mem.writeFile(
+  'example.md',
+  `
+# This is a title
+This is a multiline document.
+`
+);
+```
+
+**INCORRECT AND FORBIDDEN:**
+
+```typescript
+// This will fail!
+await mem.writeFile('example.md', '
+# This is a title
+This is a multiline document.
+');
+```
+
+### Response Patterns
+
+**Pattern A: Action Turn (Think & Act)**
+
+```xml
+<think>
+[A simple, user-friendly message about what you're doing next.]
+</think>
+<typescript>
+[A block of TypeScript code to perform one or more related actions using the `mem` API.]
+</typescript>
+```
+
+**Pattern B: Final Turn (Commit & Reply)**
+
+```xml
+<think>
+[A simple, user-friendly message about saving the work.]
+</think>
+<typescript>
+await mem.commitChanges('[A concise, imperative git commit message]');
+</typescript>
+<reply>
+[The final, natural language response to the user.]
+</reply>
+```
+
+---
+
+## 2. A Critical Principle: Maximum Efficiency
+
+Your performance is measured by how few turns you take to complete a task. Each turn is an expensive LLM call. Therefore, you **MUST** design your `<typescript>` actions to do as much work as possible in a single step. Your goal is to solve the request in the fewest turns possible.
+
+- **DO:** Check for a file, create it if it's missing, and then write a second related file all in one `<typescript>` block.
+- **DO NOT:** Use one turn to check if a file exists, a second turn to create it, and a third turn to create another. This is slow, expensive, and incorrect.
+
+---
+
+## 3. The `mem` API: Your Sandboxed Toolkit
+
+You have access to a global `mem` object with asynchronous methods. **ALL `mem` calls MUST be `await`ed.** For the complete API reference, read `tools.md`.
+
+**Key Tool Categories:**
+
+- **Core File I/O:** `mem.readFile`, `mem.writeFile`, `mem.updateFile`, `mem.fileExists`, `mem.listFiles`.
+- **Git-Native Operations:** `mem.commitChanges`, `mem.gitLog`, `mem.gitDiff`.
+- **Intelligent Graph Operations:** `mem.queryGraph`, `mem.getBacklinks`, `mem.getOutgoingLinks`.
+
+---
+
+## 4. The Core Workflow: Think-Act-Commit
+
+Your operational cycle must follow this logical progression.
+
+1.  **Internal Thought Process (No Output):** Understand the request, investigate the graph using `mem` tools, and formulate an efficient, multi-step plan to be executed in a single `<typescript>` block.
+
+2.  **Communicate & Act (Generate Output):**
+    - Write a user-facing `<think>` tag that simplifies your plan into a single, clear sentence.
+    - Write the `<typescript>` code to execute your complete plan.
+
+3.  **Commit & Reply (Final Turn):**
+    - Once the work is done, write a `<think>` message about saving the changes.
+    - Write the `<typescript>` code to call `mem.commitChanges()`.
+    - Write the final `<reply>` to the user.
+
+---
+
+## 5. Example of an Efficient Turn
+
+**User:** "Add Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning."
+
+**Turn 1: Agent communicates its intent and acts efficiently.**
+
+```xml
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
+<typescript>
+// Perform all logic in one block for maximum efficiency.
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    '# AI Research Institute\ntype:: organization\n'
+  );
+}
+
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
+);
+</typescript>
+```
+
+**Turn 2: Agent communicates saving and provides the final reply.**
+
+```xml
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>
+```
+````
+
+## File: src/types/index.ts
+````typescript
+export * from './mem.js';
+export * from './git.js';
+export * from './sandbox.js';
+export * from './mcp.js';
+export * from './llm.js';
+export * from './loop.js';
+
+export interface RecursaConfig {
+  knowledgeGraphPath: string;
+  llm: {
+    apiKey: string;
+    baseUrl?: string;
+    model: string;
+    maxTokens?: number;
+    temperature?: number;
+  };
+  sandbox: {
+    timeout: number;
+    memoryLimit: number;
+  };
+  git: {
+    userName: string;
+    userEmail: string;
+  };
+}
+
+export interface EnvironmentVariables {
+  KNOWLEDGE_GRAPH_PATH: string;
+  OPENROUTER_API_KEY: string;
+  OPENROUTER_MODEL?: string;
+  LLM_TEMPERATURE?: string;
+  LLM_MAX_TOKENS?: string;
+  SANDBOX_TIMEOUT?: string;
+  SANDBOX_MEMORY_LIMIT?: string;
+  GIT_USER_NAME?: string;
+  GIT_USER_EMAIL?: string;
+}
+````
+
+## File: src/types/llm.ts
+````typescript
+export type ParsedLLMResponse = {
+  think?: string;
+  typescript?: string;
+  reply?: string;
+};
+
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
+export interface LLMRequest {
+  messages: ChatMessage[];
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+export interface LLMResponse {
+  content: string;
+  model: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export interface LLMConfig {
+  apiKey: string;
+  baseUrl?: string;
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+export interface LLMProvider {
+  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
+  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
+}
+
+export type StreamingCallback = (chunk: string) => void;
 ````
 
 ## File: tests/lib/test-harness.ts
@@ -1204,579 +1772,6 @@ describe('LLM Module', () => {
 });
 ````
 
-## File: tests/unit/parser.test.ts
-````typescript
-import { describe, it, expect } from 'bun:test';
-import { parseLLMResponse } from '../../src/core/parser';
-
-describe('LLM Response Parser', () => {
-  it('should parse a full, valid response', () => {
-    const xml = `<think>Thinking about stuff.</think><typescript>console.log("hello");</typescript><reply>All done!</reply>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: 'Thinking about stuff.',
-      typescript: 'console.log("hello");',
-      reply: 'All done!',
-    });
-  });
-
-  it('should parse a partial response (think/act)', () => {
-    const xml = `<think>Let me write a file.</think><typescript>await mem.writeFile('a.txt', 'hi');</typescript>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: 'Let me write a file.',
-      typescript: "await mem.writeFile('a.txt', 'hi');",
-      reply: undefined,
-    });
-  });
-
-  it('should handle extra whitespace and newlines', () => {
-    const xml = `
-      <think>
-        I need to think about this...
-        With newlines.
-      </think>
-      <typescript>
-        const x = 1;
-      </typescript>
-    `;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: `I need to think about this...\n        With newlines.`,
-      typescript: 'const x = 1;',
-      reply: undefined,
-    });
-  });
-
-  it('should return an object with undefined for missing tags', () => {
-    const xml = `<reply>Just a reply.</reply>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: undefined,
-      typescript: undefined,
-      reply: 'Just a reply.',
-    });
-  });
-
-  it('should handle an empty string', () => {
-    const xml = '';
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: undefined,
-      typescript: undefined,
-      reply: undefined,
-    });
-  });
-
-  it('should handle tags in a different order', () => {
-    const xml = `<reply>Final answer.</reply><think>One last thought.</think>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: 'One last thought.',
-      typescript: undefined,
-      reply: 'Final answer.',
-    });
-  });
-});
-````
-
-## File: .env.test
-````
-# Test Environment Configuration
-OPENROUTER_API_KEY="mock-test-api-key"
-KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
-LLM_MODEL="mock-test-model"
-````
-
-## File: relay.config.json
-````json
-{
-  "$schema": "https://relay.noca.pro/schema.json",
-  "projectId": "doc",
-  "core": {
-    "logLevel": "info",
-    "enableNotifications": true,
-    "watchConfig": false
-  },
-  "watcher": {
-    "clipboardPollInterval": 2000,
-    "preferredStrategy": "auto",
-    "enableBulkProcessing": false,
-    "bulkSize": 5,
-    "bulkTimeout": 30000
-  },
-  "patch": {
-    "approvalMode": "manual",
-    "approvalOnErrorCount": 0,
-    "linter": "",
-    "preCommand": "",
-    "postCommand": "",
-    "minFileChanges": 0
-  },
-  "git": {
-    "autoGitBranch": false,
-    "gitBranchPrefix": "relay/",
-    "gitBranchTemplate": "gitCommitMsg"
-  }
-}
-````
-
-## File: tsconfig.tsbuildinfo
-````
-{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
-````
-
-## File: docs/readme.md
-````markdown
-# Recursa: The Git-Native Memory Layer for Local-First LLMs
-
-**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
-
-**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
-
-Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
-
----
-
-## The Problem: Agent Amnesia & The RAG Ceiling
-
-You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
-
-1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
-2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
-3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
-
-Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
-
-## The Recursa Philosophy: Core Features
-
-Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
-
-- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
-- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
-- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
-- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
-
-## How It Works: Architecture
-
-Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
-
-```mermaid
-graph TD
-    subgraph Your Local Machine
-        A[MCP Client <br> e.g., your script, or a compatible editor]
-        B[Recursa MCP Server <br> (This Project)]
-        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
-
-        A -- 1. User Query via Stdio --> B
-        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
-        B -- 3. Executes Sandboxed Code --> C
-        C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply & Notifications --> A
-    end
-
-    subgraph Cloud Service
-        D
-    end
-
-    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
-    style B fill:#fff2cc,stroke:#333,stroke-width:2px
-```
-
-1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
-3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
-4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
-5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
-
-## An Agent in Action: Example Workflow
-
-**Scenario:** An agent is asked to learn about a new person.
-
-**1. User Query:**
-"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
-
-**2. Turn 1: The agent communicates its intent and acts efficiently.**
-The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
-
-**LLM Response (Turn 1):**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    '# AI Research Institute\ntype:: organization\n'
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
-);
-</typescript>
-```
-
-_Recursa executes the code and confirms success to the LLM._
-
-**3. Turn 2: The agent saves its work and replies to the user.**
-Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
-
-**LLM Response (Turn 2):**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
-- An [OpenRouter.ai](https://openrouter.ai/) API Key
-
-### 1. Installation
-
-```bash
-git clone https://github.com/your-username/recursa.git
-cd recursa
-npm install
-```
-
-### 2. Configuration
-
-Create a `.env` file in the root of the project by copying the example:
-
-```bash
-cp .env.example .env
-```
-
-Now, edit your `.env` file with your details:
-
-```env
-# Your OpenRouter API Key
-OPENROUTER_API_KEY="sk-or-..."
-
-# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
-KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
-
-# The model you want to use from OpenRouter
-LLM_MODEL="anthropic/claude-3-sonnet-20240229"
-```
-
-### 3. Running the Server
-
-```bash
-bun run start
-```
-
-This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
-
-## 🗺️ Roadmap
-
-Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
-
-- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
-- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
-- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
-- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
-- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
-
-## 🧑‍💻 Contributing
-
-Recursa is designed to be hacked on. Contributions are welcome!
-
-### Adding New Tools
-
-To add a new tool (e.g., `mem.searchWeb(query)`):
-
-1.  Implement the function's logic in a file within `src/core/mem-api/`.
-2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
-3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
-4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
-5.  Open a Pull Request!
-
-## 📜 License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-**Stop building infrastructure. Start building intelligence.**
-````
-
-## File: docs/rules.md
-````markdown
-codebase compliance rules;
-
-1. No OOP, only HOFs
-2. Use bun.sh and e2e type safe TypeScript
-3. No unknown or any type
-4. [e2e|integration|unit]/[domain].test.ts files & dirs
-5. Bun tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
-6. DRY
-````
-
-## File: docs/system-prompt.md
-````markdown
-# Recursa Agent System Prompt
-
-You are Recursa, a Git-Native AI agent. Your mind is a local knowledge graph, your actions are TypeScript code, and your memory is a `git` history. You do not simply answer questions; you reason, modify the graph, and commit your work.
-
-Your entire existence is defined by the **Think-Act-Commit** loop.
-
----
-
-## 1. CRITICAL: Response Format
-
-Every response you generate MUST conform to the following XML-like structure. Failure to adhere to this format will break the execution loop.
-
-### Core Tags
-
-- `<think>`: **A user-facing status update.** A short, non-technical sentence describing the action you are about to take. This is shown to the user in real-time. **This tag is mandatory in every turn.**
-- `<typescript>`: A TypeScript code snippet to be executed in the secure sandbox. This is where your technical plan is implemented.
-- `<reply>`: The final, user-facing summary of the completed work. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
-
-### A CRITICAL Syntax Rule: Multiline Strings
-
-**For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
-
-**Correct:**
-
-```typescript
-await mem.writeFile(
-  'example.md',
-  `
-# This is a title
-This is a multiline document.
-`
-);
-```
-
-**INCORRECT AND FORBIDDEN:**
-
-```typescript
-// This will fail!
-await mem.writeFile('example.md', '
-# This is a title
-This is a multiline document.
-');
-```
-
-### Response Patterns
-
-**Pattern A: Action Turn (Think & Act)**
-
-```xml
-<think>
-[A simple, user-friendly message about what you're doing next.]
-</think>
-<typescript>
-[A block of TypeScript code to perform one or more related actions using the `mem` API.]
-</typescript>
-```
-
-**Pattern B: Final Turn (Commit & Reply)**
-
-```xml
-<think>
-[A simple, user-friendly message about saving the work.]
-</think>
-<typescript>
-await mem.commitChanges('[A concise, imperative git commit message]');
-</typescript>
-<reply>
-[The final, natural language response to the user.]
-</reply>
-```
-
----
-
-## 2. A Critical Principle: Maximum Efficiency
-
-Your performance is measured by how few turns you take to complete a task. Each turn is an expensive LLM call. Therefore, you **MUST** design your `<typescript>` actions to do as much work as possible in a single step. Your goal is to solve the request in the fewest turns possible.
-
-- **DO:** Check for a file, create it if it's missing, and then write a second related file all in one `<typescript>` block.
-- **DO NOT:** Use one turn to check if a file exists, a second turn to create it, and a third turn to create another. This is slow, expensive, and incorrect.
-
----
-
-## 3. The `mem` API: Your Sandboxed Toolkit
-
-You have access to a global `mem` object with asynchronous methods. **ALL `mem` calls MUST be `await`ed.** For the complete API reference, read `tools.md`.
-
-**Key Tool Categories:**
-
-- **Core File I/O:** `mem.readFile`, `mem.writeFile`, `mem.updateFile`, `mem.fileExists`, `mem.listFiles`.
-- **Git-Native Operations:** `mem.commitChanges`, `mem.gitLog`, `mem.gitDiff`.
-- **Intelligent Graph Operations:** `mem.queryGraph`, `mem.getBacklinks`, `mem.getOutgoingLinks`.
-
----
-
-## 4. The Core Workflow: Think-Act-Commit
-
-Your operational cycle must follow this logical progression.
-
-1.  **Internal Thought Process (No Output):** Understand the request, investigate the graph using `mem` tools, and formulate an efficient, multi-step plan to be executed in a single `<typescript>` block.
-
-2.  **Communicate & Act (Generate Output):**
-    - Write a user-facing `<think>` tag that simplifies your plan into a single, clear sentence.
-    - Write the `<typescript>` code to execute your complete plan.
-
-3.  **Commit & Reply (Final Turn):**
-    - Once the work is done, write a `<think>` message about saving the changes.
-    - Write the `<typescript>` code to call `mem.commitChanges()`.
-    - Write the final `<reply>` to the user.
-
----
-
-## 5. Example of an Efficient Turn
-
-**User:** "Add Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning."
-
-**Turn 1: Agent communicates its intent and acts efficiently.**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    '# AI Research Institute\ntype:: organization\n'
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
-);
-</typescript>
-```
-
-**Turn 2: Agent communicates saving and provides the final reply.**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-````
-
-## File: src/types/index.ts
-````typescript
-export * from './mem.js';
-export * from './git.js';
-export * from './sandbox.js';
-export * from './mcp.js';
-export * from './llm.js';
-export * from './loop.js';
-
-export interface RecursaConfig {
-  knowledgeGraphPath: string;
-  llm: {
-    apiKey: string;
-    baseUrl?: string;
-    model: string;
-    maxTokens?: number;
-    temperature?: number;
-  };
-  sandbox: {
-    timeout: number;
-    memoryLimit: number;
-  };
-  git: {
-    userName: string;
-    userEmail: string;
-  };
-}
-
-export interface EnvironmentVariables {
-  KNOWLEDGE_GRAPH_PATH: string;
-  OPENROUTER_API_KEY: string;
-  OPENROUTER_MODEL?: string;
-  LLM_TEMPERATURE?: string;
-  LLM_MAX_TOKENS?: string;
-  SANDBOX_TIMEOUT?: string;
-  SANDBOX_MEMORY_LIMIT?: string;
-  GIT_USER_NAME?: string;
-  GIT_USER_EMAIL?: string;
-}
-````
-
-## File: src/types/llm.ts
-````typescript
-export type ParsedLLMResponse = {
-  think?: string;
-  typescript?: string;
-  reply?: string;
-};
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
-export interface LLMRequest {
-  messages: ChatMessage[];
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-  topP?: number;
-}
-
-export interface LLMResponse {
-  content: string;
-  model: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
-
-export interface LLMConfig {
-  apiKey: string;
-  baseUrl?: string;
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-}
-
-export interface LLMProvider {
-  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
-  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
-}
-
-export type StreamingCallback = (chunk: string) => void;
-````
-
 ## File: .gitignore
 ````
 # Dependencies
@@ -1824,6 +1819,11 @@ lerna-debug.log*
 # Worktrees (from original)
 worktrees/*/node_modules/
 worktrees/*/.git/
+````
+
+## File: tsconfig.tsbuildinfo
+````
+{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
 ## File: docs/tools.md
@@ -1898,69 +1898,6 @@ General-purpose operations for the sandbox environment.
 | **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
 | **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
 | **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
-````
-
-## File: src/core/mem-api/index.ts
-````typescript
-import type { MemAPI } from '../../types';
-import type { AppConfig } from '../../config';
-import simpleGit from 'simple-git';
-
-import * as fileOps from './file-ops';
-import * as gitOps from './git-ops';
-import * as graphOps from './graph-ops';
-import * as stateOps from './state-ops';
-import * as utilOps from './util-ops';
-
-/**
- * Creates a fully-functional MemAPI object.
- * This is a Higher-Order Function that takes the application configuration
- * and returns an object where each method is pre-configured with the necessary
- * context (like the knowledge graph path or a git instance).
- *
- * @param config The application configuration.
- * @returns A complete MemAPI object ready to be used by the sandbox.
- */
-export const createMemAPI = (config: AppConfig): MemAPI => {
-  const git = simpleGit(config.knowledgeGraphPath)
-    .addConfig('user.name', config.gitUserName)
-    .addConfig('user.email', config.gitUserEmail);
-  const graphRoot = config.knowledgeGraphPath;
-
-  return {
-    // Core File I/O
-    readFile: fileOps.readFile(graphRoot),
-    writeFile: fileOps.writeFile(graphRoot),
-    updateFile: fileOps.updateFile(graphRoot),
-    deletePath: fileOps.deletePath(graphRoot),
-    rename: fileOps.rename(graphRoot),
-    fileExists: fileOps.fileExists(graphRoot),
-    createDir: fileOps.createDir(graphRoot),
-    listFiles: fileOps.listFiles(graphRoot),
-
-    // Git-Native Operations
-    gitDiff: gitOps.gitDiff(git),
-    gitLog: gitOps.gitLog(git),
-    getChangedFiles: gitOps.getChangedFiles(git),
-    commitChanges: gitOps.commitChanges(git),
-
-    // Intelligent Graph Operations
-    queryGraph: graphOps.queryGraph(graphRoot),
-    getBacklinks: graphOps.getBacklinks(graphRoot),
-    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
-    searchGlobal: graphOps.searchGlobal(graphRoot),
-
-    // State Management & Checkpoints
-    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
-    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
-    discardChanges: stateOps.discardChanges(git), // Implemented
-
-    // Utility & Diagnostics
-    getGraphRoot: utilOps.getGraphRoot(graphRoot),
-    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
-    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
-  };
-};
 ````
 
 ## File: src/lib/logger.ts
@@ -2819,6 +2756,69 @@ export const commitChanges =
   };
 ````
 
+## File: src/core/mem-api/index.ts
+````typescript
+import type { MemAPI } from '../../types';
+import type { AppConfig } from '../../config';
+import simpleGit from 'simple-git';
+
+import * as fileOps from './file-ops';
+import * as gitOps from './git-ops';
+import * as graphOps from './graph-ops';
+import * as stateOps from './state-ops';
+import * as utilOps from './util-ops';
+
+/**
+ * Creates a fully-functional MemAPI object.
+ * This is a Higher-Order Function that takes the application configuration
+ * and returns an object where each method is pre-configured with the necessary
+ * context (like the knowledge graph path or a git instance).
+ *
+ * @param config The application configuration.
+ * @returns A complete MemAPI object ready to be used by the sandbox.
+ */
+export const createMemAPI = (config: AppConfig): MemAPI => {
+  const git = simpleGit(config.knowledgeGraphPath)
+    .addConfig('user.name', config.gitUserName)
+    .addConfig('user.email', config.gitUserEmail);
+  const graphRoot = config.knowledgeGraphPath;
+
+  return {
+    // Core File I/O
+    readFile: fileOps.readFile(graphRoot),
+    writeFile: fileOps.writeFile(graphRoot),
+    updateFile: fileOps.updateFile(graphRoot),
+    deletePath: fileOps.deletePath(graphRoot),
+    rename: fileOps.rename(graphRoot),
+    fileExists: fileOps.fileExists(graphRoot),
+    createDir: fileOps.createDir(graphRoot),
+    listFiles: fileOps.listFiles(graphRoot),
+
+    // Git-Native Operations
+    gitDiff: gitOps.gitDiff(git),
+    gitLog: gitOps.gitLog(git),
+    getChangedFiles: gitOps.getChangedFiles(git),
+    commitChanges: gitOps.commitChanges(git),
+
+    // Intelligent Graph Operations
+    queryGraph: graphOps.queryGraph(graphRoot),
+    getBacklinks: graphOps.getBacklinks(graphRoot),
+    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
+    searchGlobal: graphOps.searchGlobal(graphRoot),
+
+    // State Management & Checkpoints
+    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
+    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
+    discardChanges: stateOps.discardChanges(git), // Implemented
+
+    // Utility & Diagnostics
+    getGraphRoot: utilOps.getGraphRoot(graphRoot),
+    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
+    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
+  };
+};
+````
+
 ## File: src/core/mem-api/state-ops.ts
 ````typescript
 import type { SimpleGit } from 'simple-git';
@@ -2860,6 +2860,163 @@ export const discardChanges =
     await git.clean('f', ['-d']);
     // 3. Return true on success.
     return true;
+  };
+````
+
+## File: src/core/parser.ts
+````typescript
+import type { ParsedLLMResponse } from '../types';
+
+/**
+ * Parses the LLM's XML-like response string into a structured object.
+ * This function uses a simple regex-based approach for robustness against
+ * potentially malformed, non-XML-compliant output from the LLM, which is
+ * often more reliable than a strict XML parser.
+ *
+ * @param response The raw string response from the LLM.
+ * @returns A ParsedLLMResponse object with optional `think`, `typescript`, and `reply` fields.
+ */
+export const parseLLMResponse = (response: string): ParsedLLMResponse => {
+  const extractTagContent = (tagName: string): string | undefined => {
+    const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
+    const match = response.match(regex);
+    // If a match is found, return the captured group (the content), trimmed.
+    return match && match[1] ? match[1].trim() : undefined;
+  };
+
+  return {
+    think: extractTagContent('think'),
+    typescript: extractTagContent('typescript'),
+    reply: extractTagContent('reply'),
+  };
+};
+````
+
+## File: .env.example
+````
+# Recursa MCP Server Configuration
+# Copy this file to .env and update the values
+
+# Required: Path to your knowledge graph directory
+KNOWLEDGE_GRAPH_PATH=./knowledge-graph
+
+# Required: OpenRouter API key for LLM access
+# Get your API key from: https://openrouter.ai/keys
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
+# See https://openrouter.ai/models for a list of available models
+LLM_MODEL=anthropic/claude-3-haiku-20240307
+
+# Optional: LLM Configuration
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=4096
+
+# Optional: Sandbox Configuration (in milliseconds and megabytes)
+SANDBOX_TIMEOUT=30000
+SANDBOX_MEMORY_LIMIT=100
+
+# Optional: Git Configuration
+GIT_USER_NAME=Recursa Agent
+GIT_USER_EMAIL=recursa@local
+
+# Usage:
+# 1. Copy this file: cp .env.example .env
+# 2. Update OPENROUTER_API_KEY with your actual API key
+# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
+# 4. Source the file: source .env
+# 5. Run the server: bun run start
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/server.ts",
+    "start": "bun run src/server.ts",
+    "test": "bun test",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "bun-types": "^1.0.0",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^7.10.0",
+    "@typescript-eslint/parser": "^7.10.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "license": "MIT"
+}
+````
+
+## File: src/core/mem-api/util-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import type { PathTokenCount } from '../../types';
+import { resolveSecurePath } from './secure-path';
+
+// A private helper to centralize token counting logic.
+// This is a simple estimation and should be replaced with a proper
+// tokenizer library like tiktoken if higher accuracy is needed.
+const countTokensForContent = (content: string): number => {
+  // A common rough estimate is 4 characters per token.
+  return Math.ceil(content.length / 4);
+};
+
+// Note: HOFs returning the final mem API functions.
+
+export const getGraphRoot =
+  (graphRoot: string) => async (): Promise<string> => {
+    return graphRoot;
+  };
+
+export const getTokenCount =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<number> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    try {
+      const content = await fs.readFile(fullPath, 'utf-8');
+      return countTokensForContent(content);
+    } catch (error) {
+      throw new Error(
+        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const getTokenCountForPaths =
+  (graphRoot: string) =>
+  async (paths: string[]): Promise<PathTokenCount[]> => {
+    return Promise.all(
+      paths.map(async (filePath) => {
+        const tokenCount = await getTokenCount(graphRoot)(filePath);
+        return {
+          path: filePath,
+          tokenCount,
+        };
+      })
+    );
   };
 ````
 
@@ -3008,32 +3165,68 @@ export const queryLLMWithRetries = withRetry(
 );
 ````
 
-## File: src/core/parser.ts
+## File: src/types/mem.ts
 ````typescript
-import type { ParsedLLMResponse } from '../types';
+import type { LogEntry } from './git';
 
-/**
- * Parses the LLM's XML-like response string into a structured object.
- * This function uses a simple regex-based approach for robustness against
- * potentially malformed, non-XML-compliant output from the LLM, which is
- * often more reliable than a strict XML parser.
- *
- * @param response The raw string response from the LLM.
- * @returns A ParsedLLMResponse object with optional `think`, `typescript`, and `reply` fields.
- */
-export const parseLLMResponse = (response: string): ParsedLLMResponse => {
-  const extractTagContent = (tagName: string): string | undefined => {
-    const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
-    const match = response.match(regex);
-    // If a match is found, return the captured group (the content), trimmed.
-    return match && match[1] ? match[1].trim() : undefined;
-  };
+// --- Knowledge Graph & Git ---
 
-  return {
-    think: extractTagContent('think'),
-    typescript: extractTagContent('typescript'),
-    reply: extractTagContent('reply'),
-  };
+// Structure for a graph query result.
+export type GraphQueryResult = {
+  filePath: string;
+  matches: string[];
+};
+
+// Structure for token count results for multiple paths.
+export type PathTokenCount = {
+  path: string;
+  tokenCount: number;
+};
+
+// --- MemAPI Interface (Matches tools.md) ---
+
+// This is the "cheatsheet" for what's available in the sandbox.
+// It must be kept in sync with the tools documentation.
+export type MemAPI = {
+  // Core File I/O
+  readFile: (filePath: string) => Promise<string>;
+  writeFile: (filePath: string, content: string) => Promise<boolean>;
+  updateFile: (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ) => Promise<boolean>;
+  deletePath: (filePath: string) => Promise<boolean>;
+  rename: (oldPath: string, newPath: string) => Promise<boolean>;
+  fileExists: (filePath: string) => Promise<boolean>;
+  createDir: (directoryPath: string) => Promise<boolean>;
+  listFiles: (directoryPath?: string) => Promise<string[]>;
+
+  // Git-Native Operations
+  gitDiff: (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ) => Promise<string>;
+  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
+  getChangedFiles: () => Promise<string[]>;
+  commitChanges: (message: string) => Promise<string>;
+
+  // Intelligent Graph Operations
+  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
+  getBacklinks: (filePath: string) => Promise<string[]>;
+  getOutgoingLinks: (filePath: string) => Promise<string[]>;
+  searchGlobal: (query: string) => Promise<string[]>;
+
+  // State Management
+  saveCheckpoint: () => Promise<boolean>;
+  revertToLastCheckpoint: () => Promise<boolean>;
+  discardChanges: () => Promise<boolean>;
+
+  // Utility
+  getGraphRoot: () => Promise<string>;
+  getTokenCount: (filePath: string) => Promise<number>;
+  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
 };
 ````
 
@@ -3138,199 +3331,6 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
 };
 ````
 
-## File: .env.example
-````
-# Recursa MCP Server Configuration
-# Copy this file to .env and update the values
-
-# Required: Path to your knowledge graph directory
-KNOWLEDGE_GRAPH_PATH=./knowledge-graph
-
-# Required: OpenRouter API key for LLM access
-# Get your API key from: https://openrouter.ai/keys
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
-# See https://openrouter.ai/models for a list of available models
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-
-# Optional: LLM Configuration
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4096
-
-# Optional: Sandbox Configuration (in milliseconds and megabytes)
-SANDBOX_TIMEOUT=30000
-SANDBOX_MEMORY_LIMIT=100
-
-# Optional: Git Configuration
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-
-# Usage:
-# 1. Copy this file: cp .env.example .env
-# 2. Update OPENROUTER_API_KEY with your actual API key
-# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
-# 4. Source the file: source .env
-# 5. Run the server: bun run start
-````
-
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "dev": "bun run --watch src/server.ts",
-    "start": "bun run src/server.ts",
-    "test": "bun test",
-    "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix",
-    "format": "prettier --check .",
-    "format:fix": "prettier --write .",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8",
-    "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.0",
-    "bun-types": "^1.0.0",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^7.10.0",
-    "@typescript-eslint/parser": "^7.10.0",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.1.3",
-    "prettier": "^3.2.5"
-  },
-  "engines": {
-    "bun": ">=1.0.0"
-  },
-  "license": "MIT"
-}
-````
-
-## File: src/core/mem-api/util-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import type { PathTokenCount } from '../../types';
-import { resolveSecurePath } from './secure-path';
-
-// A private helper to centralize token counting logic.
-// This is a simple estimation and should be replaced with a proper
-// tokenizer library like tiktoken if higher accuracy is needed.
-const countTokensForContent = (content: string): number => {
-  // A common rough estimate is 4 characters per token.
-  return Math.ceil(content.length / 4);
-};
-
-// Note: HOFs returning the final mem API functions.
-
-export const getGraphRoot =
-  (graphRoot: string) => async (): Promise<string> => {
-    return graphRoot;
-  };
-
-export const getTokenCount =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<number> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    try {
-      const content = await fs.readFile(fullPath, 'utf-8');
-      return countTokensForContent(content);
-    } catch (error) {
-      throw new Error(
-        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getTokenCountForPaths =
-  (graphRoot: string) =>
-  async (paths: string[]): Promise<PathTokenCount[]> => {
-    return Promise.all(
-      paths.map(async (filePath) => {
-        const tokenCount = await getTokenCount(graphRoot)(filePath);
-        return {
-          path: filePath,
-          tokenCount,
-        };
-      })
-    );
-  };
-````
-
-## File: src/types/mem.ts
-````typescript
-import type { LogEntry } from './git';
-
-// --- Knowledge Graph & Git ---
-
-// Structure for a graph query result.
-export type GraphQueryResult = {
-  filePath: string;
-  matches: string[];
-};
-
-// Structure for token count results for multiple paths.
-export type PathTokenCount = {
-  path: string;
-  tokenCount: number;
-};
-
-// --- MemAPI Interface (Matches tools.md) ---
-
-// This is the "cheatsheet" for what's available in the sandbox.
-// It must be kept in sync with the tools documentation.
-export type MemAPI = {
-  // Core File I/O
-  readFile: (filePath: string) => Promise<string>;
-  writeFile: (filePath: string, content: string) => Promise<boolean>;
-  updateFile: (
-    filePath: string,
-    oldContent: string,
-    newContent: string
-  ) => Promise<boolean>;
-  deletePath: (filePath: string) => Promise<boolean>;
-  rename: (oldPath: string, newPath: string) => Promise<boolean>;
-  fileExists: (filePath: string) => Promise<boolean>;
-  createDir: (directoryPath: string) => Promise<boolean>;
-  listFiles: (directoryPath?: string) => Promise<string[]>;
-
-  // Git-Native Operations
-  gitDiff: (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ) => Promise<string>;
-  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
-  getChangedFiles: () => Promise<string[]>;
-  commitChanges: (message: string) => Promise<string>;
-
-  // Intelligent Graph Operations
-  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
-  getBacklinks: (filePath: string) => Promise<string[]>;
-  getOutgoingLinks: (filePath: string) => Promise<string[]>;
-  searchGlobal: (query: string) => Promise<string[]>;
-
-  // State Management
-  saveCheckpoint: () => Promise<boolean>;
-  revertToLastCheckpoint: () => Promise<boolean>;
-  discardChanges: () => Promise<boolean>;
-
-  // Utility
-  getGraphRoot: () => Promise<string>;
-  getTokenCount: (filePath: string) => Promise<number>;
-  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
-};
-````
-
 ## File: repomix.config.json
 ````json
 {
@@ -3371,7 +3371,8 @@ export type MemAPI = {
       "agent-spawner.claude.md",
       "agent-spawner.droid.md",
       "AGENTS.md",
-      "repo"
+      "repo",
+      "prompt"
     ]
   },
   "security": {
@@ -3381,6 +3382,83 @@ export type MemAPI = {
     "encoding": "o200k_base"
   }
 }
+````
+
+## File: tasks.md
+````markdown
+# Tasks
+
+Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
+
+## Part 1: Purge `any` Types to Enforce Strict Type Safety
+
+### Task 1.1: Harden Emitter with `unknown`
+
+- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
+- **status**: done
+- **job-id**: job-44fc2242
+- **depends-on**: []
+- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
+- **files**: src/lib/events.ts
+
+### Task 1.2: Add Strict Types to MCP E2E Test
+
+- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
+- **status**: done
+- **job-id**: job-44fc2242
+- **depends-on**: []
+- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
+- **files**: tests/e2e/mcp-protocol.test.ts
+
+## Part 2: Abstract Test Environment Setup (DRY)
+
+### Task 2.1: Create a `TestHarness` for Environment Management
+
+- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
+- **status**: done
+- **job-id**: job-b2ec7d18
+- **depends-on**: []
+- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
+- **files**: tests/lib/test-harness.ts (new)
+
+### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
+
+- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
+- **status**: done
+- **job-id**: job-b2ec7d18
+- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
+- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
+- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
+
+## Part 3: Consolidate Mock LLM Utility (DRY)
+
+### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
+
+- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
+- **status**: done
+- **job-id**: job-11bd80d6
+- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
+- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
+- **files**: tests/lib/test-harness.ts
+
+### Task 3.2: Refactor Tests to Use Shared LLM Mock
+
+- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
+- **status**: done
+- **job-id**: job-11bd80d6
+- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
+- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
+- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
+
+## Audit Task
+
+### Task A.1: Final Audit and Merge
+
+- **uuid**: audit-001
+- **status**: todo
+- **job-id**:
+- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
+- **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
 ````
 
 ## File: src/core/mem-api/graph-ops.ts
@@ -3660,81 +3738,190 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 });
 ````
 
-## File: tasks.md
-````markdown
-# Tasks
+## File: src/api/mcp.handler.ts
+````typescript
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  InitializeRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import type { MemAPI } from '../types/mem.js';
+import type { MCPTool, MCPResource } from '../types/mcp.js';
+import type { AppConfig } from '../config.js';
+import type { handleUserQuery } from '../core/loop.js';
+import type { StatusUpdate } from '../types/loop.js';
+import type { Emitter } from '../lib/events.js';
 
-Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
+export const createMCPHandler = (
+  memApi: MemAPI,
+  knowledgeGraphPath: string,
+  config: AppConfig,
+  handleQuery: typeof handleUserQuery,
+  emitter: Emitter<Record<string, StatusUpdate>>
+) => {
+  const server = new Server(
+    {
+      name: 'recursa-server',
+      version: '0.1.0',
+    },
+    {
+      capabilities: {
+        tools: {
+          listChanged: true,
+        },
+        resources: {
+          listChanged: true,
+        },
+      },
+    }
+  );
 
-## Part 1: Purge `any` Types to Enforce Strict Type Safety
+  const tools: MCPTool[] = [
+    {
+      name: 'process_query',
+      description:
+        'Processes a high-level user query by running the agent loop.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The user query to process.',
+          },
+          sessionId: {
+            type: 'string',
+            description: 'An optional session ID to maintain context.',
+          },
+          runId: {
+            type: 'string',
+            description:
+              'A unique ID for this execution run, used for notifications.',
+          },
+        },
+        required: ['query', 'runId'],
+      },
+    },
+  ];
 
-### Task 1.1: Harden Emitter with `unknown`
+  const resources: MCPResource[] = [
+    {
+      uri: `file://${knowledgeGraphPath}`,
+      name: 'Knowledge Graph Root',
+      mimeType: 'text/directory',
+      description: 'Root directory of the knowledge graph',
+    },
+  ];
 
-- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
-- **files**: src/lib/events.ts
+  server.setRequestHandler(InitializeRequestSchema, async (request) => {
+    return {
+      protocolVersion: '2024-11-05',
+      capabilities: {
+        tools: {
+          listChanged: true,
+        },
+        resources: {
+          listChanged: true,
+        },
+      },
+      serverInfo: {
+        name: 'recursa-server',
+        version: '0.1.0',
+      },
+    };
+  });
 
-### Task 1.2: Add Strict Types to MCP E2E Test
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return {
+      tools,
+    };
+  });
 
-- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
-- **files**: tests/e2e/mcp-protocol.test.ts
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params as {
+      name: string;
+      arguments: Record<string, unknown>;
+    };
 
-## Part 2: Abstract Test Environment Setup (DRY)
+    try {
+      switch (name) {
+        case 'process_query': {
+          const query = String(args.query);
+          const runId = String(args.runId);
+          const sessionId = args.sessionId ? String(args.sessionId) : undefined;
 
-### Task 2.1: Create a `TestHarness` for Environment Management
+          // This callback will be passed to the agent loop to emit status updates.
+          const onStatusUpdate = (update: StatusUpdate) => {
+            emitter.emit(runId, update);
+          };
 
-- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: []
-- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
-- **files**: tests/lib/test-harness.ts (new)
+          // This listener forwards emitted events as MCP notifications for this run.
+          const listener = (update: StatusUpdate) => {
+            server.notification({
+              method: 'tool/status',
+              params: {
+                runId,
+                status: update,
+              },
+            });
+          };
+          emitter.on(runId, listener);
 
-### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
+          try {
+            const finalReply = await handleQuery(
+              query,
+              config,
+              sessionId,
+              undefined,
+              onStatusUpdate
+            );
 
-- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
-- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ reply: finalReply, runId }),
+                },
+              ],
+            };
+          } finally {
+            // Ensure the listener is cleaned up regardless of success or failure.
+            emitter.off(runId, listener);
+          }
+        }
 
-## Part 3: Consolidate Mock LLM Utility (DRY)
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+  });
 
-### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return {
+      resources,
+    };
+  });
 
-- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
-- **files**: tests/lib/test-harness.ts
-
-### Task 3.2: Refactor Tests to Use Shared LLM Mock
-
-- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
-- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
-- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Audit Task
-
-### Task A.1: Final Audit and Merge
-
-- **uuid**: audit-001
-- **status**: todo
-- **job-id**:
-- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
-- **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
+  return {
+    server,
+    transport: new StdioServerTransport(),
+  };
+};
 ````
 
 ## File: src/core/loop.ts
@@ -3952,269 +4139,6 @@ export const handleUserQuery = async (
 };
 ````
 
-## File: src/api/mcp.handler.ts
-````typescript
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  InitializeRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-import type { MemAPI } from '../types/mem.js';
-import type { MCPTool, MCPResource } from '../types/mcp.js';
-import type { AppConfig } from '../config.js';
-import type { handleUserQuery } from '../core/loop.js';
-import type { StatusUpdate } from '../types/loop.js';
-import type { Emitter } from '../lib/events.js';
-
-export const createMCPHandler = (
-  memApi: MemAPI,
-  knowledgeGraphPath: string,
-  config: AppConfig,
-  handleQuery: typeof handleUserQuery,
-  emitter: Emitter<Record<string, StatusUpdate>>
-) => {
-  const server = new Server(
-    {
-      name: 'recursa-server',
-      version: '0.1.0',
-    },
-    {
-      capabilities: {
-        tools: {
-          listChanged: true,
-        },
-        resources: {
-          listChanged: true,
-        },
-      },
-    }
-  );
-
-  const tools: MCPTool[] = [
-    {
-      name: 'process_query',
-      description:
-        'Processes a high-level user query by running the agent loop.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'The user query to process.',
-          },
-          sessionId: {
-            type: 'string',
-            description: 'An optional session ID to maintain context.',
-          },
-          runId: {
-            type: 'string',
-            description:
-              'A unique ID for this execution run, used for notifications.',
-          },
-        },
-        required: ['query', 'runId'],
-      },
-    },
-  ];
-
-  const resources: MCPResource[] = [
-    {
-      uri: `file://${knowledgeGraphPath}`,
-      name: 'Knowledge Graph Root',
-      mimeType: 'text/directory',
-      description: 'Root directory of the knowledge graph',
-    },
-  ];
-
-  server.setRequestHandler(InitializeRequestSchema, async (request) => {
-    return {
-      protocolVersion: '2024-11-05',
-      capabilities: {
-        tools: {
-          listChanged: true,
-        },
-        resources: {
-          listChanged: true,
-        },
-      },
-      serverInfo: {
-        name: 'recursa-server',
-        version: '0.1.0',
-      },
-    };
-  });
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools,
-    };
-  });
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params as {
-      name: string;
-      arguments: Record<string, unknown>;
-    };
-
-    try {
-      switch (name) {
-        case 'process_query': {
-          const query = String(args.query);
-          const runId = String(args.runId);
-          const sessionId = args.sessionId ? String(args.sessionId) : undefined;
-
-          // This callback will be passed to the agent loop to emit status updates.
-          const onStatusUpdate = (update: StatusUpdate) => {
-            emitter.emit(runId, update);
-          };
-
-          // This listener forwards emitted events as MCP notifications for this run.
-          const listener = (update: StatusUpdate) => {
-            server.notification({
-              method: 'tool/status',
-              params: {
-                runId,
-                status: update,
-              },
-            });
-          };
-          emitter.on(runId, listener);
-
-          try {
-            const finalReply = await handleQuery(
-              query,
-              config,
-              sessionId,
-              undefined,
-              onStatusUpdate
-            );
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ reply: finalReply, runId }),
-                },
-              ],
-            };
-          } finally {
-            // Ensure the listener is cleaned up regardless of success or failure.
-            emitter.off(runId, listener);
-          }
-        }
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          },
-        ],
-        isError: true,
-      };
-    }
-  });
-
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    return {
-      resources,
-    };
-  });
-
-  return {
-    server,
-    transport: new StdioServerTransport(),
-  };
-};
-````
-
-## File: src/core/sandbox.ts
-````typescript
-import { createContext, runInContext } from 'node:vm';
-import type { MemAPI } from '../types/mem';
-import { logger } from '../lib/logger';
-
-/**
- * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
- * @param code The TypeScript code snippet to execute.
- * @param memApi The MemAPI instance to expose to the sandboxed code.
- * @returns The result of the code execution.
- */
-export const runInSandbox = async (
-  code: string,
-  memApi: MemAPI,
-  timeout = 10000
-): Promise<unknown> => {
-  // Create a sandboxed context with the mem API and only essential globals
-  const context = createContext({
-    mem: memApi,
-    // Essential JavaScript globals
-    console: {
-      log: (...args: unknown[]) =>
-        logger.info('Sandbox console.log', { arguments: args }),
-      error: (...args: unknown[]) =>
-        logger.error('Sandbox console.error', undefined, {
-          arguments: args,
-        }),
-      warn: (...args: unknown[]) =>
-        logger.warn('Sandbox console.warn', { arguments: args }),
-    },
-    // Promise and async support
-    Promise,
-    setTimeout: (fn: () => void, delay: number) => {
-      if (delay > 1000) {
-        throw new Error('Timeout too long');
-      }
-      return setTimeout(fn, Math.min(delay, 10000));
-    },
-    clearTimeout,
-    // Basic types and constructors
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    Date,
-    Math,
-    JSON,
-    RegExp,
-    Error,
-  });
-
-  // Wrap the user code in an async IIFE to allow top-level await.
-  const wrappedCode = `(async () => {
-    ${code}
-  })();`;
-
-  try {
-    logger.debug('Executing code in sandbox', { code, timeout });
-    const result = await runInContext(wrappedCode, context, {
-      timeout, // Use provided timeout
-      displayErrors: true,
-    });
-    logger.debug('Sandbox execution successful', {
-      result,
-      type: typeof result,
-    });
-    return result;
-  } catch (error) {
-    logger.error('Error executing sandboxed code', error as Error, { code });
-    // Re-throw a sanitized error to the agent loop
-    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
-  }
-};
-````
-
 ## File: tests/integration/mem-api.test.ts
 ````typescript
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
@@ -4368,6 +4292,83 @@ No links here.
     expect(readContent2).toBe('version 2.5');
   });
 });
+````
+
+## File: src/core/sandbox.ts
+````typescript
+import { createContext, runInContext } from 'node:vm';
+import type { MemAPI } from '../types/mem';
+import { logger } from '../lib/logger';
+
+/**
+ * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
+ * @param code The TypeScript code snippet to execute.
+ * @param memApi The MemAPI instance to expose to the sandboxed code.
+ * @returns The result of the code execution.
+ */
+export const runInSandbox = async (
+  code: string,
+  memApi: MemAPI,
+  timeout = 10000
+): Promise<unknown> => {
+  // Create a sandboxed context with the mem API and only essential globals
+  const context = createContext({
+    mem: memApi,
+    // Essential JavaScript globals
+    console: {
+      log: (...args: unknown[]) =>
+        logger.info('Sandbox console.log', { arguments: args }),
+      error: (...args: unknown[]) =>
+        logger.error('Sandbox console.error', undefined, {
+          arguments: args,
+        }),
+      warn: (...args: unknown[]) =>
+        logger.warn('Sandbox console.warn', { arguments: args }),
+    },
+    // Promise and async support
+    Promise,
+    setTimeout: (fn: () => void, delay: number) => {
+      if (delay > 1000) {
+        throw new Error('Timeout too long');
+      }
+      return setTimeout(fn, Math.min(delay, 10000));
+    },
+    clearTimeout,
+    // Basic types and constructors
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Date,
+    Math,
+    JSON,
+    RegExp,
+    Error,
+  });
+
+  // Wrap the user code in an async IIFE to allow top-level await.
+  const wrappedCode = `(async () => {
+    ${code}
+  })();`;
+
+  try {
+    logger.debug('Executing code in sandbox', { code, timeout });
+    const result = await runInContext(wrappedCode, context, {
+      timeout, // Use provided timeout
+      displayErrors: true,
+    });
+    logger.debug('Sandbox execution successful', {
+      result,
+      type: typeof result,
+    });
+    return result;
+  } catch (error) {
+    logger.error('Error executing sandboxed code', error as Error, { code });
+    // Re-throw a sanitized error to the agent loop
+    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
+  }
+};
 ````
 
 ## File: src/server.ts

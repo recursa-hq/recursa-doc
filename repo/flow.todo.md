@@ -1,3 +1,17 @@
+I thought based on readme, the file system content structure should be logseq - item based org-mode
+
+    ```markdown
+    - A parent item
+      - A nested child item
+        - property:: value
+    ```
+
+please analyse current implementation gap
+
+repo/gap-expectation.report.md
+
+===
+
 I dont think the implementation met spec
 
 === DONE
