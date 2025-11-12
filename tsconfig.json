@@ -19,7 +19,7 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
     "noEmit": false,
-    "types": ["bun-types"]
+    "types": ["node", "jest"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

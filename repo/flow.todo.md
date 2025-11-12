@@ -1,3 +1,6 @@
+
+=== DONE
+
 I thought based on readme, the file system content structure should be logseq - item based org-mode
 
     ```markdown
@@ -12,7 +15,12 @@ repo/gap-expectation.report.md
 
 ===
 
-I dont think the implementation met spec
+1. I dont think the implementation met spec
+2. I believe still there is too many placeholder/todo/mock/bandaids code across codebase
+
+===
+
+lets turn bun based to nodejs based for better compability
 
 === DONE
 

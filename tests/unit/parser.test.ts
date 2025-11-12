@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from '@jest/globals';
 import { parseLLMResponse } from '../../src/core/parser';
 
 describe('LLM Response Parser', () => {

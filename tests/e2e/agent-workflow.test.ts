@@ -3,9 +3,9 @@ import {
   it,
   expect,
   beforeAll,
-  beforeEach,
   afterEach,
-} from 'bun:test';
+  beforeEach,
+} from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
 import { type AppConfig, loadAndValidateConfig } from '../../src/config';
 import {

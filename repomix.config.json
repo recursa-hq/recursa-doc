@@ -38,7 +38,7 @@
       "AGENTS.md",
       "repo",
       "prompt",
-      "tests"
+   //   "tests"
     ]
   },
   "security": {
