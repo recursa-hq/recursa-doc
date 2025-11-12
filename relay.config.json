@@ -3,7 +3,7 @@
   "projectId": "doc",
   "core": {
     "logLevel": "info",
-    "enableNotifications": true,
+    "enableNotifications": false,
     "watchConfig": false
   },
   "watcher": {

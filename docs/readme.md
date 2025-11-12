@@ -84,13 +84,13 @@ const orgExists = await mem.fileExists(orgPath);
 if (!orgExists) {
   await mem.writeFile(
     orgPath,
-    '# AI Research Institute\ntype:: organization\n'
+    `- # AI Research Institute\n  - type:: organization\n`
   );
 }
 
 await mem.writeFile(
   'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]'
+  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
 );
 </typescript>
 ```
