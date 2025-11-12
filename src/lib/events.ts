@@ -53,7 +53,7 @@ export const createEmitter = <
       try {
         (listener as Listener<Events[K]>)(data);
       } catch (e: unknown) {
-        // eslint-disable-next-line no-console
+         
         console.error(`Error in event listener for ${String(event)}`, e);
       }
     });

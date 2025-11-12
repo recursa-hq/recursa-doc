@@ -15,10 +15,16 @@ repo/gap-expectation.report.md
 
 ===
 
+fix problems until this project fine with npm install
+
+multi env compability. by Claude code.
+
+===
+
 1. I dont think the implementation met spec
 2. I believe still there is too many placeholder/todo/mock/bandaids code across codebase
 
-===
+=== DONE
 
 lets turn bun based to nodejs based for better compability
 

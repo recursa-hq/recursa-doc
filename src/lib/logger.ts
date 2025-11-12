@@ -55,7 +55,7 @@ const createLoggerInternal = (baseContext: LogContext = {}): Logger => {
       message,
       ...finalContext,
     };
-    // eslint-disable-next-line no-console
+     
     console.log(JSON.stringify(logEntry));
   };
 

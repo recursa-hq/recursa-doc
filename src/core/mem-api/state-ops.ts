@@ -19,11 +19,11 @@ export const revertToLastCheckpoint =
       // This can fail if the stash is empty, so wrap in a try/catch.
       await git.stash(['pop']);
       return true;
-    } catch (error) {
+    } catch {
       // If stash is empty, simple-git throws. We can consider this a "success"
       // in that there's nothing to revert to. Or we can re-throw.
       // For now, let's log and return false.
-      // eslint-disable-next-line no-console
+       
       console.warn('Could not revert to checkpoint, stash may be empty.');
       return false;
     }
