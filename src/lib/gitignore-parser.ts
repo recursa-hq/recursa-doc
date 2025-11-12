@@ -39,7 +39,7 @@ const matchesPattern = (
   relativePath: string,
   parsedPattern: GitignorePattern
 ): boolean => {
-  const { pattern, isNegated, isDirectory } = parsedPattern;
+  const { pattern, isDirectory } = parsedPattern;
   
   // Convert gitignore pattern to regex
   let regexPattern = pattern
@@ -115,7 +115,7 @@ export const createIgnoreFilter = async (
       
       return isIgnored;
     };
-  } catch (error) {
+  } catch {
     // .gitignore doesn't exist or can't be read, return a function that never ignores
     return (): boolean => false;
   }

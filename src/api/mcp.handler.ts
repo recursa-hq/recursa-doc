@@ -5,7 +5,6 @@ import {
   InitializeRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
-  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { MemAPI } from '../types/mem.js';
 import type { MCPTool, MCPResource } from '../types/mcp.js';
@@ -74,7 +73,7 @@ export const createMCPHandler = (
     },
   ];
 
-  server.setRequestHandler(InitializeRequestSchema, async (request) => {
+  server.setRequestHandler(InitializeRequestSchema, async (_request) => {
     return {
       protocolVersion: '2024-11-05',
       capabilities: {

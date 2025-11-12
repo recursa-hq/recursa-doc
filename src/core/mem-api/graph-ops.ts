@@ -125,7 +125,7 @@ export const getBacklinks =
           if (content.includes(linkPattern)) {
             backlinks.push(path.relative(graphRoot, currentFilePath));
           }
-        } catch (e) {
+        } catch {
           // Ignore files that can't be read
         }
       }
@@ -163,7 +163,7 @@ export const searchGlobal =
         if (content.toLowerCase().includes(lowerCaseQuery)) {
           matchingFiles.push(path.relative(graphRoot, filePath));
         }
-      } catch (e) {
+      } catch {
         // Ignore binary files or files that can't be read
       }
     }
