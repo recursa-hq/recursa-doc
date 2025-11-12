@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "prestart": "npm run build",
-    "test": "node node_modules/jest/bin/jest.js",
+    "test": "NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && nvm use 24.11.1 && node node_modules/jest/bin/jest.js",
     "lint": "node node_modules/eslint/bin/eslint \"src/**/*.{ts,tsx}\" \"scripts/**/*.js\"",
     "lint:fix": "node node_modules/eslint/bin/eslint \"src/**/*.{ts,tsx}\" \"scripts/**/*.js\" --fix",
     "format": "prettier --check .",
