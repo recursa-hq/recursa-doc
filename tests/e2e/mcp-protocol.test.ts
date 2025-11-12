@@ -6,11 +6,12 @@ import {
   afterAll,
   beforeEach,
   afterEach,
-} from 'bun:test';
+} from '@jest/globals';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import type { Subprocess } from 'bun';
+import { type ChildProcess, spawn } from 'child_process';
+import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 
 // MCP Protocol Types
@@ -97,14 +98,14 @@ async function* readMessages(
 
 describe('MCP Protocol E2E Test', () => {
   let tempDir: string;
-  let proc: Subprocess | undefined;
+  let proc: ChildProcess | undefined;
 
   beforeAll(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-mcp-e2e-'));
   });
 
   afterAll(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
@@ -113,10 +114,8 @@ describe('MCP Protocol E2E Test', () => {
     await fs.mkdir(tempDir, { recursive: true });
 
     // Spawn the server as a child process for testing
-    proc = Bun.spawn(['bun', 'run', 'src/server.ts'], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
+    proc = spawn('tsx', ['src/server.ts'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         KNOWLEDGE_GRAPH_PATH: tempDir,
@@ -135,7 +134,10 @@ describe('MCP Protocol E2E Test', () => {
     if (!proc) throw new Error('Process not started');
 
     const writer = proc.stdin;
-    const reader = readMessages(proc.stdout);
+    if (!writer || !proc.stdout) {
+      throw new Error('Process stdio not available');
+    }
+    const reader = readMessages(Readable.toWeb(proc.stdout) as ReadableStream);
 
     // 1. Send initialize request
     const initRequestId = randomUUID();

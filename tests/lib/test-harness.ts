@@ -1,4 +1,4 @@
-import { mock } from 'bun:test';
+import { jest } from '@jest/globals';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -263,7 +263,7 @@ export const createMockQueryLLM = (responses: string[]) => {
  */
 export const createMockLLMQueryWithSpy = (responses: string[]) => {
   let callCount = 0;
-  return mock(async (_history: unknown[], _config: unknown) => {
+  return jest.fn(async (_history: unknown[], _config: unknown) => {
     const response = responses[callCount] || responses[responses.length - 1];
     callCount++;
     return response;
