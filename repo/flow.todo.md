@@ -7,6 +7,9 @@ discrepancy analysis
 
 fix fail test
 
+
+fix all fail test without bandaids fake fix to comply with readme.md spec and real Implementation verification
+
 === DONE
 
 I thought based on readme, the file system content structure should be logseq - item based org-mode

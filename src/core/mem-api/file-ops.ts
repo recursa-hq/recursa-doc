@@ -137,8 +137,8 @@ export const writeFile =
     const fullPath = resolveSecurePath(graphRoot, filePath);
 
     try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
+      // Additional validation - allow non-existent files for write operations
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false, requireExistence: false })) {
         throw new Error(`Security violation: Path validation failed for ${filePath}`);
       }
 
@@ -235,15 +235,17 @@ export const fileExists =
     const fullPath = resolveSecurePath(graphRoot, filePath);
 
     try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
+      // Additional validation - don't throw for non-existent files in fileExists
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true, requireExistence: false })) {
         return false; // Treat security violations as non-existent
       }
 
       await fs.access(fullPath);
       return true;
     } catch (error: unknown) {
-      if (hasErrorCode(error) && error.code === 'ENOENT') {
+      // Check for ENOENT error more robustly
+      const errorCode = (error as any).code;
+      if (errorCode === 'ENOENT') {
         return false;
       }
       throw handleFileError(error, 'check file existence', filePath);

@@ -50,8 +50,9 @@ export const runInSandbox = async (
   });
 
   // Wrap the user code in an async IIFE to allow top-level await.
+  // Ensure the code is properly formatted and doesn't have syntax errors
   const wrappedCode = `(async () => {
-    ${code}
+${code}
   })();`;
 
   try {
@@ -66,8 +67,19 @@ export const runInSandbox = async (
     });
     return result;
   } catch (error) {
-    logger.error('Error executing sandboxed code', error as Error, { code });
-    // Re-throw a sanitized error to the agent loop
-    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
+    const errorMessage = (error as Error).message;
+    logger.error('Error executing sandboxed code', error as Error, { 
+      code,
+      wrappedCode: wrappedCode.substring(0, 500) + '...' // Log first 500 chars for debugging
+    });
+    
+    // Provide more specific error messages for common issues
+    if (errorMessage.includes('Invalid or unexpected token')) {
+      throw new Error(`Sandbox execution failed: Syntax error in code. This usually indicates unescaped quotes or malformed JavaScript. Original error: ${errorMessage}`);
+    } else if (errorMessage.includes('timeout')) {
+      throw new Error(`Sandbox execution failed: Code execution timed out after ${timeout}ms`);
+    } else {
+      throw new Error(`Sandbox execution failed: ${errorMessage}`);
+    }
   }
 };
