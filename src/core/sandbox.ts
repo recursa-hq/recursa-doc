@@ -70,7 +70,7 @@ ${code}
     const errorMessage = (error as Error).message;
     logger.error('Error executing sandboxed code', error as Error, { 
       code,
-      wrappedCode: wrappedCode.substring(0, 500) + '...' // Log first 500 chars for debugging
+      wrappedCode: wrappedCode.substring(0, 800) + '...' // Log first 800 chars for debugging
     });
     
     // Provide more specific error messages for common issues

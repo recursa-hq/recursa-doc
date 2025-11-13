@@ -244,8 +244,7 @@ export const fileExists =
       return true;
     } catch (error: unknown) {
       // Check for ENOENT error more robustly
-      const errorCode = (error as any).code;
-      if (errorCode === 'ENOENT') {
+      if (hasErrorCode(error) && error.code === 'ENOENT') {
         return false;
       }
       throw handleFileError(error, 'check file existence', filePath);

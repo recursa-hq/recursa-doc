@@ -11,8 +11,6 @@ scripts/
   build.js
   install.js
 src/
-  api/
-    mcp.handler.ts
   core/
     mem-api/
       file-ops.ts
@@ -28,7 +26,6 @@ src/
     parser.ts
     sandbox.ts
   lib/
-    events.ts
     gitignore-parser.ts
     logger.ts
     platform.ts
@@ -51,6 +48,7 @@ tests/
     workflow.test.ts
   lib/
     test-harness.ts
+    test-util.ts
   unit/
     llm.test.ts
     parser.test.ts
@@ -59,7 +57,6 @@ tests/
 .dockerignore
 .env.example
 .env.test
-.eslintrc.json
 .gitignore
 .prettierrc.json
 ### 2. Configuration
@@ -77,6 +74,66 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
+
+## File: tests/lib/test-util.ts
+````typescript
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import type { TestHarnessState } from './test-harness';
+import type { MCPRequest, MCPResponse } from '../../src/types';
+
+export const spawnServer = (
+  harness: TestHarnessState
+): ChildProcessWithoutNullStreams => {
+  const serverProcess = spawn('node', ['dist/server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
+      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
+    },
+  });
+
+  serverProcess.stderr.on('data', (data) => {
+    console.error(`SERVER STDERR: ${data}`);
+  });
+
+  return serverProcess;
+};
+
+export const writeMCPRequest = (
+  serverProcess: ChildProcessWithoutNullStreams,
+  request: MCPRequest
+): void => {
+  const message = JSON.stringify(request) + '\n';
+  serverProcess.stdin.write(message);
+};
+
+export async function* readMCPMessages(
+  serverProcess: ChildProcessWithoutNullStreams
+): AsyncGenerator<MCPResponse> {
+  let buffer = '';
+  for await (const chunk of serverProcess.stdout) {
+    buffer += chunk.toString();
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.trim()) {
+        try {
+          const parsed = JSON.parse(line);
+          // FastMCP can send notifications which don't have an ID.
+          // This reader is for responses, so we'll filter them.
+          if ('id' in parsed) {
+            yield parsed as MCPResponse;
+          }
+        } catch (error) {
+          console.error('Failed to parse MCP message:', line);
+        }
+      }
+    }
+  }
+}
+````
 
 ## File: docs/PLATFORM_SUPPORT.md
 ````markdown
@@ -2031,34 +2088,6 @@ Dockerfile
 .dockerignore
 ````
 
-## File: .eslintrc.json
-````json
-{
-  "parser": "@typescript-eslint/parser",
-  "extends": [
-    "eslint:recommended",
-    "plugin:@typescript-eslint/recommended",
-    "plugin:prettier/recommended"
-  ],
-  "parserOptions": {
-    "ecmaVersion": "latest",
-    "sourceType": "module"
-  },
-  "env": {
-    "es6": true,
-    "node": true
-  },
-  "rules": {
-    "@typescript-eslint/no-explicit-any": "error",
-    "@typescript-eslint/no-unused-vars": [
-      "warn",
-      { "argsIgnorePattern": "^_" }
-    ],
-    "no-console": "warn"
-  }
-}
-````
-
 ## File: .prettierrc.json
 ````json
 {
@@ -2143,6 +2172,73 @@ export async function* walk(
 }
 ````
 
+## File: src/types/sandbox.ts
+````typescript
+export interface SandboxOptions {
+  timeout?: number;
+  memoryLimit?: number;
+  allowedGlobals?: string[];
+  forbiddenGlobals?: string[];
+}
+
+export interface SandboxExecutionContext {
+  mem: import('./mem.js').MemAPI;
+  console: Console;
+}
+
+export interface SandboxResult {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+  output?: string;
+  executionTime: number;
+}
+
+export type SandboxCode = string;
+
+export interface ExecutionConstraints {
+  maxExecutionTime: number;
+  maxMemoryBytes: number;
+  allowedModules: string[];
+  forbiddenAPIs: string[];
+}
+````
+
+## File: .env.test
+````
+# Test Environment Configuration
+OPENROUTER_API_KEY="mock-test-api-key"
+KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
+LLM_MODEL="mock-test-model"
+````
+
+## File: jest.config.js
+````javascript
+/** @type {import('ts-jest').JestConfigWithTsJest} */
+export default {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  moduleNameMapper: {
+    '(.+)\\.js$': '$1',
+  },
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        useESM: true,
+      },
+    ],
+  },
+  extensionsToTreatAsEsm: ['.ts'],
+  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
+  clearMocks: true,
+  collectCoverage: true,
+  coverageDirectory: 'coverage',
+  coverageProvider: 'v8',
+  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
+};
+````
+
 ## File: src/core/mem-api/secure-path.ts
 ````typescript
 import path from 'path';
@@ -2225,15 +2321,30 @@ export const validatePathBounds = (
 
   try {
     const canonicalRoot = getCanonicalPath(allowedRoot);
-    let canonicalTarget = getCanonicalPath(testPath);
+    let canonicalTarget: string;
+    
+    // Handle non-existent paths specially
+    try {
+      canonicalTarget = getCanonicalPath(testPath);
+    } catch (error) {
+      // Path doesn't exist, use normalized path instead
+      canonicalTarget = platform.normalizePath(path.resolve(testPath));
+    }
 
     // If we shouldn't follow symlinks, check if the target itself is a symlink
-    if (!followSymlinks && fs.lstatSync(testPath).isSymbolicLink()) {
-      if (!allowSymlinks) {
-        return false;
+    if (!followSymlinks) {
+      try {
+        if (fs.lstatSync(testPath).isSymbolicLink()) {
+          if (!allowSymlinks) {
+            return false;
+          }
+          // Use lstat to get the symlink itself, not its target
+          canonicalTarget = platform.normalizePath(path.resolve(testPath));
+        }
+      } catch (error) {
+        // File doesn't exist, which is fine for write operations
+        // The canonicalTarget from resolveSecurePath is still valid
       }
-      // Use lstat to get the symlink itself, not its target
-      canonicalTarget = platform.normalizePath(path.resolve(testPath));
     }
 
     // Check if the target path exists (if required)
@@ -2363,164 +2474,14 @@ export default {
 };
 ````
 
-## File: src/types/sandbox.ts
-````typescript
-export interface SandboxOptions {
-  timeout?: number;
-  memoryLimit?: number;
-  allowedGlobals?: string[];
-  forbiddenGlobals?: string[];
-}
-
-export interface SandboxExecutionContext {
-  mem: import('./mem.js').MemAPI;
-  console: Console;
-}
-
-export interface SandboxResult {
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  output?: string;
-  executionTime: number;
-}
-
-export type SandboxCode = string;
-
-export interface ExecutionConstraints {
-  maxExecutionTime: number;
-  maxMemoryBytes: number;
-  allowedModules: string[];
-  forbiddenAPIs: string[];
-}
-````
-
-## File: .env.test
-````
-# Test Environment Configuration
-OPENROUTER_API_KEY="mock-test-api-key"
-KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
-LLM_MODEL="mock-test-model"
-````
-
-## File: jest.config.js
-````javascript
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-export default {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  moduleNameMapper: {
-    '(.+)\\.js$': '$1',
-  },
-  transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        useESM: true,
-      },
-    ],
-  },
-  extensionsToTreatAsEsm: ['.ts'],
-  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
-  clearMocks: true,
-  collectCoverage: true,
-  coverageDirectory: 'coverage',
-  coverageProvider: 'v8',
-  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
-};
-````
-
-## File: src/lib/events.ts
-````typescript
-type Listener<T = unknown> = (data: T) => void;
-
-// Define a generic type for the emitter's event map
-export type EventMap = Record<string, unknown>;
-
-// Define the type for the emitter object returned by the HOF
-export type Emitter<Events extends EventMap = EventMap> = {
-  on<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void;
-  off<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void;
-  emit<K extends keyof Events>(event: K, data: Events[K]): void;
-  once<K extends keyof Events>(event: K, listener: Listener<Events[K]>): void;
-};
-
-/**
- * Creates a new event emitter instance.
- * This is a Higher-Order Function that encapsulates the listeners
- * in a closure, adhering to a functional programming style.
- *
- * @returns An Emitter object.
- */
-export const createEmitter = <
-  Events extends EventMap = EventMap,
->(): Emitter<Events> => {
-  // Listeners are stored in a Map within the closure
-  const listeners = new Map<keyof Events, Array<Listener<unknown>>>();
-
-  const on = <K extends keyof Events>(
-    event: K,
-    listener: Listener<Events[K]>
-  ): void => {
-    if (!listeners.has(event)) {
-      listeners.set(event, []);
-    }
-    listeners.get(event)?.push(listener as Listener<unknown>);
-  };
-
-  const off = <K extends keyof Events>(
-    event: K,
-    listener: Listener<Events[K]>
-  ): void => {
-    const eventListeners = listeners.get(event);
-    if (!eventListeners) {
-      return;
-    }
-    listeners.set(
-      event,
-      eventListeners.filter((l) => l !== (listener as Listener<unknown>))
-    );
-  };
-
-  const emit = <K extends keyof Events>(event: K, data: Events[K]): void => {
-    listeners.get(event)?.forEach((listener) => {
-      try {
-        (listener as Listener<Events[K]>)(data);
-      } catch (e: unknown) {
-         
-        console.error(`Error in event listener for ${String(event)}`, e);
-      }
-    });
-  };
-
-  const once = <K extends keyof Events>(
-    event: K,
-    listener: Listener<Events[K]>
-  ): void => {
-    const onceListener: Listener<Events[K]> = (data) => {
-      off(event, onceListener);
-      listener(data);
-    };
-    on(event, onceListener);
-  };
-
-  return {
-    on,
-    off,
-    emit,
-    once,
-  };
-};
-````
-
 ## File: src/types/index.ts
 ````typescript
 export * from './mem.js';
 export * from './git.js';
 export * from './sandbox.js';
-export * from './mcp.js';
 export * from './llm.js';
 export * from './loop.js';
+export * from './mcp.js';
 
 export interface RecursaConfig {
   knowledgeGraphPath: string;
@@ -2599,203 +2560,6 @@ export interface LLMProvider {
 }
 
 export type StreamingCallback = (chunk: string) => void;
-````
-
-## File: tests/e2e/mcp-protocol.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import { type ChildProcess, spawn } from 'child_process';
-import { Readable } from 'stream';
-import { randomUUID } from 'crypto';
-
-// MCP Protocol Types
-interface MCPMessage {
-  id: string;
-  method: string;
-  params?: Record<string, unknown>;
-  result?: unknown;
-  error?: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-interface MCPInitializeRequest extends MCPMessage {
-  method: 'initialize';
-  params: {
-    protocolVersion: string;
-    clientInfo: {
-      name: string;
-      version: string;
-    };
-  };
-}
-
-interface MCPInitializeResponse extends MCPMessage {
-  result: {
-    serverInfo: {
-      name: string;
-      version: string;
-    };
-  };
-}
-
-interface MCPListToolsRequest extends MCPMessage {
-  method: 'list-tools';
-  params?: Record<string, unknown>;
-}
-
-interface MCPListToolsResponse extends MCPMessage {
-  result: {
-    tools: MCPTool[];
-  };
-}
-
-interface MCPTool {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
-}
-
-// Helper to read newline-delimited JSON from a stream
-async function* readMessages(
-  stream: ReadableStream<Uint8Array>
-): AsyncGenerator<MCPMessage> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // Keep the last partial line
-
-    for (const line of lines) {
-      if (line.trim()) {
-        try {
-          yield JSON.parse(line) as MCPMessage;
-        } catch (e: unknown) {
-          console.error('Failed to parse JSON line:', line);
-        }
-      }
-    }
-  }
-}
-
-describe('MCP Protocol E2E Test', () => {
-  let tempDir: string;
-  let proc: ChildProcess | undefined;
-
-  beforeAll(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'recursa-mcp-e2e-'));
-  });
-
-  afterAll(async () => {
-    if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  beforeEach(async () => {
-    // Ensure the temp directory exists and is clean for the knowledge graph
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Spawn the server as a child process for testing
-    proc = spawn('tsx', ['src/server.ts'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        KNOWLEDGE_GRAPH_PATH: tempDir,
-        OPENROUTER_API_KEY: 'mock-key-for-e2e-test',
-      },
-    });
-  });
-
-  afterEach(() => {
-    // Ensure the child process is terminated after each test
-    proc?.kill();
-    proc = undefined;
-  });
-
-  it('should initialize and list tools correctly', async () => {
-    if (!proc) throw new Error('Process not started');
-
-    const writer = proc.stdin;
-    if (!writer || !proc.stdout) {
-      throw new Error('Process stdio not available');
-    }
-    const reader = readMessages(Readable.toWeb(proc.stdout) as ReadableStream);
-
-    // 1. Send initialize request
-    const initRequestId = randomUUID();
-    const initRequest: MCPInitializeRequest = {
-      id: initRequestId,
-      method: 'initialize',
-      params: {
-        protocolVersion: '2024-11-05',
-        clientInfo: { name: 'test-client', version: '1.0.0' },
-      },
-    };
-    await writer.write(JSON.stringify(initRequest) + '\n');
-
-    // 2. Await and verify initialize response
-    const initResponse = await reader.next();
-    expect(initResponse.done).toBe(false);
-    const initResponseValue = initResponse.value as MCPInitializeResponse;
-    expect(initResponseValue.id).toBe(initRequestId);
-    expect(initResponseValue.result.serverInfo.name).toBe('recursa-server');
-
-    // 3. Send list-tools request
-    const listToolsRequestId = randomUUID();
-    const listToolsRequest: MCPListToolsRequest = {
-      id: listToolsRequestId,
-      method: 'list-tools',
-      params: {},
-    };
-    await writer.write(JSON.stringify(listToolsRequest) + '\n');
-
-    // 4. Await and verify list-tools response
-    const listToolsResponse = await reader.next();
-    expect(listToolsResponse.done).toBe(false);
-    const listToolsResponseValue =
-      listToolsResponse.value as MCPListToolsResponse;
-    expect(listToolsResponseValue.id).toBe(listToolsRequestId);
-    expect(listToolsResponseValue.result.tools).toBeArray();
-    expect(listToolsResponseValue.result.tools.length).toBeGreaterThan(0);
-    const processQueryTool = listToolsResponseValue.result.tools.find(
-      (t: MCPTool) => t.name === 'process_query'
-    );
-    expect(processQueryTool).toBeDefined();
-    expect(processQueryTool.description).toBeString();
-
-    // NOTE: Testing the 'call-tool' for 'process_query' is intentionally omitted here.
-    // A true process-level E2E test for the agent loop would require either:
-    // a) A live network connection and a valid LLM API key, making the test non-isolated and dependent on external services.
-    // b) A complex setup to inject a mock LLM into the child process, which is beyond the scope of this test suite.
-    // The agent loop's functionality is thoroughly tested with a mock LLM in the integration tests (`tests/integration/workflow.test.ts`).
-    // This E2E test focuses on verifying the MCP server's protocol compliance and basic request/response handling.
-
-    await writer.end();
-  }, 20000); // Increase timeout for spawning process
-});
 ````
 
 ## File: tests/unit/parser.test.ts
@@ -3470,570 +3234,58 @@ export type GitCommand =
 
 ## File: src/types/mcp.ts
 ````typescript
-import type { Resource } from '@modelcontextprotocol/sdk/types.js';
+// Based on MCP Specification
 
-export interface MCPInitializeRequest {
-  protocolVersion: string;
-  capabilities: {
-    tools?: {
-      listChanged?: boolean;
-    };
-    resources?: {
-      listChanged?: boolean;
-      subscribe?: boolean;
-      unsubscribe?: boolean;
-    };
-  };
+// --- Requests ---
+export interface MCPRequest {
+  jsonrpc: '2.0';
+  id: number | string;
+  method: string;
+  params?: unknown;
+}
+
+export interface InitializeParams {
+  processId?: number;
   clientInfo: {
     name: string;
     version: string;
+    [key: string]: unknown;
   };
+  capabilities: Record<string, unknown>;
 }
 
-export interface MCPInitializeResult {
-  protocolVersion: string;
-  capabilities: {
-    tools: {
-      listChanged?: boolean;
-    };
-    resources: {
-      listChanged?: boolean;
-      subscribe?: boolean;
-      unsubscribe?: boolean;
-    };
-  };
-  serverInfo: {
-    name: string;
-    version: string;
-  };
+// --- Responses ---
+export interface MCPResponse {
+  jsonrpc: '2.0';
+  id: number | string;
+  result?: unknown;
+  error?: MCPError;
 }
 
+export interface MCPError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+// --- Tooling ---
 export interface MCPTool {
   name: string;
   description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
+  parameters: Record<string, unknown>; // JSON Schema
+  [key: string]: unknown;
 }
 
-export interface MCPResource extends Resource {
-  mimeType?: string;
+export interface ListToolsResult {
+  tools: MCPTool[];
 }
 
-export interface MCPRequest {
-  id: string;
+// --- Notifications ---
+export interface MCPNotification {
+  jsonrpc: '2.0';
   method: string;
-  params?: Record<string, unknown>;
+  params?: unknown;
 }
-
-export interface MCPResponse {
-  id: string;
-  result?: Record<string, unknown>;
-  error?: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-export interface MCPServerConfig {
-  name: string;
-  version: string;
-  description?: string;
-}
-````
-
-## File: tests/lib/test-harness.ts
-````typescript
-import { jest } from '@jest/globals';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import simpleGit from 'simple-git';
-import { createMemAPI } from '../../src/core/mem-api';
-import type { AppConfig } from '../../src/config';
-import type { MemAPI } from '../../src/types';
-import type { ChatMessage } from '../../src/types';
-
-/**
- * Test harness options for customizing the test environment
- */
-export interface TestHarnessOptions {
-  /** Custom git user name, defaults to 'Test User' */
-  gitUserName?: string;
-  /** Custom git user email, defaults to 'test@example.com' */
-  gitEmail?: string;
-  /** Custom temp directory prefix, defaults to 'recursa-test-' */
-  tempPrefix?: string;
-  /** Custom OpenRouter API key, defaults to 'test-api-key' */
-  apiKey?: string;
-  /** Custom LLM model, defaults to 'test-model' */
-  model?: string;
-  /** Whether to initialize with a .gitignore file, defaults to true */
-  withGitignore?: boolean;
-}
-
-/**
- * Test harness state containing all the test environment resources
- */
-export interface TestHarnessState {
-  readonly tempDir: string;
-  readonly mockConfig: AppConfig;
-  readonly mem: MemAPI;
-  readonly git: simpleGit.SimpleGit;
-}
-
-/**
- * Creates a test harness with isolated temporary environment
- * @param options - Configuration options for the test harness
- * @returns Promise resolving to TestHarnessState with temp directory, config, and utilities
- */
-export const createTestHarness = async (
-  options: TestHarnessOptions = {}
-): Promise<TestHarnessState> => {
-  const {
-    gitUserName = 'Test User',
-    gitEmail = 'test@example.com',
-    tempPrefix = 'recursa-test-',
-    apiKey = 'test-api-key',
-    model = 'test-model',
-    withGitignore = true,
-  } = options;
-
-  // Create temporary directory
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), tempPrefix));
-
-  // Create mock configuration
-  const mockConfig: AppConfig = {
-    knowledgeGraphPath: tempDir,
-    openRouterApiKey: apiKey,
-    llmModel: model,
-    llmTemperature: 0.7,
-    llmMaxTokens: 4000,
-    sandboxTimeout: 10000,
-    sandboxMemoryLimit: 100,
-    gitUserName: gitUserName,
-    gitUserEmail: gitEmail,
-  };
-
-  // Initialize git repository
-  const git = simpleGit(tempDir);
-  await git.init();
-  await git.addConfig('user.name', gitUserName);
-  await git.addConfig('user.email', gitEmail);
-
-  // Optionally create .gitignore file
-  if (withGitignore) {
-    await fs.writeFile(
-      path.join(tempDir, '.gitignore'),
-      '*.log\nnode_modules/\n.env\n.DS_Store'
-    );
-    await git.add('.gitignore');
-    await git.commit('Initial commit with .gitignore');
-  }
-
-  // Create MemAPI instance
-  const mem = createMemAPI(mockConfig);
-
-  return {
-    tempDir,
-    mockConfig,
-    mem,
-    git,
-  };
-};
-
-/**
- * Cleans up a test harness by removing the temporary directory
- * @param harness - The test harness state to clean up
- */
-export const cleanupTestHarness = async (
-  harness: TestHarnessState
-): Promise<void> => {
-  await fs.rm(harness.tempDir, { recursive: true, force: true });
-};
-
-/**
- * Resets the test harness environment (clears directory, re-inits git)
- * @param harness - The test harness state to reset
- * @param options - Options for reset operation
- */
-export const resetTestHarness = async (
-  harness: TestHarnessState,
-  options: { withGitignore?: boolean } = {}
-): Promise<void> => {
-  const { withGitignore = true } = options;
-
-  // Clear the directory
-  await fs.rm(harness.tempDir, { recursive: true, force: true });
-  await fs.mkdir(harness.tempDir, { recursive: true });
-
-  // Re-initialize git
-  await harness.git.init();
-
-  // Optionally recreate .gitignore
-  if (withGitignore) {
-    await fs.writeFile(
-      path.join(harness.tempDir, '.gitignore'),
-      '*.log\nnode_modules/\n.env\n.DS_Store'
-    );
-    await harness.git.add('.gitignore');
-    await harness.git.commit('Initial commit with .gitignore');
-  }
-};
-
-/**
- * Higher-order function that wraps a test function with test harness setup/teardown
- * @param testFn - The test function to execute with the harness
- * @param options - Test harness options
- * @returns A test function that handles setup/teardown automatically
- */
-export const withTestHarness = <T>(
-  testFn: (harness: TestHarnessState) => Promise<T>,
-  options: TestHarnessOptions = {}
-) => {
-  return async (): Promise<T> => {
-    const harness = await createTestHarness(options);
-
-    try {
-      return await testFn(harness);
-    } finally {
-      await cleanupTestHarness(harness);
-    }
-  };
-};
-
-/**
- * Creates multiple test harnesses for parallel testing
- * @param count - Number of harnesses to create
- * @param options - Configuration options for each harness
- * @returns Array of TestHarnessState instances
- */
-export const createMultipleTestHarnesses = async (
-  count: number,
-  options: TestHarnessOptions = {}
-): Promise<TestHarnessState[]> => {
-  const harnesses: TestHarnessState[] = [];
-
-  try {
-    for (let i = 0; i < count; i++) {
-      const harness = await createTestHarness({
-        ...options,
-        tempPrefix: `${options.tempPrefix || 'recursa-test-'}parallel-${i}-`,
-      });
-      harnesses.push(harness);
-    }
-
-    return harnesses;
-  } catch (error) {
-    // Cleanup any created harnesses if an error occurs
-    await Promise.all(harnesses.map(cleanupTestHarness));
-    throw error;
-  }
-};
-
-/**
- * Utility function to create test files with common patterns
- * @param harness - Test harness state
- * @param files - Object mapping file paths to contents
- */
-export const createTestFiles = async (
-  harness: TestHarnessState,
-  files: Record<string, string>
-): Promise<void> => {
-  const promises = Object.entries(files).map(async ([filePath, content]) => {
-    await harness.mem.writeFile(filePath, content);
-  });
-
-  await Promise.all(promises);
-};
-
-/**
- * Utility function to verify files exist and have expected content
- * @param harness - Test harness state
- * @param expectedFiles - Object mapping file paths to expected content (partial or full)
- */
-export const verifyTestFiles = async (
-  harness: TestHarnessState,
-  expectedFiles: Record<string, string>
-): Promise<void> => {
-  const promises = Object.entries(expectedFiles).map(
-    async ([filePath, expectedContent]) => {
-      const exists = await harness.mem.fileExists(filePath);
-      if (!exists) {
-        throw new Error(`Expected file ${filePath} does not exist`);
-      }
-
-      const actualContent = await harness.mem.readFile(filePath);
-      if (!actualContent.includes(expectedContent)) {
-        throw new Error(
-          `File ${filePath} does not contain expected content: "${expectedContent}"`
-        );
-      }
-    }
-  );
-
-  await Promise.all(promises);
-};
-
-/**
- * Creates a mock LLM query function for testing purposes.
- * This replaces the duplicate Mock LLM utilities found across different test files.
- *
- * @param responses - Array of predefined responses to return in sequence
- * @returns A mock function that simulates LLM responses
- */
-export const createMockQueryLLM = (responses: string[]) => {
-  let callCount = 0;
-  return async (
-    _history: ChatMessage[],
-    _config: AppConfig
-  ): Promise<string> => {
-    // Return the next pre-canned XML response from the `responses` array.
-    const response = responses[callCount];
-    if (!response) {
-      throw new Error(
-        `Mock LLM called more times than expected (${callCount}).`
-      );
-    }
-    callCount++;
-    return response;
-  };
-};
-
-/**
- * Creates a mock LLM query function using Bun's mock for testing with spies.
- * This is useful when you need to track call counts, arguments, etc.
- *
- * @param responses - Array of predefined responses to return in sequence
- * @returns A Bun mock function that simulates LLM responses
- */
-export const createMockLLMQueryWithSpy = (responses: string[]) => {
-  let callCount = 0;
-  return jest.fn(async (_history: unknown[], _config: unknown) => {
-    const response = responses[callCount] || responses[responses.length - 1];
-    callCount++;
-    return response;
-  });
-};
-
-/**
- * Default mock configuration for tests
- */
-export const createMockConfig = (
-  overrides: Partial<AppConfig> = {}
-): AppConfig => ({
-  openRouterApiKey: 'test-api-key',
-  knowledgeGraphPath: '/test/path',
-  llmModel: 'anthropic/claude-3-haiku-20240307',
-  llmTemperature: 0.7,
-  llmMaxTokens: 4000,
-  sandboxTimeout: 10000,
-  sandboxMemoryLimit: 100,
-  gitUserName: 'Test User',
-  gitUserEmail: 'test@example.com',
-  ...overrides,
-});
-
-/**
- * Default mock chat history for tests
- */
-export const createMockHistory = (
-  customMessages: Partial<ChatMessage>[] = []
-): ChatMessage[] => [
-  { role: 'system', content: 'You are a helpful assistant.' },
-  { role: 'user', content: 'Hello, world!' },
-  ...customMessages.map(
-    (msg) =>
-      ({
-        role: msg.role || 'user',
-        content: msg.content || '',
-      }) as ChatMessage
-  ),
-];
-````
-
-## File: tests/unit/llm.test.ts
-````typescript
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
-import type { AppConfig } from '../../src/config';
-import type { ChatMessage } from '../../src/types';
-
-// Mock fetch globally
-global.fetch = jest.fn(() =>
-  Promise.resolve({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        choices: [
-          {
-            message: {
-              content: 'Test response from LLM',
-            },
-          },
-        ],
-      }),
-    status: 200,
-    statusText: 'OK',
-  })
-);
-
-const mockConfig: AppConfig = {
-  openRouterApiKey: 'test-api-key',
-  knowledgeGraphPath: '/test/path',
-  llmModel: 'anthropic/claude-3-haiku-20240307',
-  llmTemperature: 0.7,
-  llmMaxTokens: 4000,
-  sandboxTimeout: 10000,
-  sandboxMemoryLimit: 100,
-  gitUserName: 'Test User',
-  gitUserEmail: 'test@example.com',
-};
-
-const mockHistory: ChatMessage[] = [
-  { role: 'system', content: 'You are a helpful assistant.' },
-  { role: 'user', content: 'Hello, world!' },
-];
-
-beforeEach(() => {
-  (global.fetch as jest.Mock).mockClear();
-});
-
-describe('LLM Module', () => {
-  describe('queryLLM', () => {
-    it('should make a successful request to OpenRouter API', async () => {
-      const response = await queryLLM(mockHistory, mockConfig);
-
-      expect(response).toBe('Test response from LLM');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://openrouter.ai/api/v1/chat/completions',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            Authorization: 'Bearer test-api-key',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
-            'X-Title': 'Recursa',
-          },
-          body: JSON.stringify({
-            model: 'anthropic/claude-3-haiku-20240307',
-            messages: mockHistory,
-            temperature: 0.7,
-            max_tokens: 4000,
-          }),
-        })
-      );
-    });
-
-    it('should handle API errors properly', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Invalid API key' },
-            }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'OpenRouter API error: 401 Unauthorized'
-      );
-    });
-
-    it('should handle malformed API responses', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ invalid: 'response' }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Invalid response format from OpenRouter API'
-      );
-    });
-
-    it('should handle empty content in response', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: { content: '' },
-                },
-              ],
-            }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Empty content received from OpenRouter API'
-      );
-    });
-  });
-
-  describe('queryLLMWithRetries', () => {
-    it('should retry on retryable errors', async () => {
-      // First call fails with server error
-      // Second call succeeds
-      (global.fetch as jest.Mock)
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: false,
-            status: 500,
-            statusText: 'Internal Server Error',
-            json: () => Promise.resolve({ error: 'Server error' }),
-          })
-        )
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                choices: [
-                  {
-                    message: { content: 'Success after retry' },
-                  },
-                ],
-              }),
-          })
-        );
-
-      const response = await queryLLMWithRetries(mockHistory, mockConfig);
-
-      expect(response).toBe('Success after retry');
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('should not retry on non-retryable errors (4xx)', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          statusText: 'Bad Request',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Bad request' },
-            }),
-        })
-      );
-
-      await expect(
-        queryLLMWithRetries(mockHistory, mockConfig)
-      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
-      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
-    });
-  });
-});
 ````
 
 ## File: src/core/mem-api/git-ops.ts
@@ -4309,709 +3561,145 @@ export const createLogger = (): Logger => createLoggerInternal();
 export const logger = createLogger();
 ````
 
-## File: tests/integration/workflow.test.ts
+## File: tests/e2e/mcp-protocol.test.ts
 ````typescript
 import {
   describe,
   it,
   expect,
-  beforeEach,
+  beforeAll,
   afterEach,
+  beforeEach,
 } from '@jest/globals';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import simpleGit from 'simple-git';
-import type { StatusUpdate } from '../../src/types';
 import {
   createTestHarness,
   cleanupTestHarness,
-  createMockLLMQueryWithSpy,
   type TestHarnessState,
 } from '../lib/test-harness';
-describe('Agent Workflow Integration Tests', () => {
+import {
+  spawnServer,
+  writeMCPRequest,
+  readMCPMessages,
+} from '../lib/test-util';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
+import type { ListToolsResult } from '../../src/types';
+import { execSync } from 'child_process';
+
+describe('MCP Protocol E2E Test', () => {
   let harness: TestHarnessState;
+  let serverProcess: ChildProcessWithoutNullStreams;
+
+  // Build the project once before running tests
+  beforeAll(() => {
+    console.log('Building server for E2E tests...');
+    try {
+      execSync('npm run build', { stdio: 'inherit' });
+    } catch (error) {
+      console.error('Build failed. Aborting tests.');
+      process.exit(1);
+    }
+  });
 
   beforeEach(async () => {
     harness = await createTestHarness();
   });
 
   afterEach(async () => {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
     await cleanupTestHarness(harness);
   });
 
-  describe('Complete Workflow Integration', () => {
-    it('should execute a complete project lifecycle', async () => {
-      const sessionId = 'project-lifecycle';
+  it('should initialize, list tools correctly, and shutdown', async () => {
+    // 1. Spawn server
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
 
-      // Phase 1: Initialize project
-      const initMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll initialize a new project with basic structure.</think>
-<typescript>
-// Create project structure
-await mem.writeFile('package.json', JSON.stringify({
-  name: 'test-project',
-  version: '1.0.0',
-  description: 'A test project',
-  scripts: { start: 'node index.js', test: 'jest' }
-}, null, 2));
-
-await mem.writeFile('README.md', '# Test Project\n\nThis is a comprehensive test project.');
-await mem.writeFile('index.js', 'console.log("Hello, World!");');
-await mem.createDir('src');
-await mem.writeFile('src/app.js', '// Application logic');
-</typescript>`,
-        `<think>Project initialized. Now commit the initial setup.</think>
-<typescript>
-await mem.commitChanges('feat: initialize project with basic structure');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
-      ]);
-
-      const initResult = await handleUserQuery(
-        'Initialize a new Node.js project',
-        harness.mockConfig,
-        sessionId,
-        initMockLLMQuery
-      );
-
-      expect(initResult).toContain('Project initialized successfully');
-
-      // Phase 2: Add features
-      const featureMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll add features to the existing project.</think>
-<typescript>
-// Add feature files
-await mem.writeFile('src/utils.js', '// Utility functions\nexports.formatDate = (date) => date.toISOString();');
-await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
-await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', '// Test utilities\nconst { formatDate } = require('../src/utils.js');');
-</typescript>`,
-        `<think>Features added. Commit the new functionality.</think>
-<typescript>
-await mem.commitChanges('feat: add utilities, config, and test structure');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
-      ]);
-
-      const featureResult = await handleUserQuery(
-        'Add utilities and configuration to the project',
-        harness.mockConfig,
-        sessionId,
-        featureMockLLMQuery
-      );
-
-      expect(featureResult).toContain('Added utility functions');
-
-      // Phase 3: Update existing files
-      const updateMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll update the main application to use the new utilities.</think>
-<typescript>
-// Update main file
-const indexContent = await mem.readFile('index.js');
-const updatedIndex = indexContent.replace(
-  'console.log("Hello, World!");',
-  'const { formatDate } = require("./src/utils.js");\nconsole.log("Current time:", formatDate(new Date()));'
-);
-await mem.updateFile('index.js', indexContent, updatedIndex);
-
-// Update README
-const readmeContent = await mem.readFile('README.md');
-const updatedReadme = readmeContent + '\n\n## Usage\n\nRun with: npm start';
-await mem.updateFile('README.md', readmeContent, updatedReadme);
-</typescript>`,
-        `<think>Main application updated. Commit the improvements.</think>
-<typescript>
-await mem.commitChanges('feat: integrate utilities and update documentation');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Updated the main application to use utilities and improved documentation.</reply>`,
-      ]);
-
-      const updateResult = await handleUserQuery(
-        'Update the main application to use the new utilities',
-        harness.mockConfig,
-        sessionId,
-        updateMockLLMQuery
-      );
-
-      expect(updateResult).toContain('Updated the main application');
-
-      // Verify complete project state
-      const mem = harness.mem;
-
-      // Check all expected files exist
-      const expectedFiles = [
-        'package.json',
-        'README.md',
-        'index.js',
-        'src/app.js',
-        'src/utils.js',
-        'src/config.js',
-        'tests/utils.test.js',
-      ];
-
-      for (const file of expectedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Verify file contents
-      const indexContent = await mem.readFile('index.js');
-      expect(indexContent).toContain('formatDate');
-      expect(indexContent).toContain('./src/utils.js');
-
-      const readmeContent = await mem.readFile('README.md');
-      expect(readmeContent).toContain('Usage');
-      expect(readmeContent).toContain('npm start');
-
-      // Verify git history shows all three commits
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(3);
-      expect(log.all[0].message).toBe(
-        'feat: integrate utilities and update documentation'
-      );
-      expect(log.all[1].message).toBe(
-        'feat: add utilities, config, and test structure'
-      );
-      expect(log.all[2].message).toBe(
-        'feat: initialize project with basic structure'
-      );
+    // 2. Send initialize request
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        processId: 1234,
+        clientInfo: { name: 'test-client', version: '0.1.0' },
+        capabilities: {},
+      },
     });
 
-    it('should handle complex file operations and git workflow', async () => {
-      const statusUpdates: StatusUpdate[] = [];
+    // 3. Await and verify initialize response
+    const initResponse = await messages.next();
+    expect(initResponse.done).toBe(false);
+    expect(initResponse.value.id).toBe(1);
+    expect(initResponse.value.result).toBeDefined();
+    expect((initResponse.value.result as any).serverInfo.name).toBe(
+      'recursa-server'
+    );
 
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      const complexMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
-<typescript>
-// Create multiple related files
-await mem.writeFile('docs/intro.md', '# Introduction\n\nProject introduction.');
-await mem.writeFile('docs/guide.md', '# User Guide\n\nDetailed user guide.');
-await mem.writeFile('docs/api.md', '# API Reference\n\nAPI documentation.');
-
-// Create a temporary file that will be renamed
-await mem.writeFile('docs/temp.md', '# Temporary\n\nThis will be renamed.');
-
-// Create a file that will be deleted
-await mem.writeFile('docs/obsolete.md', '# Obsolete\n\nThis will be deleted.');
-
-// List files to verify
-const docsFiles = await mem.listFiles('docs');
-console.log('Files created:', docsFiles);
-</typescript>`,
-        `<think>Now I'll perform file operations: rename and delete.</think>
-<typescript>
-// Rename temp.md to overview.md
-await mem.rename('docs/temp.md', 'docs/overview.md');
-
-// Delete the obsolete file
-await mem.deletePath('docs/obsolete.md');
-
-// Update the introduction to reference the overview
-const introContent = await mem.readFile('docs/intro.md');
-const updatedIntro = introContent + '\n\nSee also: [[Overview]] for a project overview.';
-await mem.updateFile('docs/intro.md', introContent, updatedIntro);
-
-// Verify git staged files
-const stagedFiles = await mem.getChangedFiles();
-console.log('Staged files:', stagedFiles);
-</typescript>`,
-        `<think>File operations complete. Now commit and verify git operations.</think>
-<typescript>
-await mem.commitChanges('feat: reorganize documentation structure');
-
-// Test git operations
-const gitDiff = await mem.gitDiff('docs/intro.md');
-const gitLog = await mem.gitLog('docs/', 5);
-
-console.log('Git diff for intro.md:', gitDiff);
-console.log('Git log for docs/:', gitLog);
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>
-Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Perform complex file operations with git workflow',
-        harness.mockConfig,
-        'complex-ops-session',
-        complexMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(result).toContain(
-        'Successfully performed complex file operations'
-      );
-
-      // Verify status updates were captured throughout the process
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
-
-      // Verify final file state
-      const mem = harness.mem;
-
-      // Files that should exist
-      const existingFiles = [
-        'docs/intro.md',
-        'docs/guide.md',
-        'docs/api.md',
-        'docs/overview.md',
-      ];
-      for (const file of existingFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Files that should not exist
-      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
-      for (const file of deletedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(false);
-      }
-
-      // Verify content was updated
-      const introContent = await mem.readFile('docs/intro.md');
-      expect(introContent).toContain('[[Overview]]');
-
-      // Verify git operations worked
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: reorganize documentation structure'
-      );
+    // 4. Send list_tools request
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'list_tools',
+      params: {},
     });
 
-    it('should handle error scenarios and recovery gracefully', async () => {
-      const statusUpdates: StatusUpdate[] = [];
+    // 5. Await and verify list_tools response
+    const listToolsResponse = await messages.next();
+    expect(listToolsResponse.done).toBe(false);
+    expect(listToolsResponse.value.id).toBe(2);
+    expect(listToolsResponse.value.result).toBeDefined();
 
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
+    const { tools } = listToolsResponse.value.result as ListToolsResult;
+    const processQueryTool = tools.find((t) => t.name === 'process_query');
 
-      const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll attempt various operations to test error handling and recovery.</think>
-<typescript>
-// This should fail - file doesn't exist
-try {
-  await mem.readFile('non-existent-config.json');
-} catch (error) {
-  console.log('Expected error caught:', error.message);
-}
-
-// This should also fail - invalid path traversal attempt
-try {
-  await mem.writeFile('../../../etc/malicious.txt', 'hack');
-} catch (error) {
-  console.log('Security error caught:', error.message);
-}
-
-// This should work - create the missing file
-await mem.writeFile('non-existent-config.json', JSON.stringify({
-  app: 'test',
-  version: '1.0.0'
-}, null, 2));
-</typescript>`,
-        `<think>Now I'll test additional error scenarios.</think>
-<typescript>
-// Try to update a file that doesn't exist
-try {
-  await mem.updateFile('missing.md', 'old content', 'new content');
-} catch (error) {
-  console.log('Update error caught:', error.message);
-  // Create the file instead
-  await mem.writeFile('missing.md', '# Created after error\n\nContent here.');
-}
-
-// Try to delete a file that doesn't exist
-try {
-  await mem.deletePath('already-deleted.md');
-} catch (error) {
-  console.log('Delete error caught:', error.message);
-}
-</typescript>`,
-        `<think>Error recovery completed. Now commit all successful operations.</think>
-<typescript>
-await mem.commitChanges('feat: demonstrate error handling and recovery');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>
-Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Test error handling and recovery scenarios',
-        harness.mockConfig,
-        'error-test-session',
-        errorRecoveryMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(result).toContain(
-        'Successfully demonstrated comprehensive error handling'
-      );
-
-      // Verify error status updates were captured
-      const errorUpdates = statusUpdates.filter((u) => u.type === 'error');
-      expect(errorUpdates.length).toBeGreaterThan(0);
-
-      // Verify files that should exist after recovery
-      const mem = harness.mem;
-      const configExists = await mem.fileExists('non-existent-config.json');
-      expect(configExists).toBe(true);
-
-      const missingExists = await mem.fileExists('missing.md');
-      expect(missingExists).toBe(true);
-
-      // Verify content
-      const configContent = await mem.readFile('non-existent-config.json');
-      expect(configContent).toContain('test');
-      expect(configContent).toContain('1.0.0');
-
-      const missingContent = await mem.readFile('missing.md');
-      expect(missingContent).toContain('Created after error');
-
-      // Verify git commit was successful despite errors
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
-        'feat: demonstrate error handling and recovery'
-      );
+    expect(processQueryTool).toBeDefined();
+    expect(processQueryTool?.description).toContain('agent loop');
+    expect(processQueryTool?.parameters).toEqual({
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The user query to process.' },
+        sessionId: {
+          type: 'string',
+          description: 'An optional session ID to maintain context.',
+        },
+        runId: {
+          type: 'string',
+          description:
+            'A unique ID for this execution run, used for notifications.',
+        },
+      },
+      required: ['query', 'runId'],
     });
-  });
+
+    // 6. Send shutdown request
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'shutdown',
+      params: {},
+    });
+
+    const shutdownResponse = await messages.next();
+    expect(shutdownResponse.done).toBe(false);
+    expect(shutdownResponse.value.id).toBe(3);
+
+    // 7. Send exit notification
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      method: 'exit',
+    });
+
+    // Wait for the process to exit gracefully
+    await new Promise<void>((resolve) => {
+      serverProcess.on('exit', (code) => {
+        expect(code).toBe(0);
+        resolve();
+      });
+    });
+  }, 20000); // Increase timeout for this test
 });
-````
-
-## File: tsconfig.json
-````json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "lib": ["ES2022"],
-    "moduleResolution": "bundler",
-    "rootDir": "src",
-    "outDir": "dist",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noPropertyAccessFromIndexSignature": false,
-    "resolveJsonModule": true,
-    "allowImportingTsExtensions": false,
-    "noEmit": false,
-    "types": ["node", "jest"]
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
-}
-````
-
-## File: src/core/mem-api/file-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import { resolveSecurePath, validatePathBounds } from './secure-path';
-import platform from '../../lib/platform.js';
-
-// Note: Each function here is a HOF that takes dependencies (like graphRoot)
-// and returns the actual function to be exposed on the mem API.
-
-/**
- * Cross-platform file operation utilities with enhanced error handling
- */
-
-/**
- * Atomic file write with temporary file and proper cleanup
- */
-const atomicWriteFile = async (filePath: string, content: string): Promise<void> => {
-  const tempPath = filePath + '.tmp.' + Math.random().toString(36).substr(2, 9);
-
-  try {
-    // Write to temporary file first
-    await fs.writeFile(tempPath, content, 'utf-8');
-
-    // On Windows, we need to handle file locking differently
-    if (platform.isWindows) {
-      // Try to rename, if it fails due to locking, wait and retry
-      let retries = 3;
-      let lastError: Error | null = null;
-
-      while (retries > 0) {
-        try {
-          await fs.rename(tempPath, filePath);
-          return; // Success
-        } catch (error: unknown) {
-          lastError = error as Error;
-          if (hasErrorCode(error) && (error.code === 'EBUSY' || error.code === 'EPERM')) {
-            retries--;
-            await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
-            continue;
-          }
-          throw error; // Re-throw non-locking errors
-        }
-      }
-      throw lastError;
-    } else {
-      // Unix-like systems can usually rename directly
-      await fs.rename(tempPath, filePath);
-    }
-  } catch (error) {
-    // Clean up temp file if something went wrong
-    try {
-      await fs.unlink(tempPath);
-    } catch {
-      // Ignore cleanup errors
-    }
-    throw error;
-  }
-};
-
-/**
- * Type guard to check if error has a code property
- */
-const hasErrorCode = (error: unknown): error is Error & { code?: string } => {
-  return error instanceof Error && 'code' in error;
-};
-
-/**
- * Enhanced error handler for file operations
- */
-const handleFileError = (error: unknown, operation: string, filePath: string): Error => {
-  const nodeError = error as NodeJS.ErrnoException;
-
-  // Handle platform-specific errors
-  if (nodeError.code === 'EACCES' || nodeError.code === 'EPERM') {
-    if (platform.isWindows) {
-      return new Error(`Permission denied for ${operation} on ${filePath}. The file may be in use or you may need administrator privileges.`);
-    }
-    if (platform.isTermux) {
-      return new Error(`Permission denied for ${operation} on ${filePath}. Check Termux storage permissions.`);
-    }
-    return new Error(`Permission denied for ${operation} on ${filePath}. Check file permissions.`);
-  }
-
-  if (nodeError.code === 'EMFILE' || nodeError.code === 'ENFILE') {
-    return new Error(`Too many files open for ${operation} on ${filePath}. Close some files and try again.`);
-  }
-
-  if (nodeError.code === 'ENOSPC') {
-    return new Error(`No space left on device for ${operation} on ${filePath}.`);
-  }
-
-  if (nodeError.code === 'EROFS') {
-    return new Error(`Read-only file system: Cannot perform ${operation} on ${filePath}.`);
-  }
-
-  if (nodeError.code === 'EBUSY') {
-    return new Error(`Resource busy: Cannot perform ${operation} on ${filePath} as it is in use.`);
-  }
-
-  return new Error(`Failed to ${operation.toLowerCase()} ${filePath}: ${nodeError.message}`);
-};
-
-/**
- * Ensure parent directories exist with proper error handling
- */
-const ensureParentDirectories = async (filePath: string): Promise<void> => {
-  const dir = path.dirname(filePath);
-
-  try {
-    await fs.mkdir(dir, { recursive: true });
-  } catch (error: unknown) {
-    if (hasErrorCode(error) && error.code !== 'EEXIST') {
-      throw handleFileError(error, 'create parent directories', dir);
-    }
-  }
-};
-
-export const readFile =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation for symlink safety
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      return await fs.readFile(fullPath, 'utf-8');
-    } catch (error) {
-      throw handleFileError(error, 'read file', filePath);
-    }
-  };
-
-export const writeFile =
-  (graphRoot: string) =>
-  async (filePath: string, content: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      // Ensure parent directories exist
-      await ensureParentDirectories(fullPath);
-
-      // Use atomic write for data safety
-      await atomicWriteFile(fullPath, content);
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'write file', filePath);
-    }
-  };
-
-export const updateFile =
-  (graphRoot: string) =>
-  async (
-    filePath: string,
-    oldContent: string,
-    newContent: string
-  ): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      // Atomically read and compare the file content.
-      const currentContent = await fs.readFile(fullPath, 'utf-8');
-
-      // This is a Compare-and-Swap (CAS) operation.
-      // If the content on disk is not what the agent *thinks* it is,
-      // another process (or agent turn) has modified it. We must abort.
-      if (currentContent !== oldContent) {
-        throw new Error(
-          `File content has changed since it was last read for ${filePath}. Update aborted to prevent data loss.`
-        );
-      }
-
-      // Write the new content back using atomic write.
-      await atomicWriteFile(fullPath, newContent);
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'update file', filePath);
-    }
-  };
-
-export const deletePath =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      await fs.rm(fullPath, { recursive: true, force: true });
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'delete path', filePath);
-    }
-  };
-
-export const rename =
-  (graphRoot: string) =>
-  async (oldPath: string, newPath: string): Promise<boolean> => {
-    const fullOldPath = resolveSecurePath(graphRoot, oldPath);
-    const fullNewPath = resolveSecurePath(graphRoot, newPath);
-
-    try {
-      // Additional validation for both paths
-      if (!validatePathBounds(graphRoot, fullOldPath, { followSymlinks: false }) ||
-          !validatePathBounds(graphRoot, fullNewPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for rename operation`);
-      }
-
-      // Ensure parent directory of new path exists
-      await ensureParentDirectories(fullNewPath);
-
-      await fs.rename(fullOldPath, fullNewPath);
-      return true;
-    } catch (error) {
-      throw handleFileError(error, `rename ${oldPath} to ${newPath}`, oldPath);
-    }
-  };
-
-export const fileExists =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
-        return false; // Treat security violations as non-existent
-      }
-
-      await fs.access(fullPath);
-      return true;
-    } catch (error: unknown) {
-      if (hasErrorCode(error) && error.code === 'ENOENT') {
-        return false;
-      }
-      throw handleFileError(error, 'check file existence', filePath);
-    }
-  };
-
-export const createDir =
-  (graphRoot: string) =>
-  async (directoryPath: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, directoryPath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${directoryPath}`);
-      }
-
-      await fs.mkdir(fullPath, { recursive: true });
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'create directory', directoryPath);
-    }
-  };
-
-export const listFiles =
-  (graphRoot: string) =>
-  async (directoryPath?: string): Promise<string[]> => {
-    const targetDir = directoryPath ? directoryPath : '.';
-    const fullPath = resolveSecurePath(graphRoot, targetDir);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
-        throw new Error(`Security violation: Path validation failed for directory ${directoryPath || 'root'}`);
-      }
-
-      const entries = await fs.readdir(fullPath, { withFileTypes: true });
-      return entries.map((entry) => entry.name).sort(); // Sort for consistent ordering
-    } catch (error) {
-      throw handleFileError(error, `list files in directory`, directoryPath || 'root');
-    }
-  };
 ````
 
 ## File: src/core/mem-api/state-ops.ts
@@ -5318,6 +4006,884 @@ export type MemAPI = {
 };
 ````
 
+## File: tests/integration/workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import { handleUserQuery } from '../../src/core/loop';
+import { createMemAPI } from '../../src/core/mem-api';
+import simpleGit from 'simple-git';
+import type { StatusUpdate } from '../../src/types';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockLLMQueryWithSpy,
+  type TestHarnessState,
+} from '../lib/test-harness';
+describe('Agent Workflow Integration Tests', () => {
+  let harness: TestHarnessState;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  describe('Complete Workflow Integration', () => {
+    it('should execute a complete project lifecycle', async () => {
+      const sessionId = 'project-lifecycle';
+
+      // Phase 1: Initialize project
+      const initMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll initialize a new project with basic structure.</think>
+<typescript>
+// Create project structure
+await mem.writeFile('package.json', JSON.stringify({
+  name: 'test-project',
+  version: '1.0.0',
+  description: 'A test project',
+  scripts: { start: 'node index.js', test: 'jest' }
+}, null, 2));
+
+await mem.writeFile('README.md', '# Test Project\\n\\nThis is a comprehensive test project.');
+await mem.writeFile('index.js', 'console.log(\\"Hello, World!\\");');
+await mem.createDir('src');
+await mem.writeFile('src/app.js', '// Application logic');
+</typescript>`,
+        `<think>Project initialized. Now commit the initial setup.</think>
+<typescript>
+await mem.commitChanges('feat: initialize project with basic structure');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
+      ]);
+
+      const initResult = await handleUserQuery(
+        'Initialize a new Node.js project',
+        harness.mockConfig,
+        sessionId,
+        initMockLLMQuery
+      );
+
+      expect(initResult).toContain('Project initialized successfully');
+
+      // Phase 2: Add features
+      const featureMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll add features to the existing project.</think>
+<typescript>
+// Add feature files
+await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
+await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
+await mem.createDir('tests');
+await mem.writeFile('tests/utils.test.js', '// Test utilities\\nconst { formatDate } = require(\\\'../src/utils.js\\\');');
+</typescript>`,
+        `<think>Features added. Commit the new functionality.</think>
+<typescript>
+await mem.commitChanges('feat: add utilities, config, and test structure');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
+      ]);
+
+      const featureResult = await handleUserQuery(
+        'Add utilities and configuration to the project',
+        harness.mockConfig,
+        sessionId,
+        featureMockLLMQuery
+      );
+
+      expect(featureResult).toContain('Added utility functions');
+
+      // Phase 3: Update existing files
+      const updateMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll update the main application to use the new utilities.</think>
+<typescript>
+// Update main file
+const indexContent = await mem.readFile('index.js');
+const updatedIndex = indexContent.replace(
+  'console.log(\\"Hello, World!\\");',
+  'const { formatDate } = require(\\"./src/utils.js\\");\\nconsole.log(\\"Current time:\\", formatDate(new Date()));'
+);
+await mem.updateFile('index.js', indexContent, updatedIndex);
+
+// Update README
+const readmeContent = await mem.readFile('README.md');
+const updatedReadme = readmeContent + '\\n\\n## Usage\\n\\nRun with: npm start';
+await mem.updateFile('README.md', readmeContent, updatedReadme);
+</typescript>`,
+        `<think>Main application updated. Commit the improvements.</think>
+<typescript>
+await mem.commitChanges('feat: integrate utilities and update documentation');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Updated the main application to use utilities and improved documentation.</reply>`,
+      ]);
+
+      const updateResult = await handleUserQuery(
+        'Update the main application to use the new utilities',
+        harness.mockConfig,
+        sessionId,
+        updateMockLLMQuery
+      );
+
+      expect(updateResult).toContain('Updated the main application');
+
+      // Verify complete project state
+      const mem = harness.mem;
+
+      // Check all expected files exist
+      const expectedFiles = [
+        'package.json',
+        'README.md',
+        'index.js',
+        'src/app.js',
+        'src/utils.js',
+        'src/config.js',
+        'tests/utils.test.js',
+      ];
+
+      for (const file of expectedFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(true);
+      }
+
+      // Verify file contents
+      const indexContent = await mem.readFile('index.js');
+      expect(indexContent).toContain('formatDate');
+      expect(indexContent).toContain('./src/utils.js');
+
+      const readmeContent = await mem.readFile('README.md');
+      expect(readmeContent).toContain('Usage');
+      expect(readmeContent).toContain('npm start');
+
+      // Verify git history shows all three commits (plus initial .gitignore commit)
+      const log = await harness.git.log();
+      expect(log.all.length).toBe(4);
+      expect(log.all[0]?.message).toBe(
+        'feat: integrate utilities and update documentation'
+      );
+      expect(log.all[1]?.message).toBe(
+        'feat: add utilities, config, and test structure'
+      );
+      expect(log.all[2]?.message).toBe(
+        'feat: initialize project with basic structure'
+      );
+    });
+
+    it('should handle complex file operations and git workflow', async () => {
+      const statusUpdates: StatusUpdate[] = [];
+
+      const captureStatusUpdate = (update: StatusUpdate) => {
+        statusUpdates.push(update);
+      };
+
+      const complexMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
+<typescript>
+// Create multiple related files
+await mem.writeFile('docs/intro.md', '# Introduction\\n\\nProject introduction.');
+await mem.writeFile('docs/guide.md', '# User Guide\\n\\nDetailed user guide.');
+await mem.writeFile('docs/api.md', '# API Reference\\n\\nAPI documentation.');
+
+// Create a temporary file that will be renamed
+await mem.writeFile('docs/temp.md', '# Temporary\\n\\nThis will be renamed.');
+
+// Create a file that will be deleted
+await mem.writeFile('docs/obsolete.md', '# Obsolete\\n\\nThis will be deleted.');
+
+// List files to verify
+const docsFiles = await mem.listFiles('docs');
+console.log('Files created:', docsFiles);
+</typescript>`,
+        `<think>Now I'll perform file operations: rename and delete.</think>
+<typescript>
+// Rename temp.md to overview.md
+await mem.rename('docs/temp.md', 'docs/overview.md');
+
+// Delete the obsolete file
+await mem.deletePath('docs/obsolete.md');
+
+// Update the introduction to reference the overview
+const introContent = await mem.readFile('docs/intro.md');
+const updatedIntro = introContent + '\\n\\nSee also: [[Overview]] for a project overview.';
+await mem.updateFile('docs/intro.md', introContent, updatedIntro);
+
+// Verify git staged files
+const stagedFiles = await mem.getChangedFiles();
+console.log('Staged files:', stagedFiles);
+</typescript>`,
+        `<think>File operations complete. Now commit and verify git operations.</think>
+<typescript>
+await mem.commitChanges('feat: reorganize documentation structure');
+
+// Test git operations
+const gitDiff = await mem.gitDiff('docs/intro.md');
+const gitLog = await mem.gitLog('docs/', 5);
+
+console.log('Git diff for intro.md:', gitDiff);
+console.log('Git log for docs/:', gitLog);
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>
+Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
+</reply>`,
+      ]);
+
+      const result = await handleUserQuery(
+        'Perform complex file operations with git workflow',
+        harness.mockConfig,
+        'complex-ops-session',
+        complexMockLLMQuery,
+        captureStatusUpdate
+      );
+
+      expect(result).toContain(
+        'Successfully performed complex file operations'
+      );
+
+      // Verify status updates were captured throughout the process
+      expect(statusUpdates.length).toBeGreaterThan(0);
+      const types = new Set(statusUpdates.map((u) => u.type));
+      expect(types.has('think')).toBe(true);
+      expect(types.has('act')).toBe(true);
+
+      // Verify final file state
+      const mem = harness.mem;
+
+      // Files that should exist
+      const existingFiles = [
+        'docs/intro.md',
+        'docs/guide.md',
+        'docs/api.md',
+        'docs/overview.md',
+      ];
+      for (const file of existingFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(true);
+      }
+
+      // Files that should not exist
+      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
+      for (const file of deletedFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(false);
+      }
+
+      // Verify content was updated
+      const introContent = await mem.readFile('docs/intro.md');
+      expect(introContent).toContain('[[Overview]]');
+
+      // Verify git operations worked (plus initial .gitignore commit)
+      const log = await harness.git.log();
+      expect(log.all.length).toBe(2);
+      expect(log.all[0]?.message).toBe(
+        'feat: reorganize documentation structure'
+      );
+    });
+
+    it('should handle error scenarios and recovery gracefully', async () => {
+      const statusUpdates: StatusUpdate[] = [];
+
+      const captureStatusUpdate = (update: StatusUpdate) => {
+        statusUpdates.push(update);
+      };
+
+      const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll attempt various operations to test error handling and recovery.</think>
+<typescript>
+// This should fail - file doesn't exist
+try {
+  await mem.readFile('non-existent-config.json');
+} catch (error) {
+  console.log('Expected error caught:', error.message);
+}
+
+// This should also fail - invalid path traversal attempt
+try {
+  await mem.writeFile('../../../etc/malicious.txt', 'hack');
+} catch (error) {
+  console.log('Security error caught:', error.message);
+}
+
+// This should work - create the missing file
+await mem.writeFile('non-existent-config.json', '{"app": "test", "version": "1.0.0"}');
+</typescript>`,
+        `<think>Now I'll test additional error scenarios.</think>
+<typescript>
+// Try to update a file that doesn't exist
+try {
+  await mem.updateFile('missing.md', 'old content', 'new content');
+} catch (error) {
+  console.log('Update error caught:', error.message);
+  // Create the file instead
+  await mem.writeFile('missing.md', '# Created after error\\n\\nContent here.');
+}
+
+// Try to delete a file that doesn't exist
+try {
+  await mem.deletePath('already-deleted.md');
+} catch (error) {
+  console.log('Delete error caught:', error.message);
+}
+</typescript>`,
+        `<think>Error recovery completed. Now commit all successful operations.</think>
+<typescript>
+await mem.commitChanges('feat: demonstrate error handling and recovery');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>
+Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
+</reply>`,
+      ]);
+
+      const result = await handleUserQuery(
+        'Test error handling and recovery scenarios',
+        harness.mockConfig,
+        'error-test-session',
+        errorRecoveryMockLLMQuery,
+        captureStatusUpdate
+      );
+
+      expect(result).toContain(
+        'Successfully demonstrated comprehensive error handling'
+      );
+
+      // Verify status updates were captured (should include think and act updates)
+      expect(statusUpdates.length).toBeGreaterThan(0);
+      const types = new Set(statusUpdates.map((u) => u.type));
+      expect(types.has('think')).toBe(true);
+      expect(types.has('act')).toBe(true);
+
+      // Verify files that should exist after recovery
+      const mem = harness.mem;
+      const configExists = await mem.fileExists('non-existent-config.json');
+      expect(configExists).toBe(true);
+
+      const missingExists = await mem.fileExists('missing.md');
+      expect(missingExists).toBe(true);
+
+      // Verify content
+      const configContent = await mem.readFile('non-existent-config.json');
+      expect(configContent).toContain('test');
+      expect(configContent).toContain('1.0.0');
+
+      const missingContent = await mem.readFile('missing.md');
+      expect(missingContent).toContain('Created after error');
+
+      // Verify git commit was successful despite errors (plus initial .gitignore commit)
+      const log = await harness.git.log();
+      expect(log.all.length).toBe(2);
+      expect(log.all[0]?.message).toBe(
+        'feat: demonstrate error handling and recovery'
+      );
+    });
+  });
+});
+````
+
+## File: tests/lib/test-harness.ts
+````typescript
+import { jest } from '@jest/globals';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import simpleGit, { type SimpleGit } from 'simple-git';
+import { createMemAPI } from '../../src/core/mem-api';
+import type { AppConfig } from '../../src/config';
+import type { MemAPI } from '../../src/types';
+import type { ChatMessage } from '../../src/types';
+
+/**
+ * Test harness options for customizing the test environment
+ */
+export interface TestHarnessOptions {
+  /** Custom git user name, defaults to 'Test User' */
+  gitUserName?: string;
+  /** Custom git user email, defaults to 'test@example.com' */
+  gitEmail?: string;
+  /** Custom temp directory prefix, defaults to 'recursa-test-' */
+  tempPrefix?: string;
+  /** Custom OpenRouter API key, defaults to 'test-api-key' */
+  apiKey?: string;
+  /** Custom LLM model, defaults to 'test-model' */
+  model?: string;
+  /** Whether to initialize with a .gitignore file, defaults to true */
+  withGitignore?: boolean;
+}
+
+/**
+ * Test harness state containing all the test environment resources
+ */
+export interface TestHarnessState {
+  readonly tempDir: string;
+  readonly mockConfig: AppConfig;
+  readonly mem: MemAPI;
+  readonly git: SimpleGit;
+}
+
+/**
+ * Creates a test harness with isolated temporary environment
+ * @param options - Configuration options for the test harness
+ * @returns Promise resolving to TestHarnessState with temp directory, config, and utilities
+ */
+export const createTestHarness = async (
+  options: TestHarnessOptions = {}
+): Promise<TestHarnessState> => {
+  const {
+    gitUserName = 'Test User',
+    gitEmail = 'test@example.com',
+    tempPrefix = 'recursa-test-',
+    apiKey = 'test-api-key',
+    model = 'test-model',
+    withGitignore = true,
+  } = options;
+
+  // Create temporary directory
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), tempPrefix));
+
+  // Create mock configuration
+  const mockConfig: AppConfig = {
+    knowledgeGraphPath: tempDir,
+    openRouterApiKey: apiKey,
+    llmModel: model,
+    llmTemperature: 0.7,
+    llmMaxTokens: 4000,
+    sandboxTimeout: 10000,
+    sandboxMemoryLimit: 100,
+    gitUserName: gitUserName,
+    gitUserEmail: gitEmail,
+  };
+
+  // Initialize git repository
+  const git = simpleGit(tempDir);
+  await git.init();
+  await git.addConfig('user.name', gitUserName);
+  await git.addConfig('user.email', gitEmail);
+
+  // Optionally create .gitignore file
+  if (withGitignore) {
+    await fs.writeFile(
+      path.join(tempDir, '.gitignore'),
+      '*.log\nnode_modules/\n.env\n.DS_Store'
+    );
+    await git.add('.gitignore');
+    await git.commit('Initial commit with .gitignore');
+  }
+
+  // Create MemAPI instance
+  const mem = createMemAPI(mockConfig);
+
+  return {
+    tempDir,
+    mockConfig,
+    mem,
+    git,
+  };
+};
+
+/**
+ * Cleans up a test harness by removing the temporary directory
+ * @param harness - The test harness state to clean up
+ */
+export const cleanupTestHarness = async (
+  harness: TestHarnessState
+): Promise<void> => {
+  await fs.rm(harness.tempDir, { recursive: true, force: true });
+};
+
+/**
+ * Resets the test harness environment (clears directory, re-inits git)
+ * @param harness - The test harness state to reset
+ * @param options - Options for reset operation
+ */
+export const resetTestHarness = async (
+  harness: TestHarnessState,
+  options: { withGitignore?: boolean } = {}
+): Promise<void> => {
+  const { withGitignore = true } = options;
+
+  // Clear the directory
+  await fs.rm(harness.tempDir, { recursive: true, force: true });
+  await fs.mkdir(harness.tempDir, { recursive: true });
+
+  // Re-initialize git
+  await harness.git.init();
+
+  // Optionally recreate .gitignore
+  if (withGitignore) {
+    await fs.writeFile(
+      path.join(harness.tempDir, '.gitignore'),
+      '*.log\nnode_modules/\n.env\n.DS_Store'
+    );
+    await harness.git.add('.gitignore');
+    await harness.git.commit('Initial commit with .gitignore');
+  }
+};
+
+/**
+ * Higher-order function that wraps a test function with test harness setup/teardown
+ * @param testFn - The test function to execute with the harness
+ * @param options - Test harness options
+ * @returns A test function that handles setup/teardown automatically
+ */
+export const withTestHarness = <T>(
+  testFn: (harness: TestHarnessState) => Promise<T>,
+  options: TestHarnessOptions = {}
+) => {
+  return async (): Promise<T> => {
+    const harness = await createTestHarness(options);
+
+    try {
+      return await testFn(harness);
+    } finally {
+      await cleanupTestHarness(harness);
+    }
+  };
+};
+
+/**
+ * Creates multiple test harnesses for parallel testing
+ * @param count - Number of harnesses to create
+ * @param options - Configuration options for each harness
+ * @returns Array of TestHarnessState instances
+ */
+export const createMultipleTestHarnesses = async (
+  count: number,
+  options: TestHarnessOptions = {}
+): Promise<TestHarnessState[]> => {
+  const harnesses: TestHarnessState[] = [];
+
+  try {
+    for (let i = 0; i < count; i++) {
+      const harness = await createTestHarness({
+        ...options,
+        tempPrefix: `${options.tempPrefix || 'recursa-test-'}parallel-${i}-`,
+      });
+      harnesses.push(harness);
+    }
+
+    return harnesses;
+  } catch (error) {
+    // Cleanup any created harnesses if an error occurs
+    await Promise.all(harnesses.map(cleanupTestHarness));
+    throw error;
+  }
+};
+
+/**
+ * Utility function to create test files with common patterns
+ * @param harness - Test harness state
+ * @param files - Object mapping file paths to contents
+ */
+export const createTestFiles = async (
+  harness: TestHarnessState,
+  files: Record<string, string>
+): Promise<void> => {
+  const promises = Object.entries(files).map(async ([filePath, content]) => {
+    await harness.mem.writeFile(filePath, content);
+  });
+
+  await Promise.all(promises);
+};
+
+/**
+ * Utility function to verify files exist and have expected content
+ * @param harness - Test harness state
+ * @param expectedFiles - Object mapping file paths to expected content (partial or full)
+ */
+export const verifyTestFiles = async (
+  harness: TestHarnessState,
+  expectedFiles: Record<string, string>
+): Promise<void> => {
+  const promises = Object.entries(expectedFiles).map(
+    async ([filePath, expectedContent]) => {
+      const exists = await harness.mem.fileExists(filePath);
+      if (!exists) {
+        throw new Error(`Expected file ${filePath} does not exist`);
+      }
+
+      const actualContent = await harness.mem.readFile(filePath);
+      if (!actualContent.includes(expectedContent)) {
+        throw new Error(
+          `File ${filePath} does not contain expected content: "${expectedContent}"`
+        );
+      }
+    }
+  );
+
+  await Promise.all(promises);
+};
+
+/**
+ * Creates a mock LLM query function for testing purposes.
+ * This replaces the duplicate Mock LLM utilities found across different test files.
+ *
+ * @param responses - Array of predefined responses to return in sequence
+ * @returns A mock function that simulates LLM responses
+ */
+export const createMockQueryLLM = (
+  responses: string[]
+): ((history: ChatMessage[], config: AppConfig) => Promise<string>) => {
+  let callCount = 0;
+  return async (
+    _history: ChatMessage[],
+    _config: AppConfig,
+  ): Promise<string> => {
+    // Return the next pre-canned XML response from the `responses` array.
+    const response = responses[callCount];
+    if (!response) {
+      throw new Error(
+        `Mock LLM called more times than expected (${callCount}).`
+      );
+    }
+    callCount++;
+    return response;
+  };
+};
+
+/**
+ * Creates a mock LLM query function using Bun's mock for testing with spies.
+ * This is useful when you need to track call counts, arguments, etc.
+ *
+ * @param responses - Array of predefined responses to return in sequence
+ * @returns A Bun mock function that simulates LLM responses
+ */
+export const createMockLLMQueryWithSpy = (responses: string[]) => {
+  let callCount = 0;
+  return jest.fn(
+    async (_history: ChatMessage[], _config: AppConfig): Promise<string> => {
+      const response = responses[callCount] || responses[responses.length - 1];
+      callCount++;
+      return response as string;
+    }
+  );
+};
+
+/**
+ * Default mock configuration for tests
+ */
+export const createMockConfig = (
+  overrides: Partial<AppConfig> = {}
+): AppConfig => ({
+  openRouterApiKey: 'test-api-key',
+  knowledgeGraphPath: '/test/path',
+  llmModel: 'anthropic/claude-3-haiku-20240307',
+  llmTemperature: 0.7,
+  llmMaxTokens: 4000,
+  sandboxTimeout: 10000,
+  sandboxMemoryLimit: 100,
+  gitUserName: 'Test User',
+  gitUserEmail: 'test@example.com',
+  ...overrides,
+});
+
+/**
+ * Default mock chat history for tests
+ */
+export const createMockHistory = (
+  customMessages: Partial<ChatMessage>[] = []
+): ChatMessage[] => [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'Hello, world!' },
+  ...customMessages.map(
+    (msg) =>
+      ({
+        role: msg.role || 'user',
+        content: msg.content || '',
+      }) as ChatMessage
+  ),
+];
+````
+
+## File: tests/unit/llm.test.ts
+````typescript
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
+import type { AppConfig } from '../../src/config';
+import type { ChatMessage } from '../../src/types';
+
+// Mock fetch globally
+const mockFetch = jest.fn().mockImplementation(() =>
+  Promise.resolve({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        choices: [
+          {
+            message: {
+              content: 'Test response from LLM',
+            },
+          },
+        ],
+      }),
+    status: 200,
+    statusText: 'OK',
+  })
+);
+(global as any).fetch = mockFetch;
+
+const mockConfig: AppConfig = {
+  openRouterApiKey: 'test-api-key',
+  knowledgeGraphPath: '/test/path',
+  llmModel: 'anthropic/claude-3-haiku-20240307',
+  llmTemperature: 0.7,
+  llmMaxTokens: 4000,
+  sandboxTimeout: 10000,
+  sandboxMemoryLimit: 100,
+  gitUserName: 'Test User',
+  gitUserEmail: 'test@example.com',
+};
+
+const mockHistory: ChatMessage[] = [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'Hello, world!' },
+];
+
+beforeEach(() => {
+  (global.fetch as jest.Mock).mockClear();
+});
+
+describe('LLM Module', () => {
+  describe('queryLLM', () => {
+    it('should make a successful request to OpenRouter API', async () => {
+      const response = await queryLLM(mockHistory, mockConfig);
+
+      expect(response).toBe('Test response from LLM');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
+            'X-Title': 'Recursa',
+          },
+          body: JSON.stringify({
+            model: 'anthropic/claude-3-haiku-20240307',
+            messages: mockHistory,
+            temperature: 0.7,
+            max_tokens: 4000,
+          }),
+        })
+      );
+    });
+
+    it('should handle API errors properly', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 401,
+          statusText: 'Unauthorized',
+          json: () =>
+            Promise.resolve({
+              error: { message: 'Invalid API key' },
+            }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'OpenRouter API error: 401 Unauthorized'
+      );
+    });
+
+    it('should handle malformed API responses', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ invalid: 'response' }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'Invalid response format from OpenRouter API'
+      );
+    });
+
+    it('should handle empty content in response', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              choices: [
+                {
+                  message: { content: '' },
+                },
+              ],
+            }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'Empty content received from OpenRouter API'
+      );
+    });
+  });
+
+  describe('queryLLMWithRetries', () => {
+    it('should retry on retryable errors', async () => {
+      // First call fails with server error
+      // Second call succeeds
+      (global.fetch as jest.Mock)
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            json: () => Promise.resolve({ error: 'Server error' }),
+          })
+        )
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                choices: [
+                  {
+                    message: { content: 'Success after retry' },
+                  },
+                ],
+              }),
+          })
+        );
+
+      const response = await queryLLMWithRetries(mockHistory, mockConfig);
+
+      expect(response).toBe('Success after retry');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not retry on non-retryable errors (4xx)', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          json: () =>
+            Promise.resolve({
+              error: { message: 'Bad request' },
+            }),
+        })
+      );
+
+      await expect(
+        queryLLMWithRetries(mockHistory, mockConfig)
+      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
+      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
+    });
+  });
+});
+````
+
 ## File: .env.example
 ````
 # Recursa MCP Server Configuration
@@ -5352,6 +4918,36 @@ GIT_USER_EMAIL=recursa@local
 # 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
 # 4. Source the file: source .env
 # 5. Run the server: npm start
+````
+
+## File: tsconfig.json
+````json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "moduleResolution": "node",
+    "rootDir": "src",
+    "outDir": "dist",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
+    "noEmit": false,
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
 ````
 
 ## File: src/config.ts
@@ -5551,99 +5147,298 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
 };
 ````
 
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/cli.js",
-    "build": "node node_modules/typescript/lib/tsc.js",
-    "dev": "node node_modules/ts-node/dist/bin.js src/cli.ts",
-    "test": "node node_modules/jest/bin/jest.js",
-    "lint": "node node_modules/eslint/bin/eslint.js 'src/**/*.ts'"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "dotenv": "^16.4.5",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@jest/globals": "^30.2.0",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^7.0.0",
-    "ts-jest": "^29.4.5",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "license": "MIT"
-}
-````
+## File: src/core/mem-api/file-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import { resolveSecurePath, validatePathBounds } from './secure-path';
+import platform from '../../lib/platform.js';
 
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
+// Note: Each function here is a HOF that takes dependencies (like graphRoot)
+// and returns the actual function to be exposed on the mem API.
+
+/**
+ * Cross-platform file operation utilities with enhanced error handling
+ */
+
+/**
+ * Atomic file write with temporary file and proper cleanup
+ */
+const atomicWriteFile = async (filePath: string, content: string): Promise<void> => {
+  const tempPath = filePath + '.tmp.' + Math.random().toString(36).substr(2, 9);
+
+  try {
+    // Write to temporary file first
+    await fs.writeFile(tempPath, content, 'utf-8');
+
+    // On Windows, we need to handle file locking differently
+    if (platform.isWindows) {
+      // Try to rename, if it fails due to locking, wait and retry
+      let retries = 3;
+      let lastError: Error | null = null;
+
+      while (retries > 0) {
+        try {
+          await fs.rename(tempPath, filePath);
+          return; // Success
+        } catch (error: unknown) {
+          lastError = error as Error;
+          if (hasErrorCode(error) && (error.code === 'EBUSY' || error.code === 'EPERM')) {
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+            continue;
+          }
+          throw error; // Re-throw non-locking errors
+        }
+      }
+      throw lastError;
+    } else {
+      // Unix-like systems can usually rename directly
+      await fs.rename(tempPath, filePath);
     }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt",
-   //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
+  } catch (error) {
+    // Clean up temp file if something went wrong
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // Ignore cleanup errors
+    }
+    throw error;
   }
-}
+};
+
+/**
+ * Type guard to check if error has a code property
+ */
+const hasErrorCode = (error: unknown): error is Error & { code?: string } => {
+  return error instanceof Error && 'code' in error;
+};
+
+/**
+ * Enhanced error handler for file operations
+ */
+const handleFileError = (error: unknown, operation: string, filePath: string): Error => {
+  const nodeError = error as NodeJS.ErrnoException;
+
+  // Handle platform-specific errors
+  if (nodeError.code === 'EACCES' || nodeError.code === 'EPERM') {
+    if (platform.isWindows) {
+      return new Error(`Permission denied for ${operation} on ${filePath}. The file may be in use or you may need administrator privileges.`);
+    }
+    if (platform.isTermux) {
+      return new Error(`Permission denied for ${operation} on ${filePath}. Check Termux storage permissions.`);
+    }
+    return new Error(`Permission denied for ${operation} on ${filePath}. Check file permissions.`);
+  }
+
+  if (nodeError.code === 'EMFILE' || nodeError.code === 'ENFILE') {
+    return new Error(`Too many files open for ${operation} on ${filePath}. Close some files and try again.`);
+  }
+
+  if (nodeError.code === 'ENOSPC') {
+    return new Error(`No space left on device for ${operation} on ${filePath}.`);
+  }
+
+  if (nodeError.code === 'EROFS') {
+    return new Error(`Read-only file system: Cannot perform ${operation} on ${filePath}.`);
+  }
+
+  if (nodeError.code === 'EBUSY') {
+    return new Error(`Resource busy: Cannot perform ${operation} on ${filePath} as it is in use.`);
+  }
+
+  return new Error(`Failed to ${operation.toLowerCase()} ${filePath}: ${nodeError.message}`);
+};
+
+/**
+ * Ensure parent directories exist with proper error handling
+ */
+const ensureParentDirectories = async (filePath: string): Promise<void> => {
+  const dir = path.dirname(filePath);
+
+  try {
+    await fs.mkdir(dir, { recursive: true });
+  } catch (error: unknown) {
+    if (hasErrorCode(error) && error.code !== 'EEXIST') {
+      throw handleFileError(error, 'create parent directories', dir);
+    }
+  }
+};
+
+export const readFile =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      // Additional validation for symlink safety
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
+        throw new Error(`Security violation: Path validation failed for ${filePath}`);
+      }
+
+      return await fs.readFile(fullPath, 'utf-8');
+    } catch (error) {
+      throw handleFileError(error, 'read file', filePath);
+    }
+  };
+
+export const writeFile =
+  (graphRoot: string) =>
+  async (filePath: string, content: string): Promise<boolean> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      // Additional validation - allow non-existent files for write operations
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false, requireExistence: false })) {
+        throw new Error(`Security violation: Path validation failed for ${filePath}`);
+      }
+
+      // Ensure parent directories exist
+      await ensureParentDirectories(fullPath);
+
+      // Use atomic write for data safety
+      await atomicWriteFile(fullPath, content);
+      return true;
+    } catch (error) {
+      throw handleFileError(error, 'write file', filePath);
+    }
+  };
+
+export const updateFile =
+  (graphRoot: string) =>
+  async (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ): Promise<boolean> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      // Additional validation
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
+        throw new Error(`Security violation: Path validation failed for ${filePath}`);
+      }
+
+      // Atomically read and compare the file content.
+      const currentContent = await fs.readFile(fullPath, 'utf-8');
+
+      // This is a Compare-and-Swap (CAS) operation.
+      // If the content on disk is not what the agent *thinks* it is,
+      // another process (or agent turn) has modified it. We must abort.
+      if (currentContent !== oldContent) {
+        throw new Error(
+          `File content has changed since it was last read for ${filePath}. Update aborted to prevent data loss.`
+        );
+      }
+
+      // Write the new content back using atomic write.
+      await atomicWriteFile(fullPath, newContent);
+      return true;
+    } catch (error) {
+      throw handleFileError(error, 'update file', filePath);
+    }
+  };
+
+export const deletePath =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<boolean> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      // Additional validation
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
+        throw new Error(`Security violation: Path validation failed for ${filePath}`);
+      }
+
+      await fs.rm(fullPath, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      throw handleFileError(error, 'delete path', filePath);
+    }
+  };
+
+export const rename =
+  (graphRoot: string) =>
+  async (oldPath: string, newPath: string): Promise<boolean> => {
+    const fullOldPath = resolveSecurePath(graphRoot, oldPath);
+    const fullNewPath = resolveSecurePath(graphRoot, newPath);
+
+    try {
+      // Additional validation for both paths
+      if (!validatePathBounds(graphRoot, fullOldPath, { followSymlinks: false }) ||
+          !validatePathBounds(graphRoot, fullNewPath, { followSymlinks: false })) {
+        throw new Error(`Security violation: Path validation failed for rename operation`);
+      }
+
+      // Ensure parent directory of new path exists
+      await ensureParentDirectories(fullNewPath);
+
+      await fs.rename(fullOldPath, fullNewPath);
+      return true;
+    } catch (error) {
+      throw handleFileError(error, `rename ${oldPath} to ${newPath}`, oldPath);
+    }
+  };
+
+export const fileExists =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<boolean> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+
+    try {
+      // Additional validation - don't throw for non-existent files in fileExists
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true, requireExistence: false })) {
+        return false; // Treat security violations as non-existent
+      }
+
+      await fs.access(fullPath);
+      return true;
+    } catch (error: unknown) {
+      // Check for ENOENT error more robustly
+      const errorCode = (error as any).code;
+      if (errorCode === 'ENOENT') {
+        return false;
+      }
+      throw handleFileError(error, 'check file existence', filePath);
+    }
+  };
+
+export const createDir =
+  (graphRoot: string) =>
+  async (directoryPath: string): Promise<boolean> => {
+    const fullPath = resolveSecurePath(graphRoot, directoryPath);
+
+    try {
+      // Additional validation
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
+        throw new Error(`Security violation: Path validation failed for ${directoryPath}`);
+      }
+
+      await fs.mkdir(fullPath, { recursive: true });
+      return true;
+    } catch (error) {
+      throw handleFileError(error, 'create directory', directoryPath);
+    }
+  };
+
+export const listFiles =
+  (graphRoot: string) =>
+  async (directoryPath?: string): Promise<string[]> => {
+    const targetDir = directoryPath ? directoryPath : '.';
+    const fullPath = resolveSecurePath(graphRoot, targetDir);
+
+    try {
+      // Additional validation
+      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
+        throw new Error(`Security violation: Path validation failed for directory ${directoryPath || 'root'}`);
+      }
+
+      const entries = await fs.readdir(fullPath, { withFileTypes: true });
+      return entries.map((entry) => entry.name).sort(); // Sort for consistent ordering
+    } catch (error) {
+      throw handleFileError(error, `list files in directory`, directoryPath || 'root');
+    }
+  };
 ````
 
 ## File: tasks.md
@@ -5721,6 +5516,112 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 - **job-id**:
 - **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
 - **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastmcp": "^1.21.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
+````
+
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
 ````
 
 ## File: src/core/mem-api/graph-ops.ts
@@ -5955,7 +5856,10 @@ export const handleUserQuery = async (
   config: AppConfig,
   sessionId?: string,
   // Allow overriding the LLM query function (with its retry logic) for testing purposes
-  queryLLM: typeof defaultQueryLLM = defaultQueryLLM,
+  queryLLM: ((
+    history: ChatMessage[],
+    config: AppConfig,
+  ) => Promise<string | unknown>) = defaultQueryLLM,
   // Optional callback for real-time status updates
   onStatusUpdate?: (update: StatusUpdate) => void
 ): Promise<string> => {
@@ -6124,7 +6028,7 @@ import {
   beforeEach,
 } from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
-import { type AppConfig, loadAndValidateConfig } from '../../src/config';
+import type { AppConfig } from '../../src/config';
 import {
   createTestHarness,
   cleanupTestHarness,
@@ -6136,8 +6040,19 @@ describe('Agent End-to-End Workflow', () => {
   let appConfig: AppConfig;
   let harness: TestHarnessState;
 
-  beforeAll(async () => {
-    appConfig = await loadAndValidateConfig();
+  beforeAll(() => {
+    // Create a mock config for E2E tests to avoid environment variable dependencies
+    appConfig = {
+      openRouterApiKey: 'test-api-key',
+      knowledgeGraphPath: '/tmp/test-knowledge-graph',
+      llmModel: 'test-model',
+      llmTemperature: 0.7,
+      llmMaxTokens: 4000,
+      sandboxTimeout: 10000,
+      sandboxMemoryLimit: 100,
+      gitUserName: 'Test User',
+      gitUserEmail: 'test@example.com',
+    };
   });
 
   beforeEach(async () => {
@@ -6162,9 +6077,9 @@ describe('Agent End-to-End Workflow', () => {
 const orgPath = 'AI Research Institute.md';
 const orgExists = await mem.fileExists(orgPath);
 if (!orgExists) {
-  await mem.writeFile(orgPath, '# AI Research Institute\ntype:: organization\n');
+  await mem.writeFile(orgPath, '# AI Research Institute\\ntype:: organization\\n');
 }
-await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]');
+await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\\ntype:: person\\naffiliation:: [[AI Research Institute]]\\nfield:: [[Symbolic Reasoning]]');
 </typescript>`;
     const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
 <typescript>
@@ -6213,191 +6128,6 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     );
   });
 });
-````
-
-## File: src/api/mcp.handler.ts
-````typescript
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  InitializeRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-import type { MemAPI } from '../types/mem.js';
-import type { MCPTool, MCPResource } from '../types/mcp.js';
-import type { AppConfig } from '../config.js';
-import type { handleUserQuery } from '../core/loop.js';
-import type { StatusUpdate } from '../types/loop.js';
-import type { Emitter } from '../lib/events.js';
-
-export const createMCPHandler = (
-  memApi: MemAPI,
-  knowledgeGraphPath: string,
-  config: AppConfig,
-  handleQuery: typeof handleUserQuery,
-  emitter: Emitter<Record<string, StatusUpdate>>
-) => {
-  const server = new Server(
-    {
-      name: 'recursa-server',
-      version: '0.1.0',
-    },
-    {
-      capabilities: {
-        tools: {
-          listChanged: true,
-        },
-        resources: {
-          listChanged: true,
-        },
-      },
-    }
-  );
-
-  const tools: MCPTool[] = [
-    {
-      name: 'process_query',
-      description:
-        'Processes a high-level user query by running the agent loop.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'The user query to process.',
-          },
-          sessionId: {
-            type: 'string',
-            description: 'An optional session ID to maintain context.',
-          },
-          runId: {
-            type: 'string',
-            description:
-              'A unique ID for this execution run, used for notifications.',
-          },
-        },
-        required: ['query', 'runId'],
-      },
-    },
-  ];
-
-  const resources: MCPResource[] = [
-    {
-      uri: `file://${knowledgeGraphPath}`,
-      name: 'Knowledge Graph Root',
-      mimeType: 'text/directory',
-      description: 'Root directory of the knowledge graph',
-    },
-  ];
-
-  server.setRequestHandler(InitializeRequestSchema, async (_request) => {
-    return {
-      protocolVersion: '2024-11-05',
-      capabilities: {
-        tools: {
-          listChanged: true,
-        },
-        resources: {
-          listChanged: true,
-        },
-      },
-      serverInfo: {
-        name: 'recursa-server',
-        version: '0.1.0',
-      },
-    };
-  });
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools,
-    };
-  });
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params as {
-      name: string;
-      arguments: Record<string, unknown>;
-    };
-
-    try {
-      switch (name) {
-        case 'process_query': {
-          const query = String(args.query);
-          const runId = String(args.runId);
-          const sessionId = args.sessionId ? String(args.sessionId) : undefined;
-
-          // This callback will be passed to the agent loop to emit status updates.
-          const onStatusUpdate = (update: StatusUpdate) => {
-            emitter.emit(runId, update);
-          };
-
-          // This listener forwards emitted events as MCP notifications for this run.
-          const listener = (update: StatusUpdate) => {
-            server.notification({
-              method: 'tool/status',
-              params: {
-                runId,
-                status: update,
-              },
-            });
-          };
-          emitter.on(runId, listener);
-
-          try {
-            const finalReply = await handleQuery(
-              query,
-              config,
-              sessionId,
-              undefined,
-              onStatusUpdate
-            );
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ reply: finalReply, runId }),
-                },
-              ],
-            };
-          } finally {
-            // Ensure the listener is cleaned up regardless of success or failure.
-            emitter.off(runId, listener);
-          }
-        }
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          },
-        ],
-        isError: true,
-      };
-    }
-  });
-
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    return {
-      resources,
-    };
-  });
-
-  return {
-    server,
-    transport: new StdioServerTransport(),
-  };
-};
 ````
 
 ## File: src/core/sandbox.ts
@@ -6454,8 +6184,9 @@ export const runInSandbox = async (
   });
 
   // Wrap the user code in an async IIFE to allow top-level await.
+  // Ensure the code is properly formatted and doesn't have syntax errors
   const wrappedCode = `(async () => {
-    ${code}
+${code}
   })();`;
 
   try {
@@ -6470,9 +6201,20 @@ export const runInSandbox = async (
     });
     return result;
   } catch (error) {
-    logger.error('Error executing sandboxed code', error as Error, { code });
-    // Re-throw a sanitized error to the agent loop
-    throw new Error(`Sandbox execution failed: ${(error as Error).message}`);
+    const errorMessage = (error as Error).message;
+    logger.error('Error executing sandboxed code', error as Error, { 
+      code,
+      wrappedCode: wrappedCode.substring(0, 800) + '...' // Log first 800 chars for debugging
+    });
+    
+    // Provide more specific error messages for common issues
+    if (errorMessage.includes('Invalid or unexpected token')) {
+      throw new Error(`Sandbox execution failed: Syntax error in code. This usually indicates unescaped quotes or malformed JavaScript. Original error: ${errorMessage}`);
+    } else if (errorMessage.includes('timeout')) {
+      throw new Error(`Sandbox execution failed: Code execution timed out after ${timeout}ms`);
+    } else {
+      throw new Error(`Sandbox execution failed: ${errorMessage}`);
+    }
   }
 };
 ````
@@ -6527,19 +6269,19 @@ describe('MemAPI Integration Tests', () => {
     const maliciousPath = '../../../etc/passwd';
 
     await expect(mem.readFile(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
 
     await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
 
     await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
 
     await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
   });
 
@@ -6557,8 +6299,9 @@ describe('MemAPI Integration Tests', () => {
 
     const log = await mem.gitLog(filePath, 1);
 
-    expect(log.length).toBe(1);
-    expect(log[0].message).toBe(commitMessage);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toBeDefined();
+    expect(log[0]?.message).toBe(commitMessage);
   });
 
   it('should list files in a directory', async () => {
@@ -6601,8 +6344,9 @@ No links here.
     const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
     const results = await mem.queryGraph(query);
 
-    expect(results.length).toBe(1);
-    expect(results[0].filePath).toBe('PageA.md');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    expect(results[0]?.filePath).toBe('PageA.md');
   });
 
   it('should update a file atomically and fail if content changes', async () => {
@@ -6640,12 +6384,11 @@ No links here.
 
 ## File: src/server.ts
 ````typescript
-import { createMCPHandler } from './api/mcp.handler.js';
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
 import { loadAndValidateConfig } from './config.js';
-import { createMemAPI } from './core/mem-api/index.js';
-import { createEmitter } from './lib/events.js';
+import { FastMCP } from 'fastmcp';
+import { z } from 'zod';
 import type { StatusUpdate } from './types/loop.js';
 
 const main = async () => {
@@ -6655,22 +6398,89 @@ const main = async () => {
     // 1. Load configuration
     const config = await loadAndValidateConfig();
 
-    // 2. Initialize dependencies
-    const emitter = createEmitter<Record<string, StatusUpdate>>();
-    const memApi = createMemAPI(config);
+    // 2. Create FastMCP server
+    const server = new FastMCP({
+      name: 'recursa-server',
+      version: '0.1.0',
+    });
 
-    // 3. Create the MCP handler, injecting dependencies
-    const { server, transport } = createMCPHandler(
-      memApi,
-      config.knowledgeGraphPath,
-      config,
-      handleUserQuery,
-      emitter
-    );
+    // 3. Add resources
+    server.addResource({
+      uri: `file://${config.knowledgeGraphPath}`,
+      name: 'Knowledge Graph Root',
+      mimeType: 'text/directory',
+      description: 'Root directory of the knowledge graph',
+      async load() {
+        return {
+          text: `This resource represents the root of the knowledge graph at ${config.knowledgeGraphPath}. It cannot be loaded directly.`,
+        };
+      },
+    });
 
-    // 4. Start listening for requests over stdio
-    await transport.start();
-    await server.connect(transport);
+    // 4. Add tools
+    server.addTool({
+      name: 'process_query',
+      description:
+        'Processes a high-level user query by running the agent loop.',
+      parameters: z.object({
+        query: z.string().describe('The user query to process.'),
+        sessionId: z
+          .string()
+          .describe('An optional session ID to maintain context.')
+          .optional(),
+        runId: z
+          .string()
+          .describe(
+            'A unique ID for this execution run, used for notifications.'
+          ),
+      }),
+      execute: async (args, { log }) => {
+        const onStatusUpdate = (update: StatusUpdate) => {
+          // Map StatusUpdate to fastmcp logs, which are sent as notifications.
+          const { type, content, data } = update;
+          const message = `[${type}] ${content}`;
+
+          switch (type) {
+            case 'think':
+              log.info(content);
+              break;
+            case 'act':
+              log.info(message, data);
+              break;
+            case 'error':
+              log.error(message, data);
+              break;
+            default:
+              log.debug(message, data);
+          }
+        };
+
+        try {
+          const finalReply = await handleUserQuery(
+            args.query,
+            config,
+            args.sessionId,
+            undefined,
+            onStatusUpdate
+          );
+
+          return JSON.stringify({ reply: finalReply, runId: args.runId });
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          log.error(`Error in process_query: ${errorMessage}`, {
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+          return JSON.stringify({
+            error: errorMessage,
+            runId: args.runId,
+          });
+        }
+      },
+    });
+
+    // 5. Start the server
+    await server.start({ transportType: 'stdio' });
 
     logger.info('Recursa MCP Server is running and listening on stdio.');
   } catch (error) {

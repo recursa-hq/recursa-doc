@@ -1,73 +1,52 @@
-import type { Resource } from '@modelcontextprotocol/sdk/types.js';
+// Based on MCP Specification
 
-export interface MCPInitializeRequest {
-  protocolVersion: string;
-  capabilities: {
-    tools?: {
-      listChanged?: boolean;
-    };
-    resources?: {
-      listChanged?: boolean;
-      subscribe?: boolean;
-      unsubscribe?: boolean;
-    };
-  };
+// --- Requests ---
+export interface MCPRequest {
+  jsonrpc: '2.0';
+  id: number | string;
+  method: string;
+  params?: unknown;
+}
+
+export interface InitializeParams {
+  processId?: number;
   clientInfo: {
     name: string;
     version: string;
+    [key: string]: unknown;
   };
+  capabilities: Record<string, unknown>;
 }
 
-export interface MCPInitializeResult {
-  protocolVersion: string;
-  capabilities: {
-    tools: {
-      listChanged?: boolean;
-    };
-    resources: {
-      listChanged?: boolean;
-      subscribe?: boolean;
-      unsubscribe?: boolean;
-    };
-  };
-  serverInfo: {
-    name: string;
-    version: string;
-  };
+// --- Responses ---
+export interface MCPResponse {
+  jsonrpc: '2.0';
+  id: number | string;
+  result?: unknown;
+  error?: MCPError;
 }
 
+export interface MCPError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+// --- Tooling ---
 export interface MCPTool {
   name: string;
   description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
+  parameters: Record<string, unknown>; // JSON Schema
+  [key: string]: unknown;
 }
 
-export interface MCPResource extends Resource {
-  mimeType?: string;
+export interface ListToolsResult {
+  tools: MCPTool[];
 }
 
-export interface MCPRequest {
-  id: string;
+// --- Notifications ---
+export interface MCPNotification {
+  jsonrpc: '2.0';
   method: string;
-  params?: Record<string, unknown>;
-}
-
-export interface MCPResponse {
-  id: string;
-  result?: Record<string, unknown>;
-  error?: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-export interface MCPServerConfig {
-  name: string;
-  version: string;
-  description?: string;
+  params?: unknown;
 }
