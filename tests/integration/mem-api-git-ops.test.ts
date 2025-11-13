@@ -56,16 +56,16 @@ describe('MemAPI Git Ops Integration Tests', () => {
 
     // Diff against HEAD (working tree vs last commit)
     const diffWorking = await mem.gitDiff(filePath);
-    expect(diffWorking).toContain('+ - version 3');
+    expect(diffWorking).toContain('+- version 3');
 
     // Diff between two commits
     const diffCommits = await mem.gitDiff(filePath, 'HEAD~1', 'HEAD');
-    expect(diffCommits).toContain('+ - version 2');
+    expect(diffCommits).toContain('+- version 2');
     expect(diffCommits).not.toContain('+ - version 3');
 
     // Diff from a specific commit to HEAD
     const diffFromCommit = await mem.gitDiff(filePath, commitV2Hash);
-    expect(diffFromCommit).toContain('+ - version 3');
+    expect(diffFromCommit).toContain('+- version 3');
   });
 
   it('should get changed files from the working tree', async () => {

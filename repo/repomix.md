@@ -1,13 +1,5 @@
 # Directory Structure
 ```
-docs/
-  overview.md
-  PLATFORM_SUPPORT.md
-  readme.md
-  rules.md
-  system-prompt.md
-  tools.md
-  TROUBLESHOOTING.md
 scripts/
   build.js
   install.js
@@ -79,1109 +71,6 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
-
-## File: docs/overview.md
-````markdown
-### TL;DR: The Structure
-
-The agent doesn't keep everything in a flat directory. It starts creating topic-based and time-based subdirectories as the graph grows. The file system itself becomes part of the schema.
-
-```
-knowledge-graph/
-├── people/
-│   ├── Dr. Aris Thorne.md
-│   └── Dr. Evelyn Reed.md
-├── projects/
-│   └── Project Singularity.md
-├── meetings/
-│   ├── 2024/
-│   │   └── 2024-07-22 - Singularity Architecture Deep Dive.md
-│   └── 2025/
-│       └── 2025-01-15 - Singularity Q1 Review.md
-├── decisions/
-│   ├── ADR-001 - Use Micro-frontend Architecture.md
-│   └── ADR-002 - Adopt Rust for performance-critical services.md
-└── tech/
-    ├── Micro-frontend Architecture.md
-    └── Symbolic Reasoning.md
-```
-
-This is key. The agent can now `mem.listFiles('decisions/')` to see all Architectural Decision Records, or `mem.listFiles('meetings/2024/')` to review last year's meetings. It's a queryable file system.
-
-### The Complex Example: "Project Singularity"
-
-Let's trace a complex, multi-year project through the graph.
-
----
-
-#### File: `projects/Project Singularity.md`
-
-> This is the central hub for the project. It links out to everything else. It's the first place the agent looks for project-related queries.
-
-```markdown
-- # Project Singularity
-  - status:: active
-  - start-date:: 2024-06-01
-  - lead:: [[Dr. Evelyn Reed]]
-  - team:: [[Dr. Aris Thorne]]
-  - key-decisions::
-    - [[ADR-001 - Use Micro-frontend Architecture]]
-    - [[ADR-002 - Adopt Rust for performance-critical services]]
-  - summary::
-    - A long-term research project to develop a novel symbolic reasoning engine.
-  - meetings::
-    - [[2024-07-22 - Singularity Architecture Deep Dive]]
-    - [[2025-01-15 - Singularity Q1 Review]]
-```
-
----
-
-#### File: `people/Dr. Evelyn Reed.md`
-
-> The agent now has a rich context on people. It knows their roles, what projects they lead, and what meetings they attended. `mem.getBacklinks` on this file is powerful.
-
-```markdown
-- # Dr. Evelyn Reed
-  - type:: person
-  - role:: Lead Research Scientist
-  - expertise::
-    - [[Symbolic Reasoning]]
-    - Distributed Systems
-  - leads-project::
-    - [[Project Singularity]]
-  - attended::
-    - [[2024-07-22 - Singularity Architecture Deep Dive]]
-    - [[2025-01-15 - Singularity Q1 Review]]
-```
-
----
-
-#### File: `meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md`
-
-> Meetings are time-stamped and atomic. They capture a moment in time, linking people, discussion points, and outcomes.
-
-```markdown
-- # 2024-07-22 - Singularity Architecture Deep Dive
-  - type:: meeting
-  - project:: [[Project Singularity]]
-  - attendees:: [[Dr. Evelyn Reed]], [[Dr. Aris Thorne]]
-  - agenda::
-    - Discuss initial architectural approach for the reasoning engine.
-    - Evaluate monolith vs. microservices.
-  - outcomes::
-    - **Decision Made**: The team agreed to move forward with a micro-frontend architecture for the UI components.
-    - This decision is formally documented in [[ADR-001 - Use Micro-frontend Architecture]].
-  - action-items::
-    - [[Dr. Aris Thorne]] to draft the initial ADR.
-```
-
----
-
-#### File: `decisions/ADR-001 - Use Micro-frontend Architecture.md`
-
-> Decisions are first-class citizens. This is critical for audibility. The agent can trace *why* a choice was made, who was involved, and what the justification was.
-
-```markdown
-- # ADR-001: Use Micro-frontend Architecture
-  - status:: accepted
-  - date:: 2024-07-25
-  - authors:: [[Dr. Aris Thorne]]
-  - decided-in:: [[2024-07-22 - Singularity Architecture Deep Dive]]
-  - context::
-    - The UI for the reasoning engine needs to be modular to allow different teams to work on visualization and input components independently.
-  - justification::
-    - Enables independent deployment cycles.
-    - Reduces cognitive load for new developers.
-  - consequences::
-    - Increased complexity in the build pipeline.
-    - Requires a robust component sharing strategy.
-```
-
----
-
-### How the Agent Navigates This at Scale
-
-The agent doesn't `cat` everything. It uses its tools to traverse the graph intelligently.
-
-**User Query:** `"Why did we choose micro-frontends for Singularity and who was in that meeting?"`
-
-The agent's internal monologue (and actions) would be:
-
-1.  "User is asking about a decision for 'Singularity'. I'll start by searching for a decision record."
-    *   `await mem.searchGlobal('micro-frontends Singularity')`
-    *   **Result:** `['decisions/ADR-001 - Use Micro-frontend Architecture.md']`
-
-2.  "Found the ADR. I'll read it to get the justification and find the source meeting."
-    *   `const adrContent = await mem.readFile('decisions/ADR-001 - Use Micro-frontend Architecture.md')`
-    *   *Parses `decided-in:: [[2024-07-22 - Singularity Architecture Deep Dive]]` from the content.*
-
-3.  "Okay, the decision was made in that meeting. Now I'll read the meeting file to find the attendees."
-    *   `const meetingContent = await mem.readFile('meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md')`
-    *   *Parses `attendees:: [[Dr. Evelyn Reed]], [[Dr. Aris Thorne]]` from the content.*
-
-4.  "I have all the pieces. I'll synthesize the final answer."
-
-This is the power of the system. The scaling problem becomes a graph traversal problem, which is cheap and efficient.
-
-### The `git` Angle
-
-And the killer feature: every change is a commit.
-
-*   Want to know *when* the micro-frontend decision was formally documented?
-    `git log -- "decisions/ADR-001 - Use Micro-frontend Architecture.md"`
-*   Want to see how Project Singularity's status has changed over the last month?
-    `git diff HEAD~10 HEAD -- "projects/Project Singularity.md"`
-
-Your AI's brain isn't an opaque database blob. It's a repo you can clone, branch, and audit.
-
-Ship it.
-````
-
-## File: src/lib/logseq-validator.ts
-````typescript
-export interface ValidationResult {
-  isValid: boolean;
-  errors: string[];
-}
-
-/**
- * Validates if the given string content conforms to the Logseq/Org-mode block format.
- * @param content The content to validate.
- * @returns A ValidationResult object.
- */
-export const validateLogseqContent = (content: string): ValidationResult => {
-  const errors: string[] = [];
-  const lines = content.split('\n');
-  const indentationStack: number[] = [-2]; // Stack to track indentation, -2 for a virtual root
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const lineNumber = i + 1;
-
-    // Skip undefined or null lines
-    if (line === undefined || line === null) {
-      continue;
-    }
-
-    // Ignore empty or whitespace-only lines
-    if (line.trim() === '') {
-      continue;
-    }
-
-    const indentation = line.length - line.trimStart().length;
-    const trimmedLine = line.trim();
-
-    // Rule 1: Must start with a dash
-    if (!trimmedLine.startsWith('- ')) {
-      errors.push(`Line ${lineNumber}: Must start with "- ". Found: "${trimmedLine}"`);
-      continue; // Skip other checks for this malformed line
-    }
-
-    // Rule 2: Indentation must be a multiple of 2
-    if (indentation % 2 !== 0) {
-      errors.push(
-        `Line ${lineNumber}: Indentation must be a multiple of 2. Found ${indentation} spaces.`
-      );
-    }
-
-    // Rule 3: Nesting must be logical
-    const parentIndentation = indentationStack[indentationStack.length - 1]!;
-    if (indentation > parentIndentation + 2) {
-      errors.push(
-        `Line ${lineNumber}: Invalid nesting. Indentation increased by more than one level (from ${parentIndentation} to ${indentation} spaces).`
-      );
-    }
-
-    // Adjust indentation stack
-    if (indentation > parentIndentation) {
-      indentationStack.push(indentation);
-    } else {
-      while (
-        indentationStack.length > 1 &&
-        indentationStack[indentationStack.length - 1]! > indentation
-      ) {
-        indentationStack.pop();
-      }
-    }
-
-    // Rule 4: Properties (::) cannot be at the root level
-    if (indentation === 0 && trimmedLine.includes('::')) {
-      errors.push(
-        `Line ${lineNumber}: Properties (using "::") cannot be at the root level.`
-      );
-    }
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-};
-````
-
-## File: tests/unit/logseq-validator.test.ts
-````typescript
-import { describe, it, expect } from '@jest/globals';
-import { validateLogseqContent } from '../../src/lib/logseq-validator.js';
-
-describe('Logseq Content Validator', () => {
-  it('should return valid for correct Logseq content', () => {
-    const content = `
-- # Page Title
-  - property:: value
-  - List item 1
-    - Nested item 1.1
-      - Doubly nested item
-  - List item 2
-- Another root item
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(true);
-    expect(result.errors).toEqual([]);
-  });
-
-  it('should return valid for empty or whitespace-only content', () => {
-    expect(validateLogseqContent('').isValid).toBe(true);
-    expect(validateLogseqContent('   \n\n  ').isValid).toBe(true);
-  });
-
-  it('should detect lines not starting with "- "', () => {
-    const content = `
-- Valid item
-Invalid item
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Must start with "- ". Found: "Invalid item"'
-    );
-  });
-
-  it('should detect incorrect indentation (not a multiple of 2)', () => {
-    const content = `
-- Root
-   - Invalid indentation
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Indentation must be a multiple of 2. Found 3 spaces.'
-    );
-  });
-
-  it('should detect incorrect single-space indentation', () => {
-    const content = `
-- Root
- - Invalid indentation
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Indentation must be a multiple of 2. Found 1 spaces.'
-    );
-  });
-
-  it('should detect illogical nesting (jumping more than one level)', () => {
-    const content = `
-- Root
-    - Invalid jump
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Invalid nesting. Indentation increased by more than one level (from 0 to 4 spaces).'
-    );
-  });
-
-  it('should detect properties at the root level', () => {
-    const content = `
-- property:: not-allowed-at-root
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 2: Properties (using "::") cannot be at the root level.'
-    );
-  });
-
-  it('should allow properties at nested levels', () => {
-    const content = `
-- Item
-  - property:: allowed-here
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(true);
-  });
-
-  it('should handle multiple errors at once', () => {
-    const content = `
-Root without dash
-- property:: at-root
-   - bad indent
-        - bad nesting jump
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toEqual([
-      'Line 2: Must start with "- ". Found: "Root without dash"',
-      'Line 3: Properties (using "::") cannot be at the root level.',
-      'Line 4: Indentation must be a multiple of 2. Found 3 spaces.',
-      'Line 4: Invalid nesting. Indentation increased by more than one level (from 0 to 3 spaces).',
-      'Line 5: Invalid nesting. Indentation increased by more than one level (from 3 to 8 spaces).',
-    ]);
-  });
-});
-````
-
-## File: docs/PLATFORM_SUPPORT.md
-````markdown
-# Cross-Platform Support
-
-This document outlines the cross-platform compatibility features and installation instructions for Recursa MCP Server.
-
-## Supported Platforms
-
-### ✅ Fully Supported
-- **Linux** (Ubuntu, Debian, Fedora, Arch, etc.)
-- **macOS** (Intel and Apple Silicon)
-- **Windows** (Windows 10/11 with WSL2 recommended)
-- **Termux/Android** (Android 7.0+)
-
-### ⚠️ Partial Support
-- **Windows (Native)** - Limited by symlink support and file system constraints
-
-## Platform-Specific Features
-
-### 🔧 Platform Detection
-The server automatically detects the runtime environment and adjusts behavior:
-
-```typescript
-import platform from '../src/lib/platform.js';
-
-console.log(`Running on: ${platform.platformString}`);
-console.log(`Is Termux: ${platform.isTermux}`);
-console.log(`Is Windows: ${platform.isWindows}`);
-```
-
-### 📱 Termux/Android Optimizations
-- Conservative resource limits (256MB memory, 15s timeout)
-- Automatic permission fixes for binary executables
-- Storage permission validation
-- Symlink-free installation process
-
-### 🖥️ Windows Optimizations
-- Case-insensitive path handling
-- Drive letter normalization
-- UNC path support
-- File locking awareness with retry logic
-
-### 🍎 macOS/Linux Optimizations
-- Full symlink support
-- Native file permissions
-- Standard resource limits
-- Unix-specific optimizations
-
-## Installation Instructions
-
-### Standard Installation (Linux, macOS, WSL2)
-```bash
-# Clone the repository
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-
-# Install dependencies automatically
-npm run install:auto
-
-# Build the project
-npm run build:auto
-
-# Start development server
-npm run dev
-```
-
-### Termux/Android Installation
-```bash
-# Install Termux from F-Droid (recommended)
-# Update packages
-pkg update && pkg upgrade
-
-# Install required tools
-pkg install nodejs npm git
-
-# Clone the repository
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-
-# Install with Termux-specific optimizations
-npm run install:termux
-
-# Build for Termux
-npm run build:termux
-
-# Start development server
-npm run dev:termux
-```
-
-### Windows Native Installation
-```bash
-# Use Git Bash or PowerShell with admin privileges
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-
-# Install with Windows compatibility
-npm run install:standard
-
-# Build project
-npm run build:standard
-
-# Start development server
-npm run dev:standard
-```
-
-## Configuration
-
-### Environment Variables
-All platforms support the same environment variables, with platform-specific defaults:
-
-```bash
-# Required
-OPENROUTER_API_KEY=your_api_key_here
-KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
-
-# Optional (platform-specific defaults apply)
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4000
-SANDBOX_TIMEOUT=10000
-SANDBOX_MEMORY_LIMIT=100
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-```
-
-### Platform-Specific Defaults
-
-| Setting | Linux/macOS | Termux/Android | Windows |
-|---------|-------------|-----------------|---------|
-| `LLM_MAX_TOKENS` | 4000 | 2000 | 4000 |
-| `LLM_TEMPERATURE` | 0.7 | 0.5 | 0.7 |
-| `SANDBOX_TIMEOUT` | 10000ms | 15000ms | 10000ms |
-| `SANDBOX_MEMORY_LIMIT` | 512MB | 256MB | 512MB |
-
-## Security Features
-
-### Cross-Platform Path Security
-- **Canonical path resolution** using `fs.realpath()`
-- **Case-insensitive validation** on Windows and macOS
-- **Symlink attack prevention** with configurable policies
-- **Path traversal detection** with platform-specific patterns
-
-### File System Protections
-- **Atomic file operations** with temporary files
-- **Permission validation** adapted for each platform
-- **Resource limits** enforced platform-wide
-- **Sandbox isolation** with platform-specific constraints
-
-## Troubleshooting
-
-### Common Issues
-
-#### Permission Denied (Termux)
-```bash
-# Fix storage permissions in Termux
-termux-setup-storage
-
-# Or manually fix binary permissions
-chmod +x node_modules/.bin/*
-```
-
-#### Symlink Errors (Windows)
-```bash
-# Enable developer mode on Windows
-# Or run with administrator privileges
-
-# Alternative: Use WSL2 for full compatibility
-wsl --install
-```
-
-#### Out of Memory (All Platforms)
-```bash
-# Increase Node.js memory limit
-export NODE_OPTIONS="--max-old-space-size=2048"
-
-# Or use conservative settings in Termux
-export SANDBOX_MEMORY_LIMIT=128
-```
-
-#### Git Integration Issues
-```bash
-# Configure git for the current user
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-
-# For Termux, ensure git is installed
-pkg install git
-```
-
-### Platform-Specific Debugging
-
-#### Enable Debug Logging
-```bash
-# Set debug environment variable
-export DEBUG=recursa:*
-export NODE_ENV=development
-
-# Run with verbose output
-npm run dev -- --verbose
-```
-
-#### Platform Detection Output
-```bash
-# Check what platform is detected
-node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-```
-
-## Development
-
-### Testing on Multiple Platforms
-```bash
-# Run platform-specific tests
-npm run test:linux
-npm run test:macos
-npm run test:windows
-npm run test:termux
-```
-
-### Building for Specific Platforms
-```bash
-# Explicit platform builds
-npm run build:standard  # Linux/macOS/Windows
-npm run build:termux    # Termux/Android
-```
-
-### Cross-Platform CI/CD
-The project includes GitHub Actions for testing across:
-- Ubuntu (latest)
-- macOS (latest)
-- Windows (latest)
-- Android/Termux (emulated)
-
-## Performance Considerations
-
-### Termux/Android
-- Reduced memory and CPU limits
-- Conservative token limits
-- Longer timeouts for mobile network conditions
-- Optimized for battery life
-
-### Desktop Platforms
-- Full resource utilization
-- Standard token limits
-- Faster response times
-- Complete feature set
-
-### Windows Native
-- Slightly reduced performance due to filesystem constraints
-- Additional validation overhead
-- Recommended to use WSL2 for best performance
-
-## Contributing
-
-When adding new features:
-1. Test on all supported platforms
-2. Use platform detection utilities from `src/lib/platform.ts`
-3. Add platform-specific defaults where appropriate
-4. Update documentation for platform-specific behavior
-5. Include cross-platform tests in CI/CD
-
-### Platform Detection Usage
-```typescript
-import platform from '../src/lib/platform.js';
-
-if (platform.isTermux) {
-  // Termux-specific code
-  const limits = platform.getResourceLimits();
-  console.log(`Memory limit: ${limits.maxMemory}`);
-}
-
-if (platform.isWindows) {
-  // Windows-specific code
-  const normalizedPath = platform.normalizePath(userPath);
-}
-```
-
-## Limitations
-
-### Windows Native
-- No symlink support in node_modules
-- Case-insensitive filesystem may cause issues
-- Some Unix-specific tools unavailable
-
-### Termux/Android
-- Limited memory and CPU resources
-- Storage access restrictions
-- Some native modules may not compile
-
-### macOS
-- Gatekeeper may block execution of unsigned binaries
-- Case-insensitive filesystem can cause path issues
-
-## Support
-
-For platform-specific issues:
-1. Check this documentation first
-2. Review troubleshooting section
-3. Check existing GitHub issues
-4. Create new issue with platform information:
-   - Operating system and version
-   - Node.js version
-   - Platform detection output
-   - Error messages and logs
-````
-
-## File: docs/TROUBLESHOOTING.md
-````markdown
-# Troubleshooting Guide
-
-This guide covers common issues and their solutions across different platforms.
-
-## Installation Issues
-
-### npm install fails with permission errors
-
-#### Linux/macOS
-```bash
-# Fix npm permissions
-sudo chown -R $(whoami) ~/.npm
-sudo chown -R $(whoami) /usr/local/lib/node_modules
-
-# Alternative: Use nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-nvm install 18
-nvm use 18
-```
-
-#### Termux/Android
-```bash
-# Use Termux-specific installation
-npm run install:termux
-
-# Or manually fix permissions
-find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \;
-```
-
-#### Windows
-```bash
-# Run as administrator
-# Or use PowerShell with elevated privileges
-
-# Alternative: Use Chocolatey or Scoop
-choco install nodejs
-# or
-scoop install nodejs
-```
-
-### Symlink errors during installation
-
-#### Windows Native
-```bash
-# Enable Developer Mode
-# Settings > Update & Security > For developers > Developer mode
-
-# Or run with administrator privileges
-npm install --no-bin-links
-```
-
-#### All Platforms
-```bash
-# Use the cross-platform installer
-npm run install:auto
-
-# Manual installation without symlinks
-npm install --ignore-scripts --no-bin-links
-```
-
-## Build Issues
-
-### TypeScript compilation fails
-
-#### General Solutions
-```bash
-# Clean build
-rm -rf node_modules dist
-npm run install:auto
-npm run build:auto
-
-# Check TypeScript version
-npx tsc --version
-
-# Manual compilation
-node node_modules/typescript/bin/tsc
-```
-
-#### Termux Specific
-```bash
-# Ensure TypeScript is executable
-chmod +x node_modules/.bin/tsc
-chmod +x node_modules/typescript/bin/tsc
-
-# Use Termux build script
-npm run build:termux
-```
-
-#### Windows Specific
-```bash
-# Use Windows build script
-npm run build:standard
-
-# Check if paths are too long (Windows limitation)
-# Move project closer to drive root (e.g., C:\dev\recursa)
-```
-
-## Runtime Issues
-
-### "Permission denied" errors
-
-#### File Access Issues
-```bash
-# Check file permissions
-ls -la filename
-
-# Fix permissions (Unix-like systems)
-chmod 644 filename
-chmod 755 directory
-
-# Windows: Check file properties > Security
-# Ensure your user has read/write permissions
-```
-
-#### Termux Storage Permissions
-```bash
-# Setup storage access
-termux-setup-storage
-
-# Check if storage is accessible
-ls -R ~/storage/shared
-
-# Use internal storage for knowledge graph
-export KNOWLEDGE_GRAPH_PATH=~/storage/shared/Documents/knowledge-graph
-```
-
-#### Git Repository Permissions
-```bash
-# Check git repository permissions
-git status
-
-# Fix git repository permissions (Unix-like)
-chmod -R u+rw .git/
-
-# Windows: Ensure git repository isn't read-only
-# Right-click folder > Properties > uncheck "Read-only"
-```
-
-### Memory errors
-
-#### Node.js Out of Memory
-```bash
-# Increase Node.js memory limit
-export NODE_OPTIONS="--max-old-space-size=2048"
-
-# Windows
-set NODE_OPTIONS=--max-old-space-size=2048
-
-# Run with increased memory
-node --max-old-space-size=2048 dist/server.js
-```
-
-#### Termux Memory Limits
-```bash
-# Use conservative settings
-export SANDBOX_MEMORY_LIMIT=128
-export LLM_MAX_TOKENS=1000
-
-# Check available memory
-free -h  # Linux/Termux
-```
-
-#### Windows Memory Issues
-```bash
-# Close unnecessary applications
-# Increase virtual memory
-# System > Advanced system settings > Performance > Advanced > Virtual memory
-```
-
-### Network/Connection Issues
-
-#### API Connection Problems
-```bash
-# Test network connectivity
-curl -I https://openrouter.ai/api/v1/models
-
-# Check if API key is valid
-echo $OPENROUTER_API_KEY
-
-# Use proxy if necessary
-export HTTP_PROXY=http://proxy.example.com:8080
-export HTTPS_PROXY=http://proxy.example.com:8080
-```
-
-#### Git Repository Issues
-```bash
-# Check git configuration
-git config --list
-
-# Configure git if needed
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-
-# Test git repository access
-git remote -v
-git fetch origin
-```
-
-## Platform-Specific Issues
-
-### Termux/Android
-
-#### Package Installation Fails
-```bash
-# Update package databases
-pkg update && pkg upgrade
-
-# Install required packages
-pkg install nodejs npm git make python
-
-# Clear npm cache
-npm cache clean --force
-```
-
-#### Storage Access Denied
-```bash
-# Request storage permissions
-termux-setup-storage
-
-# Check accessible directories
-ls ~/storage/
-
-# Use accessible storage location
-export KNOWLEDGE_GRAPH_PATH=~/storage/shared/Documents/recursa
-```
-
-#### Performance Issues
-```bash
-# Use conservative settings
-export LLM_MAX_TOKENS=500
-export LLM_TEMPERATURE=0.3
-export SANDBOX_TIMEOUT=30000
-
-# Monitor resource usage
-top -n 1
-```
-
-### Windows
-
-#### Path Too Long Errors
-```bash
-# Move project closer to drive root
-# C:\recursa instead of C:\Users\name\long\path\to\project
-
-# Enable long path support (Windows 10 1607+)
-# Group Policy Editor > Computer Configuration > Administrative Templates > System > Filesystem > Enable Win32 long paths
-```
-
-#### PowerShell Execution Policy
-```powershell
-# Check execution policy
-Get-ExecutionPolicy
-
-# Set execution policy (run as administrator)
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-#### Antivirus Blocking
-```bash
-# Add exception for Node.js and your project folder
-# Windows Security > Virus & threat protection > Manage settings > Add or remove exclusions
-```
-
-### macOS
-
-#### Gatekeeper Blocking App
-```bash
-# Allow app from unidentified developer
-# System Preferences > Security & Privacy > General > Allow apps downloaded from: App Store and identified developers
-
-# Or allow specific app
-xattr -d com.apple.quarantine /path/to/app
-```
-
-#### File Permissions Issues
-```bash
-# Fix permissions for user-owned files
-sudo chown -R $(whoami) ~/.npm
-sudo chown -R $(whoami) /usr/local/lib/node_modules
-
-# Alternative: Use Homebrew for Node.js
-brew install node
-```
-
-### Linux
-
-#### Permission Denied for Global Packages
-```bash
-# Use nvm (recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-
-# Or configure npm global directory
-mkdir ~/.npm-global
-npm config set prefix '~/.npm-global'
-echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
-```
-
-#### Package Building Issues
-```bash
-# Install build tools
-# Ubuntu/Debian
-sudo apt-get install build-essential
-
-# Fedora
-sudo dnf groupinstall "Development Tools"
-
-# Arch Linux
-sudo pacman -S base-devel
-```
-
-## Debugging
-
-### Enable Debug Logging
-```bash
-# Set debug environment variable
-export DEBUG=recursa:*
-
-# Set Node.js debug mode
-export NODE_ENV=development
-
-# Run with verbose output
-npm run dev -- --verbose --log-level debug
-```
-
-### Check Platform Detection
-```bash
-# Test platform detection
-node -e "
-import('./src/lib/platform.js').then(platform => {
-  console.log('Platform:', platform.default.platformString);
-  console.log('Is Termux:', platform.default.isTermux);
-  console.log('Is Windows:', platform.default.isWindows);
-  console.log('Has Symlinks:', platform.default.supportsSymlinks);
-});
-"
-```
-
-### Validate Configuration
-```bash
-# Test configuration loading
-node -e "
-import('./src/config.js').then(config => {
-  config.loadAndValidateConfig()
-    .then(cfg => console.log('Config valid:', cfg))
-    .catch(err => console.error('Config error:', err));
-});
-"
-```
-
-### Check Dependencies
-```bash
-# Verify all dependencies are installed
-npm ls
-
-# Check for missing binaries
-npx tsc --version
-npx tsx --version
-
-# Test individual components
-node -e "console.log('Node.js works')"
-node -e "import('./src/lib/platform.js').then(() => console.log('Platform module works'))"
-```
-
-## Performance Optimization
-
-### General Tips
-```bash
-# Use SSD storage for knowledge graph
-# Increase Node.js memory limit
-# Use latest Node.js version
-# Enable compression for large files
-```
-
-### Termux Optimization
-```bash
-# Use conservative LLM settings
-export LLM_MAX_TOKENS=500
-export LLM_TEMPERATURE=0.3
-
-# Close background apps
-# Use WiFi instead of mobile data
-```
-
-### Desktop Optimization
-```bash
-# Use higher token limits for better results
-export LLM_MAX_TOKENS=4000
-export SANDBOX_MEMORY_LIMIT=1024
-
-# Enable parallel processing if supported
-export WORKER_THREADS=4
-```
-
-## Getting Help
-
-### Collect Debug Information
-```bash
-# Create debug report
-{
-  echo "=== Platform Information ==="
-  uname -a
-  node --version
-  npm --version
-
-  echo "=== Platform Detection ==="
-  node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-
-  echo "=== Environment Variables ==="
-  env | grep -E "(RECURSA|NODE|PATH)" | sort
-
-  echo "=== Dependency Status ==="
-  npm ls --depth=0
-
-  echo "=== Configuration Status ==="
-  node -e "
-    import('./src/config.js').then(config => {
-      config.loadAndValidateConfig()
-        .then(cfg => console.log('✅ Configuration valid'))
-        .catch(err => console.error('❌ Configuration error:', err.message));
-    });
-  "
-} > debug-report.txt
-
-# Share debug-report.txt when asking for help
-```
-
-### File an Issue
-When creating GitHub issues, include:
-1. Operating system and version
-2. Node.js and npm versions
-3. Platform detection output
-4. Error messages and stack traces
-5. Steps to reproduce the issue
-6. Debug report (if applicable)
-
-### Community Support
-- Check existing GitHub issues
-- Review documentation
-- Ask questions in discussions
-- Join Discord/Slack communities (if available)
-````
 
 ## File: scripts/build.js
 ````javascript
@@ -1584,6 +473,88 @@ process.on('unhandledRejection', (reason, promise) => {
 main();
 ````
 
+## File: src/lib/logseq-validator.ts
+````typescript
+export interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+}
+
+/**
+ * Validates if the given string content conforms to the Logseq/Org-mode block format.
+ * @param content The content to validate.
+ * @returns A ValidationResult object.
+ */
+export const validateLogseqContent = (content: string): ValidationResult => {
+  const errors: string[] = [];
+  const lines = content.split('\n');
+  const indentationStack: number[] = [-2]; // Stack to track indentation, -2 for a virtual root
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNumber = i + 1;
+
+    // Skip undefined or null lines
+    if (line === undefined || line === null) {
+      continue;
+    }
+
+    // Ignore empty or whitespace-only lines
+    if (line.trim() === '') {
+      continue;
+    }
+
+    const indentation = line.length - line.trimStart().length;
+    const trimmedLine = line.trim();
+
+    // Rule 1: Must start with a dash
+    if (!trimmedLine.startsWith('- ')) {
+      errors.push(`Line ${lineNumber}: Must start with "- ". Found: "${trimmedLine}"`);
+      continue; // Skip other checks for this malformed line
+    }
+
+    // Rule 2: Indentation must be a multiple of 2
+    if (indentation % 2 !== 0) {
+      errors.push(
+        `Line ${lineNumber}: Indentation must be a multiple of 2. Found ${indentation} spaces.`
+      );
+    }
+
+    // Rule 3: Nesting must be logical
+    const parentIndentation = indentationStack[indentationStack.length - 1]!;
+    if (indentation > parentIndentation + 2) {
+      errors.push(
+        `Line ${lineNumber}: Invalid nesting. Indentation increased by more than one level (from ${parentIndentation} to ${indentation} spaces).`
+      );
+    }
+
+    // Adjust indentation stack
+    if (indentation > parentIndentation) {
+      indentationStack.push(indentation);
+    } else {
+      while (
+        indentationStack.length > 1 &&
+        indentationStack[indentationStack.length - 1]! > indentation
+      ) {
+        indentationStack.pop();
+      }
+    }
+
+    // Rule 4: Properties (::) cannot be at the root level
+    if (indentation === 0 && trimmedLine.includes('::')) {
+      errors.push(
+        `Line ${lineNumber}: Properties (using "::") cannot be at the root level.`
+      );
+    }
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+  };
+};
+````
+
 ## File: src/lib/platform.ts
 ````typescript
 /**
@@ -1803,6 +774,387 @@ export const platform = {
 };
 
 export default platform;
+````
+
+## File: tests/unit/logseq-validator.test.ts
+````typescript
+import { describe, it, expect } from '@jest/globals';
+import { validateLogseqContent } from '../../src/lib/logseq-validator.js';
+
+describe('Logseq Content Validator', () => {
+  it('should return valid for correct Logseq content', () => {
+    const content = `
+- # Page Title
+  - property:: value
+  - List item 1
+    - Nested item 1.1
+      - Doubly nested item
+  - List item 2
+- Another root item
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('should return valid for empty or whitespace-only content', () => {
+    expect(validateLogseqContent('').isValid).toBe(true);
+    expect(validateLogseqContent('   \n\n  ').isValid).toBe(true);
+  });
+
+  it('should detect lines not starting with "- "', () => {
+    const content = `
+- Valid item
+Invalid item
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toContain(
+      'Line 3: Must start with "- ". Found: "Invalid item"'
+    );
+  });
+
+  it('should detect incorrect indentation (not a multiple of 2)', () => {
+    const content = `
+- Root
+   - Invalid indentation
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toContain(
+      'Line 3: Indentation must be a multiple of 2. Found 3 spaces.'
+    );
+  });
+
+  it('should detect incorrect single-space indentation', () => {
+    const content = `
+- Root
+ - Invalid indentation
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toContain(
+      'Line 3: Indentation must be a multiple of 2. Found 1 spaces.'
+    );
+  });
+
+  it('should detect illogical nesting (jumping more than one level)', () => {
+    const content = `
+- Root
+    - Invalid jump
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toContain(
+      'Line 3: Invalid nesting. Indentation increased by more than one level (from 0 to 4 spaces).'
+    );
+  });
+
+  it('should detect properties at the root level', () => {
+    const content = `
+- property:: not-allowed-at-root
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toContain(
+      'Line 2: Properties (using "::") cannot be at the root level.'
+    );
+  });
+
+  it('should allow properties at nested levels', () => {
+    const content = `
+- Item
+  - property:: allowed-here
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(true);
+  });
+
+  it('should handle multiple errors at once', () => {
+    const content = `
+Root without dash
+- property:: at-root
+   - bad indent
+        - bad nesting jump
+`;
+    const result = validateLogseqContent(content);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual([
+      'Line 2: Must start with "- ". Found: "Root without dash"',
+      'Line 3: Properties (using "::") cannot be at the root level.',
+      'Line 4: Indentation must be a multiple of 2. Found 3 spaces.',
+      'Line 4: Invalid nesting. Indentation increased by more than one level (from 0 to 3 spaces).',
+      'Line 5: Invalid nesting. Indentation increased by more than one level (from 3 to 8 spaces).',
+    ]);
+  });
+});
+````
+
+## File: debug-stash.ts
+````typescript
+#!/usr/bin/env ts-node
+
+import simpleGit from 'simple-git';
+import { createTestHarness, cleanupTestHarness } from './tests/lib/test-harness.ts';
+
+async function debugStashOperations() {
+  console.log('=== Debugging Stash Operations ===');
+
+  const harness = await createTestHarness();
+
+  try {
+    // Step 1: Create initial commit
+    console.log('\n1. Creating initial commit...');
+    await harness.mem.writeFile('init.txt', 'initial file');
+    await harness.mem.commitChanges('initial commit for stash test');
+    console.log('Initial commit created');
+
+    // Step 2: Create file1.md and save checkpoint
+    console.log('\n2. Creating file1.md and saving checkpoint...');
+    await harness.mem.writeFile('file1.md', 'content1');
+    console.log('file1.md created, exists:', await harness.mem.fileExists('file1.md'));
+
+    const saveSuccess = await harness.mem.saveCheckpoint();
+    console.log('saveCheckpoint success:', saveSuccess);
+    console.log('file1.md exists after saveCheckpoint:', await harness.mem.fileExists('file1.md'));
+
+    // Check git status
+    const status1 = await harness.git.status();
+    console.log('Git status after saveCheckpoint:', {
+      staged: status1.staged,
+      modified: status1.modified,
+      created: status1.created,
+      not_added: status1.not_added,
+      isClean: status1.isClean()
+    });
+
+    // Check stash list
+    const stashes = await harness.git.stashList();
+    console.log('Stash list:', stashes.all.length, 'stashes');
+
+    // Step 3: Create file2.md
+    console.log('\n3. Creating file2.md...');
+    await harness.mem.writeFile('file2.md', 'content2');
+    console.log('file2.md created, exists:', await harness.mem.fileExists('file2.md'));
+    console.log('file1.md exists:', await harness.mem.fileExists('file1.md'));
+
+    // Check git status
+    const status2 = await harness.git.status();
+    console.log('Git status after creating file2.md:', {
+      staged: status2.staged,
+      modified: status2.modified,
+      created: status2.created,
+      not_added: status2.not_added,
+      isClean: status2.isClean()
+    });
+
+    // Step 4: Revert to checkpoint
+    console.log('\n4. Reverting to checkpoint...');
+    const revertSuccess = await harness.mem.revertToLastCheckpoint();
+    console.log('revertToLastCheckpoint success:', revertSuccess);
+    console.log('file1.md exists after revert:', await harness.mem.fileExists('file1.md'));
+    console.log('file2.md exists after revert:', await harness.mem.fileExists('file2.md'));
+
+    // Check git status after revert
+    const status3 = await harness.git.status();
+    console.log('Git status after revert:', {
+      staged: status3.staged,
+      modified: status3.modified,
+      created: status3.created,
+      not_added: status3.not_added,
+      isClean: status3.isClean()
+    });
+
+    // Check stash list after revert
+    const stashesAfter = await harness.git.stashList();
+    console.log('Stash list after revert:', stashesAfter.all.length, 'stashes');
+
+  } finally {
+    await cleanupTestHarness(harness);
+  }
+}
+
+debugStashOperations().catch(console.error);
+````
+
+## File: INSTALL_TERMUX.md
+````markdown
+# Termux Installation Guide
+
+This project works on Termux with some modifications due to Android's filesystem limitations.
+
+## Prerequisites
+```bash
+pkg update && pkg upgrade
+pkg install nodejs npm git
+```
+
+## Installation (Termux-specific)
+```bash
+# Install dependencies with Termux compatibility flags
+npm install --ignore-scripts --no-bin-links
+
+# Make binaries executable
+find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \;
+find node_modules -name "tsx" -type f -exec chmod +x {} \;
+find node_modules -name "esbuild" -type f -exec chmod +x {} \;
+
+# Run TypeScript compiler directly using npx
+npx tsc
+
+# Start development server
+npx tsx watch src/server.ts
+```
+
+## Alternative: Use the prepared scripts
+```bash
+npm run install:termux
+npm run dev:termux
+```
+
+## Known Limitations
+- Binary executables need manual permission fixes
+- Some linting tools may not work due to missing binaries
+- ESLint and Prettier dependencies removed for compatibility
+````
+
+## File: src/lib/gitignore-parser.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+
+/**
+ * Represents a parsed gitignore pattern
+ */
+interface GitignorePattern {
+  pattern: string;
+  isNegated: boolean;
+  isDirectory: boolean;
+}
+
+/**
+ * Creates a gitignore pattern object from a raw pattern string
+ */
+const parsePattern = (rawPattern: string): GitignorePattern | null => {
+  // Skip empty lines and comments
+  if (!rawPattern.trim() || rawPattern.trim().startsWith('#')) {
+    return null;
+  }
+
+  const trimmed = rawPattern.trim();
+  const isNegated = trimmed.startsWith('!');
+  const pattern = isNegated ? trimmed.slice(1) : trimmed;
+  const isDirectory = pattern.endsWith('/');
+
+  return {
+    pattern: isDirectory ? pattern.slice(0, -1) : pattern,
+    isNegated,
+    isDirectory,
+  };
+};
+
+/**
+ * Tests if a file path matches a gitignore pattern
+ */
+const matchesPattern = (
+  filePath: string,
+  relativePath: string,
+  parsedPattern: GitignorePattern
+): boolean => {
+  const { pattern, isDirectory } = parsedPattern;
+  
+  // Convert gitignore pattern to regex
+  let regexPattern = pattern
+    // Escape special regex characters except * and ?
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    // Convert * to match any characters except path separators
+    .replace(/\*/g, '[^/]*')
+    // Convert ? to match any single character except path separators
+    .replace(/\?/g, '[^/]')
+    // Convert ** to match any characters including path separators
+    .replace(/\*\*/g, '.*')
+    // Anchors for start and end
+    .replace(/^(?![^/])/, '^')
+    .replace(/(?<![^/])$/, '$');
+
+  // If pattern doesn't contain a slash, match against basename only
+  if (!pattern.includes('/')) {
+    regexPattern = `(?:^|.*/)${regexPattern}`;
+  }
+
+  const regex = new RegExp(regexPattern);
+  
+  // For directory patterns, ensure we're matching directories
+  if (isDirectory) {
+    // Check if it's a directory (ends with / in relative path)
+    if (!relativePath.endsWith('/')) {
+      return false;
+    }
+  }
+
+  // Test against relative path
+  const matches = regex.test(relativePath);
+  
+  return matches;
+};
+
+/**
+ * Creates an ignore filter function from a .gitignore file
+ * @param directory The directory containing the .gitignore file
+ * @returns A function that returns true if a path should be ignored
+ */
+export const createIgnoreFilter = async (
+  directory: string
+): Promise<(filePath: string) => boolean> => {
+  const gitignorePath = path.join(directory, '.gitignore');
+  
+  try {
+    const content = await fs.readFile(gitignorePath, 'utf-8');
+    const lines = content.split('\n');
+    
+    const patterns: GitignorePattern[] = [];
+    for (const line of lines) {
+      const parsed = parsePattern(line);
+      if (parsed) {
+        patterns.push(parsed);
+      }
+    }
+
+    // Return the filter function
+    return (filePath: string): boolean => {
+      const relativePath = path.relative(directory, filePath);
+      
+      if (relativePath === '') return false; // Never ignore the root directory
+      
+      let isIgnored = false;
+      
+      // Process patterns in order
+      for (const pattern of patterns) {
+        if (matchesPattern(filePath, relativePath, pattern)) {
+          isIgnored = !pattern.isNegated;
+        }
+      }
+      
+      return isIgnored;
+    };
+  } catch {
+    // .gitignore doesn't exist or can't be read, return a function that never ignores
+    return (): boolean => false;
+  }
+};
+
+/**
+ * Creates an ignore filter that combines multiple ignore filters
+ * @param filters Array of ignore filter functions
+ * @returns A combined ignore filter function
+ */
+export const combineIgnoreFilters = (
+  filters: Array<(filePath: string) => boolean>
+): ((filePath: string) => boolean) => {
+  return (filePath: string): boolean => {
+    return filters.some(filter => filter(filePath));
+  };
+};
 ````
 
 ## File: tests/integration/mem-api-file-ops.test.ts
@@ -2104,424 +1456,6 @@ describe('MemAPI Git Ops Integration Tests', () => {
 });
 ````
 
-## File: tests/setup.ts
-````typescript
-import { beforeAll, afterAll, jest } from '@jest/globals';
-
-// Jest setup file to handle Node.js v25+ compatibility issues
-Object.defineProperty(global, 'localStorage', {
-  value: {
-    getItem: jest.fn(),
-    setItem: jest.fn(),
-    removeItem: jest.fn(),
-    clear: jest.fn(),
-  },
-  writable: true,
-});
-
-
-// --- Console Output Suppression ---
-// The following hooks suppress console output during test runs to keep the output clean.
-// This is crucial for identifying real test failures without noise from application logs.
-// The original console methods are restored after all tests complete.
-
-beforeAll(() => {
-  jest.spyOn(console, 'log').mockImplementation(() => {});
-  jest.spyOn(console, 'warn').mockImplementation(() => {});
-  jest.spyOn(console, 'error').mockImplementation(() => {});
-  jest.spyOn(console, 'info').mockImplementation(() => {});
-  jest.spyOn(console, 'debug').mockImplementation(() => {});
-});
-
-afterAll(() => {
-  jest.restoreAllMocks();
-});
-````
-
-## File: debug-stash.ts
-````typescript
-#!/usr/bin/env ts-node
-
-import simpleGit from 'simple-git';
-import { createTestHarness, cleanupTestHarness } from './tests/lib/test-harness.ts';
-
-async function debugStashOperations() {
-  console.log('=== Debugging Stash Operations ===');
-
-  const harness = await createTestHarness();
-
-  try {
-    // Step 1: Create initial commit
-    console.log('\n1. Creating initial commit...');
-    await harness.mem.writeFile('init.txt', 'initial file');
-    await harness.mem.commitChanges('initial commit for stash test');
-    console.log('Initial commit created');
-
-    // Step 2: Create file1.md and save checkpoint
-    console.log('\n2. Creating file1.md and saving checkpoint...');
-    await harness.mem.writeFile('file1.md', 'content1');
-    console.log('file1.md created, exists:', await harness.mem.fileExists('file1.md'));
-
-    const saveSuccess = await harness.mem.saveCheckpoint();
-    console.log('saveCheckpoint success:', saveSuccess);
-    console.log('file1.md exists after saveCheckpoint:', await harness.mem.fileExists('file1.md'));
-
-    // Check git status
-    const status1 = await harness.git.status();
-    console.log('Git status after saveCheckpoint:', {
-      staged: status1.staged,
-      modified: status1.modified,
-      created: status1.created,
-      not_added: status1.not_added,
-      isClean: status1.isClean()
-    });
-
-    // Check stash list
-    const stashes = await harness.git.stashList();
-    console.log('Stash list:', stashes.all.length, 'stashes');
-
-    // Step 3: Create file2.md
-    console.log('\n3. Creating file2.md...');
-    await harness.mem.writeFile('file2.md', 'content2');
-    console.log('file2.md created, exists:', await harness.mem.fileExists('file2.md'));
-    console.log('file1.md exists:', await harness.mem.fileExists('file1.md'));
-
-    // Check git status
-    const status2 = await harness.git.status();
-    console.log('Git status after creating file2.md:', {
-      staged: status2.staged,
-      modified: status2.modified,
-      created: status2.created,
-      not_added: status2.not_added,
-      isClean: status2.isClean()
-    });
-
-    // Step 4: Revert to checkpoint
-    console.log('\n4. Reverting to checkpoint...');
-    const revertSuccess = await harness.mem.revertToLastCheckpoint();
-    console.log('revertToLastCheckpoint success:', revertSuccess);
-    console.log('file1.md exists after revert:', await harness.mem.fileExists('file1.md'));
-    console.log('file2.md exists after revert:', await harness.mem.fileExists('file2.md'));
-
-    // Check git status after revert
-    const status3 = await harness.git.status();
-    console.log('Git status after revert:', {
-      staged: status3.staged,
-      modified: status3.modified,
-      created: status3.created,
-      not_added: status3.not_added,
-      isClean: status3.isClean()
-    });
-
-    // Check stash list after revert
-    const stashesAfter = await harness.git.stashList();
-    console.log('Stash list after revert:', stashesAfter.all.length, 'stashes');
-
-  } finally {
-    await cleanupTestHarness(harness);
-  }
-}
-
-debugStashOperations().catch(console.error);
-````
-
-## File: INSTALL_TERMUX.md
-````markdown
-# Termux Installation Guide
-
-This project works on Termux with some modifications due to Android's filesystem limitations.
-
-## Prerequisites
-```bash
-pkg update && pkg upgrade
-pkg install nodejs npm git
-```
-
-## Installation (Termux-specific)
-```bash
-# Install dependencies with Termux compatibility flags
-npm install --ignore-scripts --no-bin-links
-
-# Make binaries executable
-find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \;
-find node_modules -name "tsx" -type f -exec chmod +x {} \;
-find node_modules -name "esbuild" -type f -exec chmod +x {} \;
-
-# Run TypeScript compiler directly using npx
-npx tsc
-
-# Start development server
-npx tsx watch src/server.ts
-```
-
-## Alternative: Use the prepared scripts
-```bash
-npm run install:termux
-npm run dev:termux
-```
-
-## Known Limitations
-- Binary executables need manual permission fixes
-- Some linting tools may not work due to missing binaries
-- ESLint and Prettier dependencies removed for compatibility
-````
-
-## File: src/lib/gitignore-parser.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-
-/**
- * Represents a parsed gitignore pattern
- */
-interface GitignorePattern {
-  pattern: string;
-  isNegated: boolean;
-  isDirectory: boolean;
-}
-
-/**
- * Creates a gitignore pattern object from a raw pattern string
- */
-const parsePattern = (rawPattern: string): GitignorePattern | null => {
-  // Skip empty lines and comments
-  if (!rawPattern.trim() || rawPattern.trim().startsWith('#')) {
-    return null;
-  }
-
-  const trimmed = rawPattern.trim();
-  const isNegated = trimmed.startsWith('!');
-  const pattern = isNegated ? trimmed.slice(1) : trimmed;
-  const isDirectory = pattern.endsWith('/');
-
-  return {
-    pattern: isDirectory ? pattern.slice(0, -1) : pattern,
-    isNegated,
-    isDirectory,
-  };
-};
-
-/**
- * Tests if a file path matches a gitignore pattern
- */
-const matchesPattern = (
-  filePath: string,
-  relativePath: string,
-  parsedPattern: GitignorePattern
-): boolean => {
-  const { pattern, isDirectory } = parsedPattern;
-  
-  // Convert gitignore pattern to regex
-  let regexPattern = pattern
-    // Escape special regex characters except * and ?
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    // Convert * to match any characters except path separators
-    .replace(/\*/g, '[^/]*')
-    // Convert ? to match any single character except path separators
-    .replace(/\?/g, '[^/]')
-    // Convert ** to match any characters including path separators
-    .replace(/\*\*/g, '.*')
-    // Anchors for start and end
-    .replace(/^(?![^/])/, '^')
-    .replace(/(?<![^/])$/, '$');
-
-  // If pattern doesn't contain a slash, match against basename only
-  if (!pattern.includes('/')) {
-    regexPattern = `(?:^|.*/)${regexPattern}`;
-  }
-
-  const regex = new RegExp(regexPattern);
-  
-  // For directory patterns, ensure we're matching directories
-  if (isDirectory) {
-    // Check if it's a directory (ends with / in relative path)
-    if (!relativePath.endsWith('/')) {
-      return false;
-    }
-  }
-
-  // Test against relative path
-  const matches = regex.test(relativePath);
-  
-  return matches;
-};
-
-/**
- * Creates an ignore filter function from a .gitignore file
- * @param directory The directory containing the .gitignore file
- * @returns A function that returns true if a path should be ignored
- */
-export const createIgnoreFilter = async (
-  directory: string
-): Promise<(filePath: string) => boolean> => {
-  const gitignorePath = path.join(directory, '.gitignore');
-  
-  try {
-    const content = await fs.readFile(gitignorePath, 'utf-8');
-    const lines = content.split('\n');
-    
-    const patterns: GitignorePattern[] = [];
-    for (const line of lines) {
-      const parsed = parsePattern(line);
-      if (parsed) {
-        patterns.push(parsed);
-      }
-    }
-
-    // Return the filter function
-    return (filePath: string): boolean => {
-      const relativePath = path.relative(directory, filePath);
-      
-      if (relativePath === '') return false; // Never ignore the root directory
-      
-      let isIgnored = false;
-      
-      // Process patterns in order
-      for (const pattern of patterns) {
-        if (matchesPattern(filePath, relativePath, pattern)) {
-          isIgnored = !pattern.isNegated;
-        }
-      }
-      
-      return isIgnored;
-    };
-  } catch {
-    // .gitignore doesn't exist or can't be read, return a function that never ignores
-    return (): boolean => false;
-  }
-};
-
-/**
- * Creates an ignore filter that combines multiple ignore filters
- * @param filters Array of ignore filter functions
- * @returns A combined ignore filter function
- */
-export const combineIgnoreFilters = (
-  filters: Array<(filePath: string) => boolean>
-): ((filePath: string) => boolean) => {
-  return (filePath: string): boolean => {
-    return filters.some(filter => filter(filePath));
-  };
-};
-````
-
-## File: tests/integration/mem-api-graph-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Graph Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    // Disable .gitignore for these tests so we can correctly search .log files
-    harness = await createTestHarness({ withGitignore: false });
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should query the graph with multiple conditions', async () => {
-    const pageAContent = `
-- # Page A
-  - prop:: value
-  - Link to [[Page B]].
-    `;
-    const pageBContent = `
-- # Page B
-  - prop:: other
-  - No links here.
-    `;
-
-    await mem.writeFile('PageA.md', pageAContent);
-    await mem.writeFile('PageB.md', pageBContent);
-
-    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(1);
-    expect(results[0]).toBeDefined();
-    expect(results[0]?.filePath).toBe('PageA.md');
-  });
-
-  it('should return an empty array for a query with no matches', async () => {
-    const pageAContent = `- # Page A\n  - prop:: value`;
-    await mem.writeFile('PageA.md', pageAContent);
-
-    const query = `(property prop:: non-existent-value)`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(0);
-  });
-
-  it('should get backlinks and outgoing links', async () => {
-    // PageA links to PageB and PageC
-    await mem.writeFile('PageA.md', '- Links to [[Page B]] and [[Page C]].');
-    // PageB links to PageC
-    await mem.writeFile('PageB.md', '- Links to [[Page C]].');
-    // PageC has no outgoing links
-    await mem.writeFile('PageC.md', '- No links.');
-    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
-    await mem.writeFile('PageD.md', '- Links to [[PageA]].');
-
-    // Test outgoing links
-    const outgoingA = await mem.getOutgoingLinks('PageA.md');
-    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
-    expect(outgoingA.length).toBe(2);
-
-    const outgoingC = await mem.getOutgoingLinks('PageC.md');
-    expect(outgoingC).toEqual([]);
-
-    // Test backlinks
-    const backlinksA = await mem.getBacklinks('PageA.md');
-    expect(backlinksA).toEqual(['PageD.md']);
-
-    const backlinksC = await mem.getBacklinks('PageC.md');
-    expect(backlinksC).toEqual(
-      expect.arrayContaining(['PageA.md', 'PageB.md'])
-    );
-    expect(backlinksC.length).toBe(2);
-  });
-
-  it('should perform a global full-text search', async () => {
-    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
-    await mem.writeFile('b.md', '- This file has a common-search-term.');
-    await mem.writeFile('c.log', 'This one also has a common-search-term.');
-    await mem.writeFile(
-      'd.txt',
-      'This file has nothing interesting to find.'
-    );
-
-    // Search for a unique term
-    const uniqueResults = await mem.searchGlobal('unique-search-term');
-    expect(uniqueResults).toEqual(['a.txt']);
-
-    // Search for a common term
-    const commonResults = await mem.searchGlobal('common-search-term');
-    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
-    expect(commonResults.length).toBe(2);
-
-    // Search for a non-existent term
-    const noResults = await mem.searchGlobal('non-existent-term');
-    expect(noResults).toEqual([]);
-  });
-});
-````
-
 ## File: tests/integration/mem-api-state-ops.test.ts
 ````typescript
 import {
@@ -2678,6 +1612,40 @@ describe('MemAPI Util Ops Integration Tests', () => {
       /Failed to count tokens for not-real.txt/
     );
   });
+});
+````
+
+## File: tests/setup.ts
+````typescript
+import { beforeAll, afterAll, jest } from '@jest/globals';
+
+// Jest setup file to handle Node.js v25+ compatibility issues
+Object.defineProperty(global, 'localStorage', {
+  value: {
+    getItem: jest.fn(),
+    setItem: jest.fn(),
+    removeItem: jest.fn(),
+    clear: jest.fn(),
+  },
+  writable: true,
+});
+
+
+// --- Console Output Suppression ---
+// The following hooks suppress console output during test runs to keep the output clean.
+// This is crucial for identifying real test failures without noise from application logs.
+// The original console methods are restored after all tests complete.
+
+beforeAll(() => {
+  jest.spyOn(console, 'log').mockImplementation(() => {});
+  jest.spyOn(console, 'warn').mockImplementation(() => {});
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  jest.spyOn(console, 'info').mockImplementation(() => {});
+  jest.spyOn(console, 'debug').mockImplementation(() => {});
+});
+
+afterAll(() => {
+  jest.restoreAllMocks();
 });
 ````
 
@@ -3184,6 +2152,123 @@ export interface ExecutionConstraints {
 }
 ````
 
+## File: tests/integration/mem-api-graph-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Graph Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    // Disable .gitignore for these tests so we can correctly search .log files
+    harness = await createTestHarness({ withGitignore: false });
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should query the graph with multiple conditions', async () => {
+    const pageAContent = `
+- # Page A
+  - prop:: value
+  - Link to [[Page B]].
+    `;
+    const pageBContent = `
+- # Page B
+  - prop:: other
+  - No links here.
+    `;
+
+    await mem.writeFile('PageA.md', pageAContent);
+    await mem.writeFile('PageB.md', pageBContent);
+
+    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    expect(results[0]?.filePath).toBe('PageA.md');
+  });
+
+  it('should return an empty array for a query with no matches', async () => {
+    const pageAContent = `- # Page A\n  - prop:: value`;
+    await mem.writeFile('PageA.md', pageAContent);
+
+    const query = `(property prop:: non-existent-value)`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('should get backlinks and outgoing links', async () => {
+    // PageA links to PageB and PageC
+    await mem.writeFile('PageA.md', '- Links to [[Page B]] and [[Page C]].');
+    // PageB links to PageC
+    await mem.writeFile('PageB.md', '- Links to [[Page C]].');
+    // PageC has no outgoing links
+    await mem.writeFile('PageC.md', '- No links.');
+    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
+    await mem.writeFile('PageD.md', '- Links to [[PageA]].');
+
+    // Test outgoing links
+    const outgoingA = await mem.getOutgoingLinks('PageA.md');
+    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
+    expect(outgoingA.length).toBe(2);
+
+    const outgoingC = await mem.getOutgoingLinks('PageC.md');
+    expect(outgoingC).toEqual([]);
+
+    // Test backlinks
+    const backlinksA = await mem.getBacklinks('PageA.md');
+    expect(backlinksA).toEqual(['PageD.md']);
+
+    const backlinksC = await mem.getBacklinks('PageC.md');
+    expect(backlinksC).toEqual(
+      expect.arrayContaining(['PageA.md', 'PageB.md'])
+    );
+    expect(backlinksC.length).toBe(2);
+  });
+
+  it('should perform a global full-text search', async () => {
+    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
+    await mem.writeFile('b.md', '- This file has a common-search-term.');
+    await mem.writeFile('c.log', 'This one also has a common-search-term.');
+    await mem.writeFile(
+      'd.txt',
+      'This file has nothing interesting to find.'
+    );
+
+    // Search for a unique term
+    const uniqueResults = await mem.searchGlobal('unique-search-term');
+    expect(uniqueResults).toEqual(['a.txt']);
+
+    // Search for a common term
+    const commonResults = await mem.searchGlobal('common-search-term');
+    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
+    expect(commonResults.length).toBe(2);
+
+    // Search for a non-existent term
+    const noResults = await mem.searchGlobal('non-existent-term');
+    expect(noResults).toEqual([]);
+  });
+});
+````
+
 ## File: .env.test
 ````
 # Test Environment Configuration
@@ -3455,478 +2540,6 @@ worktrees/*/.git/
 {"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
-## File: docs/readme.md
-````markdown
-# Recursa: The Git-Native Memory Layer for Local-First LLMs
-
-**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
-
-**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
-
-Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
-
----
-
-## The Problem: Agent Amnesia & The RAG Ceiling
-
-You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
-
-1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
-2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
-3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
-
-Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
-
-## The Recursa Philosophy: Core Features
-
-Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
-
-- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
-- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
-- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
-- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
-
-## How It Works: Architecture
-
-Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
-
-```mermaid
-graph TD
-    subgraph Your Local Machine
-        A[MCP Client <br> e.g., your script, or a compatible editor]
-        B[Recursa MCP Server <br> (This Project)]
-        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
-
-        A -- 1. User Query via Stdio --> B
-        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
-        B -- 3. Executes Sandboxed Code --> C
-        C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply & Notifications --> A
-    end
-
-    subgraph Cloud Service
-        D
-    end
-
-    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
-    style B fill:#fff2cc,stroke:#333,stroke-width:2px
-```
-
-1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
-3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
-4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
-5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
-
-## An Agent in Action: Example Workflow
-
-**Scenario:** An agent is asked to learn about a new person.
-
-**1. User Query:**
-"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
-
-**2. Turn 1: The agent communicates its intent and acts efficiently.**
-The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
-
-**LLM Response (Turn 1):**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    `- # AI Research Institute\n  - type:: organization\n`
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
-);
-</typescript>
-```
-
-_Recursa executes the code and confirms success to the LLM._
-
-**3. Turn 2: The agent saves its work and replies to the user.**
-Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
-
-**LLM Response (Turn 2):**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
-- An [OpenRouter.ai](https://openrouter.ai/) API Key
-
-### 1. Installation
-
-```bash
-git clone https://github.com/your-username/recursa.git
-cd recursa
-npm install
-```
-
-### 2. Configuration
-
-Create a `.env` file in the root of the project by copying the example:
-
-```bash
-cp .env.example .env
-```
-
-Now, edit your `.env` file with your details:
-
-```env
-# Your OpenRouter API Key
-OPENROUTER_API_KEY="sk-or-..."
-
-# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
-KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
-
-# The model you want to use from OpenRouter
-LLM_MODEL="anthropic/claude-3-sonnet-20240229"
-```
-
-### 3. Running the Server
-
-```bash
-bun run start
-```
-
-This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
-
-## 🗺️ Roadmap
-
-Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
-
-- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
-- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
-- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
-- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
-- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
-
-## 🧑‍💻 Contributing
-
-Recursa is designed to be hacked on. Contributions are welcome!
-
-### Adding New Tools
-
-To add a new tool (e.g., `mem.searchWeb(query)`):
-
-1.  Implement the function's logic in a file within `src/core/mem-api/`.
-2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
-3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
-4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
-5.  Open a Pull Request!
-
-## 📜 License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-**Stop building infrastructure. Start building intelligence.**
-````
-
-## File: docs/rules.md
-````markdown
-codebase compliance rules;
-
-1. No OOP, only HOFs
-2. Use Node.js and e2e type safe TypeScript
-3. No unknown or any type
-4. [e2e|integration|unit]/[domain].test.ts files & dirs
-5. Jest tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
-6. DRY
-````
-
-## File: docs/system-prompt.md
-````markdown
-# Recursa Agent System Prompt
-
-You are Recursa, a Git-Native AI agent. Your mind is a local knowledge graph, your actions are TypeScript code, and your memory is a `git` history. You do not simply answer questions; you reason, modify the graph, and commit your work.
-
-Your entire existence is defined by the **Think-Act-Commit** loop.
-
----
-
-## 1. CRITICAL: Response Format
-
-Every response you generate MUST conform to the following XML-like structure. Failure to adhere to this format will break the execution loop.
-
-### Core Tags
-
-- `<think>`: **A user-facing status update.** A short, non-technical sentence describing the action you are about to take. This is shown to the user in real-time. **This tag is mandatory in every turn.**
-- `<typescript>`: A TypeScript code snippet to be executed in the secure sandbox. This is where your technical plan is implemented.
-- `<reply>`: The final, user-facing summary of the completed work. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
-
-### A CRITICAL Syntax Rule: Multiline Strings
-
-**For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
-
-**Correct:**
-
-```typescript
-await mem.writeFile(
-  'example.md',
-  `
-# This is a title
-This is a multiline document.
-`
-);
-```
-
-**INCORRECT AND FORBIDDEN:**
-
-```typescript
-// This will fail!
-await mem.writeFile('example.md', '
-# This is a title
-This is a multiline document.
-');
-```
-
-### Response Patterns
-
-**Pattern A: Action Turn (Think & Act)**
-
-```xml
-<think>
-[A simple, user-friendly message about what you're doing next.]
-</think>
-<typescript>
-[A block of TypeScript code to perform one or more related actions using the `mem` API.]
-</typescript>
-```
-
-**Pattern B: Final Turn (Commit & Reply)**
-
-```xml
-<think>
-[A simple, user-friendly message about saving the work.]
-</think>
-<typescript>
-await mem.commitChanges('[A concise, imperative git commit message]');
-</typescript>
-<reply>
-[The final, natural language response to the user.]
-</reply>
-```
-
----
-
-## 2. CRITICAL: Output Syntax - Logseq Block Formatting
-
-All content you write to files **MUST** conform to Logseq/Org-mode block-based syntax. This is not optional. Every piece of information must be a nested item, not just free-form markdown.
-
-### Core Rules
-
-1.  **Everything is a Block:** Every line of content must start with a dash (`- `).
-2.  **Nesting is Key:** Use two spaces (`  `) to indent and create nested blocks.
-3.  **Properties are Nested:** `key:: value` pairs must be nested under the block they describe.
-
-**Correct:**
-
-```typescript
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  `
-- # Dr. Aris Thorne
-  - type:: person
-  - affiliation:: [[AI Research Institute]]
-`
-);
-```
-
-**INCORRECT AND FORBIDDEN:**
-
-```typescript
-// This is flat markdown and will be rejected.
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]'
-);
-```
-
----
-
-## 3. A Critical Principle: Maximum Efficiency
-
-Your performance is measured by how few turns you take to complete a task. Each turn is an expensive LLM call. Therefore, you **MUST** design your `<typescript>` actions to do as much work as possible in a single step. Your goal is to solve the request in the fewest turns possible.
-
-- **DO:** Check for a file, create it if it's missing, and then write a second related file all in one `<typescript>` block.
-- **DO NOT:** Use one turn to check if a file exists, a second turn to create it, and a third turn to create another. This is slow, expensive, and incorrect.
-
----
-
-## 4. The `mem` API: Your Sandboxed Toolkit
-
-You have access to a global `mem` object with asynchronous methods. **ALL `mem` calls MUST be `await`ed.** For the complete API reference, read `tools.md`.
-
-**Key Tool Categories:**
-
-- **Core File I/O:** `mem.readFile`, `mem.writeFile`, `mem.updateFile`, `mem.fileExists`, `mem.listFiles`.
-- **Git-Native Operations:** `mem.commitChanges`, `mem.gitLog`, `mem.gitDiff`.
-- **Intelligent Graph Operations:** `mem.queryGraph`, `mem.getBacklinks`, `mem.getOutgoingLinks`.
-
----
-
-## 5. The Core Workflow: Think-Act-Commit
-
-Your operational cycle must follow this logical progression.
-
-1.  **Internal Thought Process (No Output):** Understand the request, investigate the graph using `mem` tools, and formulate an efficient, multi-step plan to be executed in a single `<typescript>` block.
-
-2.  **Communicate & Act (Generate Output):**
-    - Write a user-facing `<think>` tag that simplifies your plan into a single, clear sentence.
-    - Write the `<typescript>` code to execute your complete plan.
-
-3.  **Commit & Reply (Final Turn):**
-    - Once the work is done, write a `<think>` message about saving the changes.
-    - Write the `<typescript>` code to call `mem.commitChanges()`.
-    - Write the final `<reply>` to the user.
-
----
-
-## 6. Example of an Efficient Turn
-
-**User:** "Add Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning."
-
-**Turn 1: Agent communicates its intent and acts efficiently.**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    `- # AI Research Institute\n  - type:: organization\n`
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
-);
-</typescript>
-```
-
-**Turn 2: Agent communicates saving and provides the final reply.**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-````
-
-## File: docs/tools.md
-````markdown
-# TOOLS.md: Recursa Sandboxed API (`mem` Object)
-
-The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
-
-**All methods are asynchronous (`Promise<T>`) and MUST be called using `await`.**
-
-## Category 1: Core File & Directory Operations
-
-These are the fundamental building blocks for manipulating the Logseq/Obsidian graph structure.
-
-| Method               | Signature                                                                      | Returns             | Description                                                                                                                                                                                                                                                                                                                              |
-| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                                                                                                                                                                                                                                |
-| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories. **Note:** For files ending in `.md`, the content is automatically validated against Logseq/Org-mode block format rules. An error will be thrown if validation fails.                       |
-| **`mem.updateFile`** | `(filePath: string, oldContent: string, newContent: string): Promise<boolean>` | `Promise<boolean>`  | **Performs an atomic Compare-and-Swap.** Replaces the entire file content with `newContent` ONLY IF the current content exactly matches `oldContent`. This prevents race conditions and overwriting other changes. **Usage:** Read a file, transform its content in your code, then call `updateFile` with the original and new content. **Note:** For files ending in `.md`, the `newContent` is automatically validated against Logseq/Org-mode block format rules. An error will be thrown if validation fails. |
-| **`mem.deletePath`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or directory recursively.                                                                                                                                                                                                                                                                                     |
-| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                                                                                                                                                                                                                              |
-| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                                                                                                                                                                                                                                 |
-| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                                                                                                                                                                                                                                     |
-| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                                                                                                                                                                                                                          |
-
----
-
-## Category 2: Git-Native Operations (Auditing & Versioning)
-
-These tools leverage the Git repository tracking the knowledge graph, allowing the agent to audit its own memory and understand historical context.
-
-| Method                    | Signature                                                                                              | Returns               | Description                                                                                                                                               |
-| :------------------------ | :----------------------------------------------------------------------------------------------------- | :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.gitDiff`**         | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.** |
-| **`mem.gitLog`**          | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                |
-| **`mem.getChangedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists all files that have been created, modified, staged, or deleted in the working tree. Provides a complete view of pending changes.                    |
-| **`mem.commitChanges`**   | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.   |
-
----
-
-## Category 3: Intelligent Graph & Semantic Operations
-
-These tools allow the agent to reason about the relationships and structure inherent in Logseq/Org Mode syntax, moving beyond simple file I/O.
-
-| Method                     | Signature                                                           | Returns                  | Description                                                                                                                                                                                                                                               |
-| :------------------------- | :------------------------------------------------------------------ | :----------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.queryGraph`**       | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. _Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`_ |
-| **`mem.getBacklinks`**     | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage.                                                                                                                                       |
-| **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**.                                                                                                                                                                     |
-| **`mem.searchGlobal`**     | `(query: string): Promise<string[]>`                                | `Promise<string[]>`      | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match.                                                                                                                                         |
-
----
-
-## Category 4: State Management & Checkpoints
-
-Tools for managing the working state during complex, multi-turn operations, providing a safety net against errors.
-
-| Method                           | Signature              | Returns            | Description                                                                                                                             |
-| :------------------------------- | :--------------------- | :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
-| **`mem.saveCheckpoint`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Saves the current state.** Stages all working changes (`git add .`) and creates a temporary stash. Use this before a risky operation. |
-| **`mem.revertToLastCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Reverts to the last saved state.** Restores the files to how they were when `saveCheckpoint` was last called.                         |
-| **`mem.discardChanges`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Performs a hard reset.** Abandons all current work (staged and unstaged changes) and reverts the repository to the last commit.       |
-
----
-
-## Category 5: Utility & Diagnostics
-
-General-purpose operations for the sandbox environment.
-
-| Method                          | Signature                                                          | Returns                     | Description                                                                                           |
-| :------------------------------ | :----------------------------------------------------------------- | :-------------------------- | :---------------------------------------------------------------------------------------------------- |
-| **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
-| **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
-| **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
-````
-
 ## File: src/types/git.ts
 ````typescript
 export interface GitOptions {
@@ -3960,200 +2573,6 @@ export type GitCommand =
   | 'log'
   | 'diff'
   | 'branch';
-````
-
-## File: tests/e2e/mcp-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-  createMockLLMQueryWithSpy,
-} from '../lib/test-harness';
-import { handleUserQuery } from '../../src/core/loop';
-
-describe('Agent Workflow E2E Tests (In-Process)', () => {
-  let harness: TestHarnessState;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should execute a simple file creation and commit query', async () => {
-    // 1. Arrange
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>Okay, creating the file.</think>
-         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`,
-      `<think>Committing the file.</think>
-         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
-         <reply>File created and committed.</reply>`,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'create file',
-      harness.mockConfig,
-      'simple-query-session',
-      'run-1',
-      mockQueryLLM,
-      async () => {}
-    );
-
-    // 3. Assert
-    expect(finalReply).toBe('File created and committed.');
-
-    // Verify side-effects
-    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: create hello.txt');
-  });
-
-  it('should correctly handle the Dr. Aris Thorne example', async () => {
-    // 1. Arrange
-    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
-<typescript>
-const orgPath = 'AI Research Institute.md';
-if (!await mem.fileExists(orgPath)) {
-  await mem.writeFile(orgPath, \`- # AI Research Institute
-  - type:: organization\`);
-}
-await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
-  - type:: person
-  - affiliation:: [[AI Research Institute]]
-  - field:: [[Symbolic Reasoning]]\`);
-</typescript>`;
-    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
-
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      turn1Response,
-      turn2Response,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'Create Dr. Aris Thorne',
-      harness.mockConfig,
-      'thorne-session',
-      'run-2',
-      mockQueryLLM,
-      async () => {}
-    );
-
-    // 3. Assert
-    expect(finalReply).toBe(
-      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
-    );
-
-    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
-    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
-
-    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe(
-      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
-    );
-  });
-
-  it('should save a checkpoint and successfully revert to it', async () => {
-    // 1. Arrange
-    // Stash requires an initial commit to work reliably.
-    await harness.mem.writeFile('init.txt', 'initial file');
-    await harness.mem.commitChanges('initial commit for stash test');
-
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>Writing file 1.</think>
-         <typescript>await mem.writeFile('file1.md', '- content1');</typescript>`,
-      `<think>Saving checkpoint.</think>
-         <typescript>await mem.saveCheckpoint();</typescript>`,
-      `<think>Writing file 2.</think>
-         <typescript>await mem.writeFile('file2.md', '- content2');</typescript>`,
-      `<think>Reverting to checkpoint.</think>
-         <typescript>await mem.revertToLastCheckpoint();</typescript>`,
-      `<think>Committing.</think>
-         <typescript>await mem.commitChanges('feat: add file1 and file2');</typescript>
-         <reply>Reverted and committed.</reply>`,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'test checkpoints',
-      harness.mockConfig,
-      'checkpoint-session',
-      'run-3',
-      mockQueryLLM,
-      async () => {}
-    );
-
-    // 3. Assert
-    expect(finalReply).toBe('Reverted and committed.');
-
-    // After `saveCheckpoint`, `file1.md` is stashed.
-    // After `writeFile('file2.md')`, `file2.md` is in the working directory.
-    // After `revertToLastCheckpoint` (`git stash pop`), stashed changes (`file1.md`) are
-    // applied, merging with working directory changes (`file2.md`).
-    expect(await harness.mem.fileExists('file1.md')).toBe(true);
-    expect(await harness.mem.fileExists('file2.md')).toBe(true);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: add file1 and file2');
-
-    expect(log.latest).not.toBeNull();
-
-    // Verify both files were part of the commit
-    const commitContent = await harness.git.show([
-      '--name-only',
-      log.latest!.hash,
-    ]);
-    expect(commitContent).toContain('file1.md');
-    expect(commitContent).toContain('file2.md');
-  });
-
-  it('should block and gracefully handle path traversal attempts', async () => {
-    // 1. Arrange
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>I will try to read a sensitive file.</think>
-         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`,
-      `<think>The previous action failed as expected due to security. I will inform the user.</think>
-         <reply>I was unable to access that file due to security restrictions.</reply>`,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'read sensitive file',
-      harness.mockConfig,
-      'security-session',
-      'run-4',
-      mockQueryLLM,
-      async () => {}
-    );
-
-    // 3. Assert
-    // The loop catches the security error, feeds it back to the LLM,
-    // and the LLM then generates the final reply.
-    expect(finalReply).toBe(
-      'I was unable to access that file due to security restrictions.'
-    );
-
-    // Verify the agent was given a chance to recover.
-    expect(mockQueryLLM).toHaveBeenCalledTimes(2);
-  });
-});
 ````
 
 ## File: src/core/mem-api/secure-path.ts
@@ -4606,6 +3025,200 @@ export interface MCPNotification {
   method: string;
   params?: unknown;
 }
+````
+
+## File: tests/e2e/mcp-workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+  createMockLLMQueryWithSpy,
+} from '../lib/test-harness';
+import { handleUserQuery } from '../../src/core/loop';
+
+describe('Agent Workflow E2E Tests (In-Process)', () => {
+  let harness: TestHarnessState;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should execute a simple file creation and commit query', async () => {
+    // 1. Arrange
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      `<think>Okay, creating the file.</think>
+         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`,
+      `<think>Committing the file.</think>
+         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
+         <reply>File created and committed.</reply>`,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'create file',
+      harness.mockConfig,
+      'simple-query-session',
+      'run-1',
+      mockQueryLLM,
+      async () => {}
+    );
+
+    // 3. Assert
+    expect(finalReply).toBe('File created and committed.');
+
+    // Verify side-effects
+    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: create hello.txt');
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example', async () => {
+    // 1. Arrange
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(orgPath, \`- # AI Research Institute
+  - type:: organization\`);
+}
+await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
+  - type:: person
+  - affiliation:: [[AI Research Institute]]
+  - field:: [[Symbolic Reasoning]]\`);
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
+
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      turn1Response,
+      turn2Response,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'Create Dr. Aris Thorne',
+      harness.mockConfig,
+      'thorne-session',
+      'run-2',
+      mockQueryLLM,
+      async () => {}
+    );
+
+    // 3. Assert
+    expect(finalReply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+
+    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+
+  it('should save a checkpoint and successfully revert to it', async () => {
+    // 1. Arrange
+    // Stash requires an initial commit to work reliably.
+    await harness.mem.writeFile('init.txt', 'initial file');
+    await harness.mem.commitChanges('initial commit for stash test');
+
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      `<think>Writing file 1.</think>
+         <typescript>await mem.writeFile('file1.md', '- content1');</typescript>`,
+      `<think>Saving checkpoint.</think>
+         <typescript>await mem.saveCheckpoint();</typescript>`,
+      `<think>Writing file 2.</think>
+         <typescript>await mem.writeFile('file2.md', '- content2');</typescript>`,
+      `<think>Reverting to checkpoint.</think>
+         <typescript>await mem.revertToLastCheckpoint();</typescript>`,
+      `<think>Committing.</think>
+         <typescript>await mem.commitChanges('feat: add file1 and file2');</typescript>
+         <reply>Reverted and committed.</reply>`,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'test checkpoints',
+      harness.mockConfig,
+      'checkpoint-session',
+      'run-3',
+      mockQueryLLM,
+      async () => {}
+    );
+
+    // 3. Assert
+    expect(finalReply).toBe('Reverted and committed.');
+
+    // After `saveCheckpoint`, `file1.md` is stashed.
+    // After `writeFile('file2.md')`, `file2.md` is in the working directory.
+    // After `revertToLastCheckpoint` (`git stash pop`), stashed changes (`file1.md`) are
+    // applied, merging with working directory changes (`file2.md`).
+    expect(await harness.mem.fileExists('file1.md')).toBe(true);
+    expect(await harness.mem.fileExists('file2.md')).toBe(true);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: add file1 and file2');
+
+    expect(log.latest).not.toBeNull();
+
+    // Verify both files were part of the commit
+    const commitContent = await harness.git.show([
+      '--name-only',
+      log.latest!.hash,
+    ]);
+    expect(commitContent).toContain('file1.md');
+    expect(commitContent).toContain('file2.md');
+  });
+
+  it('should block and gracefully handle path traversal attempts', async () => {
+    // 1. Arrange
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      `<think>I will try to read a sensitive file.</think>
+         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`,
+      `<think>The previous action failed as expected due to security. I will inform the user.</think>
+         <reply>I was unable to access that file due to security restrictions.</reply>`,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'read sensitive file',
+      harness.mockConfig,
+      'security-session',
+      'run-4',
+      mockQueryLLM,
+      async () => {}
+    );
+
+    // 3. Assert
+    // The loop catches the security error, feeds it back to the LLM,
+    // and the LLM then generates the final reply.
+    expect(finalReply).toBe(
+      'I was unable to access that file due to security restrictions.'
+    );
+
+    // Verify the agent was given a chance to recover.
+    expect(mockQueryLLM).toHaveBeenCalledTimes(2);
+  });
+});
 ````
 
 ## File: src/core/mem-api/git-ops.ts
@@ -5128,6 +3741,252 @@ export type MemAPI = {
 };
 ````
 
+## File: .env.example
+````
+# Recursa MCP Server Configuration
+# Copy this file to .env and update the values
+
+# Required: Path to your knowledge graph directory
+KNOWLEDGE_GRAPH_PATH=./knowledge-graph
+
+# Required: OpenRouter API key for LLM access
+# Get your API key from: https://openrouter.ai/keys
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# Required: API key for securing the Recursa server endpoint
+RECURSA_API_KEY=a-very-secret-key
+
+# Optional: Port for the HTTP server
+HTTP_PORT=8080
+
+# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
+# See https://openrouter.ai/models for a list of available models
+LLM_MODEL=anthropic/claude-3-haiku-20240307
+
+# Optional: LLM Configuration
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=4096
+
+# Optional: Sandbox Configuration (in milliseconds and megabytes)
+SANDBOX_TIMEOUT=30000
+SANDBOX_MEMORY_LIMIT=100
+
+# Optional: Git Configuration
+GIT_USER_NAME=Recursa Agent
+GIT_USER_EMAIL=recursa@local
+
+# Usage:
+# 1. Copy this file: cp .env.example .env
+# 2. Update OPENROUTER_API_KEY and RECURSA_API_KEY with your actual keys
+# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
+# 4. Run the server: npm run dev
+````
+
+## File: src/config.ts
+````typescript
+import 'dotenv/config';
+import { z } from 'zod';
+import path from 'path';
+import { promises as fs } from 'fs';
+import platform from './lib/platform.js';
+
+// Platform-specific default values
+const getPlatformDefaults = () => {
+  const resourceLimits = platform.getResourceLimits();
+
+  return {
+    // Conservative defaults for mobile/limited environments
+    LLM_MODEL: 'anthropic/claude-3-haiku-20240307',
+    LLM_TEMPERATURE: platform.isTermux ? 0.5 : 0.7,
+    LLM_MAX_TOKENS: platform.isTermux ? 2000 : 4000,
+    SANDBOX_TIMEOUT: Math.min(resourceLimits.maxCpuTime, 10000),
+    SANDBOX_MEMORY_LIMIT: Math.floor(resourceLimits.maxMemory / 1024 / 1024), // Convert to MB
+    GIT_USER_NAME: 'Recursa Agent',
+    GIT_USER_EMAIL: 'recursa@local'
+  };
+};
+
+const configSchema = z.object({
+  OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
+  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  RECURSA_API_KEY: z.string().min(1, 'RECURSA_API_KEY is required.'),
+  HTTP_PORT: z.coerce.number().default(8080).optional(),
+  LLM_MODEL: z.string().default(getPlatformDefaults().LLM_MODEL).optional(),
+  LLM_TEMPERATURE: z.coerce.number().default(getPlatformDefaults().LLM_TEMPERATURE).optional(),
+  LLM_MAX_TOKENS: z.coerce.number().default(getPlatformDefaults().LLM_MAX_TOKENS).optional(),
+  SANDBOX_TIMEOUT: z.coerce.number().default(getPlatformDefaults().SANDBOX_TIMEOUT).optional(),
+  SANDBOX_MEMORY_LIMIT: z.coerce.number().default(getPlatformDefaults().SANDBOX_MEMORY_LIMIT).optional(),
+  GIT_USER_NAME: z.string().default(getPlatformDefaults().GIT_USER_NAME).optional(),
+  GIT_USER_EMAIL: z.string().default(getPlatformDefaults().GIT_USER_EMAIL).optional(),
+});
+
+export type AppConfig = {
+  openRouterApiKey: string;
+  knowledgeGraphPath: string;
+  recursaApiKey: string;
+  httpPort: number;
+  llmModel: string;
+  llmTemperature: number;
+  llmMaxTokens: number;
+  sandboxTimeout: number;
+  sandboxMemoryLimit: number;
+  gitUserName: string;
+  gitUserEmail: string;
+};
+
+/**
+ * Normalize environment variable keys for cross-platform compatibility
+ */
+const normalizeEnvVars = () => {
+  const normalized: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      const normalizedKey = platform.normalizeEnvVar(key);
+      normalized[normalizedKey] = value;
+    }
+  }
+
+  return { ...process.env, ...normalized };
+};
+
+/**
+ * Resolve and validate the knowledge graph path with platform awareness
+ */
+const resolveKnowledgeGraphPath = (basePath: string): string => {
+  // Normalize path separators for the current platform
+  let resolvedPath = platform.normalizePath(basePath);
+
+  // Handle relative paths
+  if (!platform.isAbsolute(resolvedPath)) {
+    resolvedPath = platform.normalizePath(path.resolve(process.cwd(), resolvedPath));
+     
+    console.warn(
+      `KNOWLEDGE_GRAPH_PATH is not absolute. Resolved to: ${resolvedPath}`
+    );
+  }
+
+  // Handle platform-specific path requirements
+  if (platform.isWindows) {
+    // Ensure Windows paths are properly formatted
+    if (!/^[A-Za-z]:\\/.test(resolvedPath) && !resolvedPath.startsWith('\\\\')) {
+      // Add current drive letter if missing
+      const cwd = process.cwd();
+      const drive = cwd.substring(0, 2); // e.g., "C:"
+      resolvedPath = drive + resolvedPath;
+    }
+  }
+
+  return resolvedPath;
+};
+
+/**
+ * Validate that the knowledge graph directory exists and is accessible
+ */
+const validateKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => {
+  // Skip validation in test environments
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  try {
+    const stats = await fs.stat(resolvedPath);
+    if (!stats.isDirectory()) {
+      throw new Error('Path exists but is not a directory.');
+    }
+
+    // Test write permissions in a cross-platform way
+    const testFile = path.join(resolvedPath, '.recursa-write-test');
+    try {
+      await fs.writeFile(testFile, 'test');
+      await fs.unlink(testFile);
+    } catch {
+      if (platform.isWindows) {
+        throw new Error('Directory is not writable. Check folder permissions.');
+      } else if (platform.isTermux) {
+        throw new Error('Directory is not writable. Check Termux storage permissions.');
+      } else {
+        throw new Error('Directory is not writable. Check file permissions.');
+      }
+    }
+
+    // Check available disk space (Unix-like systems only)
+    if (!platform.isWindows) {
+      try {
+        const stats = await fs.statfs(resolvedPath);
+        const availableSpace = stats.bavail * stats.bsize;
+        const minSpace = 100 * 1024 * 1024; // 100MB minimum
+        if (availableSpace < minSpace) {
+          console.warn(`⚠️  Low disk space: ${Math.floor(availableSpace / 1024 / 1024)}MB available`);
+        }
+      } catch {
+        // Ignore filesystem stats errors
+      }
+    }
+
+  } catch (error) {
+    if ((error as Error & { code?: string }).code === 'ENOENT') {
+      throw new Error('Directory does not exist. Please create it before continuing.');
+    }
+    throw error;
+  }
+};
+
+export const loadAndValidateConfig = async (): Promise<AppConfig> => {
+  // Use normalized environment variables
+  const normalizedEnv = normalizeEnvVars();
+  const parseResult = configSchema.safeParse(normalizedEnv);
+
+  if (!parseResult.success) {
+     
+    console.error(
+      '❌ Invalid environment variables:',
+      parseResult.error.flatten().fieldErrors
+    );
+    process.exit(1);
+  }
+
+  const {
+    OPENROUTER_API_KEY,
+    KNOWLEDGE_GRAPH_PATH,
+    RECURSA_API_KEY,
+    HTTP_PORT,
+    LLM_MODEL,
+    LLM_TEMPERATURE,
+    LLM_MAX_TOKENS,
+    SANDBOX_TIMEOUT,
+    SANDBOX_MEMORY_LIMIT,
+    GIT_USER_NAME,
+    GIT_USER_EMAIL,
+  } = parseResult.data;
+
+  // Resolve and validate the knowledge graph path
+  const resolvedPath = resolveKnowledgeGraphPath(KNOWLEDGE_GRAPH_PATH);
+  await validateKnowledgeGraphPath(resolvedPath);
+
+  // Log platform-specific information
+  console.log(`🔧 Platform: ${platform.platformString}`);
+  if (platform.isTermux) {
+    console.log('📱 Running in Termux/Android environment');
+    console.log(`⚡ Memory limit: ${SANDBOX_MEMORY_LIMIT}MB, Timeout: ${SANDBOX_TIMEOUT}ms`);
+  }
+
+  return Object.freeze({
+    openRouterApiKey: OPENROUTER_API_KEY,
+    knowledgeGraphPath: resolvedPath,
+    recursaApiKey: RECURSA_API_KEY,
+    httpPort: HTTP_PORT!,
+    llmModel: LLM_MODEL!,
+    llmTemperature: LLM_TEMPERATURE!,
+    llmMaxTokens: LLM_MAX_TOKENS!,
+    sandboxTimeout: SANDBOX_TIMEOUT!,
+    sandboxMemoryLimit: SANDBOX_MEMORY_LIMIT!,
+    gitUserName: GIT_USER_NAME!,
+    gitUserEmail: GIT_USER_EMAIL!,
+  });
+};
+````
+
 ## File: tests/lib/test-harness.ts
 ````typescript
 import { jest } from '@jest/globals';
@@ -5476,252 +4335,6 @@ export const createMockHistory = (
 ];
 ````
 
-## File: .env.example
-````
-# Recursa MCP Server Configuration
-# Copy this file to .env and update the values
-
-# Required: Path to your knowledge graph directory
-KNOWLEDGE_GRAPH_PATH=./knowledge-graph
-
-# Required: OpenRouter API key for LLM access
-# Get your API key from: https://openrouter.ai/keys
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Required: API key for securing the Recursa server endpoint
-RECURSA_API_KEY=a-very-secret-key
-
-# Optional: Port for the HTTP server
-HTTP_PORT=8080
-
-# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
-# See https://openrouter.ai/models for a list of available models
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-
-# Optional: LLM Configuration
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4096
-
-# Optional: Sandbox Configuration (in milliseconds and megabytes)
-SANDBOX_TIMEOUT=30000
-SANDBOX_MEMORY_LIMIT=100
-
-# Optional: Git Configuration
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-
-# Usage:
-# 1. Copy this file: cp .env.example .env
-# 2. Update OPENROUTER_API_KEY and RECURSA_API_KEY with your actual keys
-# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
-# 4. Run the server: npm run dev
-````
-
-## File: src/config.ts
-````typescript
-import 'dotenv/config';
-import { z } from 'zod';
-import path from 'path';
-import { promises as fs } from 'fs';
-import platform from './lib/platform.js';
-
-// Platform-specific default values
-const getPlatformDefaults = () => {
-  const resourceLimits = platform.getResourceLimits();
-
-  return {
-    // Conservative defaults for mobile/limited environments
-    LLM_MODEL: 'anthropic/claude-3-haiku-20240307',
-    LLM_TEMPERATURE: platform.isTermux ? 0.5 : 0.7,
-    LLM_MAX_TOKENS: platform.isTermux ? 2000 : 4000,
-    SANDBOX_TIMEOUT: Math.min(resourceLimits.maxCpuTime, 10000),
-    SANDBOX_MEMORY_LIMIT: Math.floor(resourceLimits.maxMemory / 1024 / 1024), // Convert to MB
-    GIT_USER_NAME: 'Recursa Agent',
-    GIT_USER_EMAIL: 'recursa@local'
-  };
-};
-
-const configSchema = z.object({
-  OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
-  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
-  RECURSA_API_KEY: z.string().min(1, 'RECURSA_API_KEY is required.'),
-  HTTP_PORT: z.coerce.number().default(8080).optional(),
-  LLM_MODEL: z.string().default(getPlatformDefaults().LLM_MODEL).optional(),
-  LLM_TEMPERATURE: z.coerce.number().default(getPlatformDefaults().LLM_TEMPERATURE).optional(),
-  LLM_MAX_TOKENS: z.coerce.number().default(getPlatformDefaults().LLM_MAX_TOKENS).optional(),
-  SANDBOX_TIMEOUT: z.coerce.number().default(getPlatformDefaults().SANDBOX_TIMEOUT).optional(),
-  SANDBOX_MEMORY_LIMIT: z.coerce.number().default(getPlatformDefaults().SANDBOX_MEMORY_LIMIT).optional(),
-  GIT_USER_NAME: z.string().default(getPlatformDefaults().GIT_USER_NAME).optional(),
-  GIT_USER_EMAIL: z.string().default(getPlatformDefaults().GIT_USER_EMAIL).optional(),
-});
-
-export type AppConfig = {
-  openRouterApiKey: string;
-  knowledgeGraphPath: string;
-  recursaApiKey: string;
-  httpPort: number;
-  llmModel: string;
-  llmTemperature: number;
-  llmMaxTokens: number;
-  sandboxTimeout: number;
-  sandboxMemoryLimit: number;
-  gitUserName: string;
-  gitUserEmail: string;
-};
-
-/**
- * Normalize environment variable keys for cross-platform compatibility
- */
-const normalizeEnvVars = () => {
-  const normalized: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) {
-      const normalizedKey = platform.normalizeEnvVar(key);
-      normalized[normalizedKey] = value;
-    }
-  }
-
-  return { ...process.env, ...normalized };
-};
-
-/**
- * Resolve and validate the knowledge graph path with platform awareness
- */
-const resolveKnowledgeGraphPath = (basePath: string): string => {
-  // Normalize path separators for the current platform
-  let resolvedPath = platform.normalizePath(basePath);
-
-  // Handle relative paths
-  if (!platform.isAbsolute(resolvedPath)) {
-    resolvedPath = platform.normalizePath(path.resolve(process.cwd(), resolvedPath));
-     
-    console.warn(
-      `KNOWLEDGE_GRAPH_PATH is not absolute. Resolved to: ${resolvedPath}`
-    );
-  }
-
-  // Handle platform-specific path requirements
-  if (platform.isWindows) {
-    // Ensure Windows paths are properly formatted
-    if (!/^[A-Za-z]:\\/.test(resolvedPath) && !resolvedPath.startsWith('\\\\')) {
-      // Add current drive letter if missing
-      const cwd = process.cwd();
-      const drive = cwd.substring(0, 2); // e.g., "C:"
-      resolvedPath = drive + resolvedPath;
-    }
-  }
-
-  return resolvedPath;
-};
-
-/**
- * Validate that the knowledge graph directory exists and is accessible
- */
-const validateKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => {
-  // Skip validation in test environments
-  if (process.env.NODE_ENV === 'test') {
-    return;
-  }
-
-  try {
-    const stats = await fs.stat(resolvedPath);
-    if (!stats.isDirectory()) {
-      throw new Error('Path exists but is not a directory.');
-    }
-
-    // Test write permissions in a cross-platform way
-    const testFile = path.join(resolvedPath, '.recursa-write-test');
-    try {
-      await fs.writeFile(testFile, 'test');
-      await fs.unlink(testFile);
-    } catch {
-      if (platform.isWindows) {
-        throw new Error('Directory is not writable. Check folder permissions.');
-      } else if (platform.isTermux) {
-        throw new Error('Directory is not writable. Check Termux storage permissions.');
-      } else {
-        throw new Error('Directory is not writable. Check file permissions.');
-      }
-    }
-
-    // Check available disk space (Unix-like systems only)
-    if (!platform.isWindows) {
-      try {
-        const stats = await fs.statfs(resolvedPath);
-        const availableSpace = stats.bavail * stats.bsize;
-        const minSpace = 100 * 1024 * 1024; // 100MB minimum
-        if (availableSpace < minSpace) {
-          console.warn(`⚠️  Low disk space: ${Math.floor(availableSpace / 1024 / 1024)}MB available`);
-        }
-      } catch {
-        // Ignore filesystem stats errors
-      }
-    }
-
-  } catch (error) {
-    if ((error as Error & { code?: string }).code === 'ENOENT') {
-      throw new Error('Directory does not exist. Please create it before continuing.');
-    }
-    throw error;
-  }
-};
-
-export const loadAndValidateConfig = async (): Promise<AppConfig> => {
-  // Use normalized environment variables
-  const normalizedEnv = normalizeEnvVars();
-  const parseResult = configSchema.safeParse(normalizedEnv);
-
-  if (!parseResult.success) {
-     
-    console.error(
-      '❌ Invalid environment variables:',
-      parseResult.error.flatten().fieldErrors
-    );
-    process.exit(1);
-  }
-
-  const {
-    OPENROUTER_API_KEY,
-    KNOWLEDGE_GRAPH_PATH,
-    RECURSA_API_KEY,
-    HTTP_PORT,
-    LLM_MODEL,
-    LLM_TEMPERATURE,
-    LLM_MAX_TOKENS,
-    SANDBOX_TIMEOUT,
-    SANDBOX_MEMORY_LIMIT,
-    GIT_USER_NAME,
-    GIT_USER_EMAIL,
-  } = parseResult.data;
-
-  // Resolve and validate the knowledge graph path
-  const resolvedPath = resolveKnowledgeGraphPath(KNOWLEDGE_GRAPH_PATH);
-  await validateKnowledgeGraphPath(resolvedPath);
-
-  // Log platform-specific information
-  console.log(`🔧 Platform: ${platform.platformString}`);
-  if (platform.isTermux) {
-    console.log('📱 Running in Termux/Android environment');
-    console.log(`⚡ Memory limit: ${SANDBOX_MEMORY_LIMIT}MB, Timeout: ${SANDBOX_TIMEOUT}ms`);
-  }
-
-  return Object.freeze({
-    openRouterApiKey: OPENROUTER_API_KEY,
-    knowledgeGraphPath: resolvedPath,
-    recursaApiKey: RECURSA_API_KEY,
-    httpPort: HTTP_PORT!,
-    llmModel: LLM_MODEL!,
-    llmTemperature: LLM_TEMPERATURE!,
-    llmMaxTokens: LLM_MAX_TOKENS!,
-    sandboxTimeout: SANDBOX_TIMEOUT!,
-    sandboxMemoryLimit: SANDBOX_MEMORY_LIMIT!,
-    gitUserName: GIT_USER_NAME!,
-    gitUserEmail: GIT_USER_EMAIL!,
-  });
-};
-````
-
 ## File: tasks.md
 ````markdown
 # Tasks
@@ -5797,394 +4410,6 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 - **job-id**:
 - **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
 - **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
-````
-
-## File: tests/integration/workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  jest,
-} from '@jest/globals';
-import { handleUserQuery } from '../../src/core/loop';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  createMockLLMQueryWithSpy,
-  type TestHarnessState,
-} from '../lib/test-harness';
-describe('Agent Workflow Integration Tests', () => {
-  let harness: TestHarnessState;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  describe('Complete Workflow Integration', () => {
-    it('should execute a complete project lifecycle', async () => {
-      const sessionId = 'project-lifecycle';
-
-      // Phase 1: Initialize project
-      const initMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll initialize a new project with basic structure.</think>
-<typescript>
-// Create project structure
-await mem.writeFile('package.json', JSON.stringify({
-  name: 'test-project',
-  version: '1.0.0',
-  description: 'A test project',
-  scripts: { start: 'node index.js', test: 'jest' }
-}, null, 2));
-
-await mem.writeFile('README.md', '- # Test Project\n  - This is a comprehensive test project.');
-await mem.writeFile('index.js', 'console.log(\\"Hello, World!\\");');
-await mem.createDir('src');
-await mem.writeFile('src/app.js', '// Application logic');
-</typescript>`,
-        `<think>Project initialized. Now commit the initial setup.</think>
-<typescript>
-await mem.commitChanges('feat: initialize project with basic structure');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
-      ]);
-
-      const initResult = await handleUserQuery(
-        'Initialize a new Node.js project',
-        harness.mockConfig,
-        sessionId,
-        'run-1',
-        initMockLLMQuery,
-        async () => {}
-      );
-
-      expect(initResult).toContain('Project initialized successfully');
-
-      // Phase 2: Add features
-      const featureMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll add features to the existing project.</think>
-<typescript>
-// Add feature files
-await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
-await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
-await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', "// Test utilities\\nconst { formatDate } = require('../src/utils.js');");
-</typescript>`,
-        `<think>Features added. Commit the new functionality.</think>
-<typescript>
-await mem.commitChanges('feat: add utilities, config, and test structure');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
-      ]);
-
-      const featureResult = await handleUserQuery(
-        'Add utilities and configuration to the project',
-        harness.mockConfig,
-        sessionId,
-        'run-2',
-        featureMockLLMQuery,
-        async () => {}
-      );
-
-      expect(featureResult).toContain('Added utility functions');
-
-      // Phase 3: Update existing files
-      const updateMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll update the main application to use the new utilities.</think>
-<typescript>
-// Update main file
-const indexContent = await mem.readFile('index.js');
-const updatedIndex = indexContent.replace(
-  'console.log(\\"Hello, World!\\");',
-  'const { formatDate } = require(\\"./src/utils.js\\");\\nconsole.log(\\"Current time:\\", formatDate(new Date()));'
-);
-await mem.updateFile('index.js', indexContent, updatedIndex);
-
-// Update README
-const readmeContent = await mem.readFile('README.md');
-const updatedReadme = readmeContent + '\\n  - ## Usage\\n    - Run with: npm start';
-await mem.updateFile('README.md', readmeContent, updatedReadme);
-</typescript>`,
-        `<think>Main application updated. Commit the improvements.</think>
-<typescript>
-await mem.commitChanges('feat: integrate utilities and update documentation');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Updated the main application to use utilities and improved documentation.</reply>`,
-      ]);
-
-      const updateResult = await handleUserQuery(
-        'Update the main application to use the new utilities',
-        harness.mockConfig,
-        sessionId,
-        'run-3',
-        updateMockLLMQuery,
-        async () => {}
-      );
-
-      expect(updateResult).toContain('Updated the main application');
-
-      // Verify complete project state
-      const mem = harness.mem;
-
-      // Check all expected files exist
-      const expectedFiles = [
-        'package.json',
-        'README.md',
-        'index.js',
-        'src/app.js',
-        'src/utils.js',
-        'src/config.js',
-        'tests/utils.test.js',
-      ];
-
-      for (const file of expectedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Verify file contents
-      const indexContent = await mem.readFile('index.js');
-      expect(indexContent).toContain('formatDate');
-      expect(indexContent).toContain('./src/utils.js');
-
-      const readmeContent = await mem.readFile('README.md');
-      expect(readmeContent).toContain('Usage');
-      expect(readmeContent).toContain('npm start');
-
-      // Verify git history shows all three commits (plus initial .gitignore commit)
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(4);
-      expect(log.all[0]?.message).toBe(
-        'feat: integrate utilities and update documentation'
-      );
-      expect(log.all[1]?.message).toBe(
-        'feat: add utilities, config, and test structure'
-      );
-      expect(log.all[2]?.message).toBe(
-        'feat: initialize project with basic structure'
-      );
-    });
-
-    it('should handle complex file operations and git workflow', async () => {
-      const streamContentMock = jest.fn<
-        (content: { type: 'text'; text: string }) => Promise<void>
-      >();
-
-      const complexMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
-<typescript>
-// Create multiple related files
-await mem.writeFile('docs/intro.md', '- # Introduction\\n  - Project introduction.');
-await mem.writeFile('docs/guide.md', '- # User Guide\\n  - Detailed user guide.');
-await mem.writeFile('docs/api.md', '- # API Reference\\n  - API documentation.');
-
-// Create a temporary file that will be renamed
-await mem.writeFile('docs/temp.md', '- # Temporary\\n  - This will be renamed.');
-
-// Create a file that will be deleted
-await mem.writeFile('docs/obsolete.md', '- # Obsolete\\n  - This will be deleted.');
-
-// List files to verify
-const docsFiles = await mem.listFiles('docs');
-console.log('Files created:', docsFiles);
-</typescript>`,
-        `<think>Now I'll perform file operations: rename and delete.</think>
-<typescript>
-// Rename temp.md to overview.md
-await mem.rename('docs/temp.md', 'docs/overview.md');
-
-// Delete the obsolete file
-await mem.deletePath('docs/obsolete.md');
-
-// Update the introduction to reference the overview
-const introContent = await mem.readFile('docs/intro.md');
-const updatedIntro = introContent + '\\n  - See also: [[Overview]] for a project overview.';
-await mem.updateFile('docs/intro.md', introContent, updatedIntro);
-
-// Verify git staged files
-const stagedFiles = await mem.getChangedFiles();
-console.log('Staged files:', stagedFiles);
-</typescript>`,
-        `<think>File operations complete. Now commit and verify git operations.</think>
-<typescript>
-await mem.commitChanges('feat: reorganize documentation structure');
-
-// Test git operations
-const gitDiff = await mem.gitDiff('docs/intro.md');
-const gitLog = await mem.gitLog('docs/', 5);
-
-console.log('Git diff for intro.md:', gitDiff);
-console.log('Git log for docs/:', gitLog);
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>
-Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Perform complex file operations with git workflow',
-        harness.mockConfig,
-        'complex-ops-session',
-        'run-complex',
-        complexMockLLMQuery,
-        streamContentMock
-      );
-
-      expect(result).toContain(
-        'Successfully performed complex file operations'
-      );
-
-      // Verify status updates were captured throughout the process
-      expect(streamContentMock).toHaveBeenCalled();
-      if (streamContentMock.mock.calls && streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0] && streamContentMock.mock.calls[0].length > 0) {
-        const firstCallArg = streamContentMock.mock.calls[0][0];
-        expect(firstCallArg).toHaveProperty('type', 'text');
-        expect(firstCallArg.text).toContain('demonstrate complex file operations');
-      }
-
-      // Verify final file state
-      const mem = harness.mem;
-
-      // Files that should exist
-      const existingFiles = [
-        'docs/intro.md',
-        'docs/guide.md',
-        'docs/api.md',
-        'docs/overview.md',
-      ];
-      for (const file of existingFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Files that should not exist
-      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
-      for (const file of deletedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(false);
-      }
-
-      // Verify content was updated
-      const introContent = await mem.readFile('docs/intro.md');
-      expect(introContent).toContain('[[Overview]]');
-
-      // Verify git operations worked (plus initial .gitignore commit)
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0]?.message).toBe(
-        'feat: reorganize documentation structure'
-      );
-    });
-
-    it('should handle error scenarios and recovery gracefully', async () => {
-      const streamContentMock = jest.fn<
-        (content: { type: 'text'; text: string }) => Promise<void>
-      >();
-
-      const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll attempt various operations to test error handling and recovery.</think>
-<typescript>
-// This should fail - file doesn't exist
-try {
-  await mem.readFile('non-existent-config.json');
-} catch (error) {
-  console.log('Expected error caught:', error.message);
-}
-
-// This should also fail - invalid path traversal attempt
-try {
-  await mem.writeFile('../../../etc/malicious.txt', 'hack');
-} catch (error) {
-  console.log('Security error caught:', error.message);
-}
-
-// This should work - create the missing file
-await mem.writeFile('non-existent-config.json', '{"app": "test", "version": "1.0.0"}');
-</typescript>`,
-        `<think>Now I'll test additional error scenarios.</think>
-<typescript>
-// Try to update a file that doesn't exist
-try {
-  await mem.updateFile('missing.md', 'old content', 'new content');
-} catch (error) {
-  console.log('Update error caught:', error.message);
-  // Create the file instead
-  await mem.writeFile('missing.md', '- # Created after error\\n  - Content here.');
-}
-
-// Try to delete a file that doesn't exist
-try {
-  await mem.deletePath('already-deleted.md');
-} catch (error) {
-  console.log('Delete error caught:', error.message);
-}
-</typescript>`,
-        `<think>Error recovery completed. Now commit all successful operations.</think>
-<typescript>
-await mem.commitChanges('feat: demonstrate error handling and recovery');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>
-Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Test error handling and recovery scenarios',
-        harness.mockConfig,
-        'error-test-session',
-        'run-error',
-        errorRecoveryMockLLMQuery,
-        streamContentMock
-      );
-
-      expect(result).toContain(
-        'Successfully demonstrated comprehensive error handling'
-      );
-
-      // Verify status updates were captured (should include think and act updates)
-      expect(streamContentMock).toHaveBeenCalled();
-      if (streamContentMock.mock.calls && streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0] && streamContentMock.mock.calls[0].length > 0) {
-        const firstCallArg = streamContentMock.mock.calls[0][0];
-        expect(firstCallArg).toHaveProperty('type', 'text');
-        expect(firstCallArg.text).toContain('attempt various operations');
-      }
-
-      // Verify files that should exist after recovery
-      const mem = harness.mem;
-      const configExists = await mem.fileExists('non-existent-config.json');
-      expect(configExists).toBe(true);
-
-      const missingExists = await mem.fileExists('missing.md');
-      expect(missingExists).toBe(true);
-
-      // Verify content
-      const configContent = await mem.readFile('non-existent-config.json');
-      expect(configContent).toContain('test');
-      expect(configContent).toContain('1.0.0');
-
-      const missingContent = await mem.readFile('missing.md');
-      expect(missingContent).toContain('Created after error');
-
-      // Verify git commit was successful despite errors (plus initial .gitignore commit)
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0]?.message).toBe(
-        'feat: demonstrate error handling and recovery'
-      );
-    });
-  });
-});
 ````
 
 ## File: tests/unit/llm.test.ts
@@ -6344,6 +4569,205 @@ describe('LLM Module', () => {
 });
 ````
 
+## File: tests/integration/workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
+import { handleUserQuery } from '../../src/core/loop';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockLLMQueryWithSpy,
+  type TestHarnessState,
+} from '../lib/test-harness';
+
+describe('Agent Workflow Integration Tests', () => {
+  let harness: TestHarnessState;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should initialize a new project from scratch', async () => {
+    const sessionId = 'project-init';
+    const initMockLLMQuery = createMockLLMQueryWithSpy([
+      `<think>I'll initialize a new project with basic structure.</think>
+<typescript>
+await mem.writeFile('package.json', JSON.stringify({ name: 'test-project', version: '1.0.0' }, null, 2));
+await mem.writeFile('README.md', '- # Test Project');
+await mem.commitChanges('feat: initialize project');
+</typescript>
+<reply>Project initialized successfully.</reply>`,
+    ]);
+
+    const result = await handleUserQuery(
+      'Initialize a new Node.js project',
+      harness.mockConfig,
+      sessionId,
+      'run-1',
+      initMockLLMQuery,
+      async () => {}
+    );
+
+    expect(result).toBe('Project initialized successfully.');
+    expect(await harness.mem.fileExists('package.json')).toBe(true);
+    expect(await harness.mem.fileExists('README.md')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: initialize project');
+  });
+
+  it('should add features to an existing project', async () => {
+    // Setup: Create the initial project state
+    await harness.mem.writeFile(
+      'package.json',
+      JSON.stringify({ name: 'test-project' })
+    );
+    await harness.mem.writeFile('README.md', '- # Test Project');
+    await harness.mem.commitChanges('feat: initial project');
+
+    const sessionId = 'project-features';
+    const featureMockLLMQuery = createMockLLMQueryWithSpy([
+      `<think>I'll add features to the existing project.</think>
+<typescript>
+await mem.createDir('src');
+await mem.writeFile('src/utils.js', '// Utility functions');
+await mem.commitChanges('feat: add utilities');
+</typescript>
+<reply>Added utility functions.</reply>`,
+    ]);
+
+    const result = await handleUserQuery(
+      'Add utilities to the project',
+      harness.mockConfig,
+      sessionId,
+      'run-2',
+      featureMockLLMQuery,
+      async () => {}
+    );
+
+    expect(result).toBe('Added utility functions.');
+    expect(await harness.mem.fileExists('src/utils.js')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: add utilities');
+  });
+
+  it('should update existing files correctly', async () => {
+    // Setup: Create the initial project state
+    await harness.mem.writeFile('README.md', '- # Test Project');
+    await harness.mem.commitChanges('feat: initial project');
+
+    const sessionId = 'project-update';
+    const updateMockLLMQuery = createMockLLMQueryWithSpy([
+      `<think>I'll update the README.</think>
+<typescript>
+const content = await mem.readFile('README.md');
+const newContent = content + '\\n  - An update.';
+await mem.updateFile('README.md', content, newContent);
+await mem.commitChanges('docs: update README');
+</typescript>
+<reply>README updated.</reply>`,
+    ]);
+
+    const result = await handleUserQuery(
+      'Update the README',
+      harness.mockConfig,
+      sessionId,
+      'run-3',
+      updateMockLLMQuery,
+      async () => {}
+    );
+
+    expect(result).toBe('README updated.');
+    const readmeContent = await harness.mem.readFile('README.md');
+    expect(readmeContent).toContain('- An update.');
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('docs: update README');
+  });
+
+  it('should handle complex file operations like rename and delete', async () => {
+    const streamContentMock = jest.fn<(content: { type: 'text'; text: string }) => Promise<void>>();
+    await harness.mem.writeFile('docs/intro.md', '- # Introduction');
+    await harness.mem.commitChanges('docs: add intro');
+
+    const mockLLMQuery = createMockLLMQueryWithSpy([
+      `<think>I will rename a file, delete another, and update one.</think>
+<typescript>
+await mem.writeFile('docs/temp.md', '- # Temp');
+await mem.writeFile('docs/obsolete.md', '- # Obsolete');
+await mem.rename('docs/temp.md', 'docs/overview.md');
+await mem.deletePath('docs/obsolete.md');
+const intro = await mem.readFile('docs/intro.md');
+await mem.updateFile('docs/intro.md', intro, intro + '\\n  - Link to [[overview]]');
+await mem.commitChanges('feat: reorganize docs');
+</typescript>
+<reply>Docs reorganized.</reply>`,
+    ]);
+
+    const result = await handleUserQuery(
+      'Reorganize docs',
+      harness.mockConfig,
+      'complex-ops-session',
+      'run-complex',
+      mockLLMQuery,
+      streamContentMock
+    );
+
+    expect(result).toBe('Docs reorganized.');
+    expect(await harness.mem.fileExists('docs/overview.md')).toBe(true);
+    expect(await harness.mem.fileExists('docs/temp.md')).toBe(false);
+    expect(await harness.mem.fileExists('docs/obsolete.md')).toBe(false);
+    const introContent = await harness.mem.readFile('docs/intro.md');
+    expect(introContent).toContain('[[overview]]');
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: reorganize docs');
+  });
+
+  it('should recover from a file-not-found error', async () => {
+    const streamContentMock = jest.fn();
+    const mockLLMQuery = createMockLLMQueryWithSpy([
+      `<think>I will try to read a file that does not exist.</think>
+<typescript>
+try {
+  await mem.readFile('non-existent.md');
+} catch (e) {
+  console.log('Caught expected error');
+  await mem.writeFile('non-existent.md', '- # Created After Error');
+}
+</typescript>`,
+      `<think>Committing the new file.</think>
+<typescript>
+await mem.commitChanges('fix: create missing file after read error');
+</typescript>
+<reply>Handled error and created file.</reply>`,
+    ]);
+
+    const result = await handleUserQuery(
+      'Test error recovery',
+      harness.mockConfig,
+      'error-test-session',
+      'run-error',
+      mockLLMQuery,
+      streamContentMock
+    );
+
+    expect(result).toBe('Handled error and created file.');
+    expect(await harness.mem.fileExists('non-existent.md')).toBe(true);
+    const content = await harness.mem.readFile('non-existent.md');
+    expect(content).toBe('- # Created After Error');
+  });
+});
+````
+
 ## File: repomix.config.json
 ````json
 {
@@ -6385,7 +4809,8 @@ describe('LLM Module', () => {
       "agent-spawner.droid.md",
       "AGENTS.md",
       "repo",
-      "prompt"
+      "prompt",
+      "docs"
       //   "tests"
     ]
   },
@@ -6395,6 +4820,58 @@ describe('LLM Module', () => {
   "tokenCount": {
     "encoding": "o200k_base"
   }
+}
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastmcp": "^1.21.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
 }
 ````
 
@@ -6706,58 +5183,6 @@ export const listFiles =
       throw handleFileError(error, `list files in directory`, directoryPath || 'root');
     }
   };
-````
-
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/server.js",
-    "start:termux": "npm run start",
-    "start:standard": "npm run start",
-    "build": "tsc",
-    "build:auto": "node scripts/build.js",
-    "build:termux": "node scripts/build.js termux",
-    "build:standard": "node scripts/build.js standard",
-    "dev": "tsx watch src/server.ts",
-    "dev:termux": "npm run dev",
-    "dev:standard": "npm run dev",
-    "test": "jest",
-    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
-    "install:auto": "node scripts/install.js",
-    "install:termux": "node scripts/install.js termux",
-    "install:standard": "node scripts/install.js standard",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "fastmcp": "^1.21.0",
-    "dotenv": "^16.4.5",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^4.0.2",
-    "ts-jest": "^29.1.2",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "license": "MIT"
-}
 ````
 
 ## File: src/core/loop.ts

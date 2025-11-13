@@ -122,7 +122,7 @@ await mem.commitChanges('docs: update README');
   });
 
   it('should handle complex file operations like rename and delete', async () => {
-    const streamContentMock = jest.fn();
+    const streamContentMock = jest.fn<(content: { type: 'text'; text: string }) => Promise<void>>();
     await harness.mem.writeFile('docs/intro.md', '- # Introduction');
     await harness.mem.commitChanges('docs: add intro');
 
@@ -160,7 +160,9 @@ await mem.commitChanges('feat: reorganize docs');
   });
 
   it('should recover from a file-not-found error', async () => {
-    const streamContentMock = jest.fn();
+    const streamContentMock = jest.fn<
+      (content: { type: 'text'; text: string }) => Promise<void>
+    >();
     const mockLLMQuery = createMockLLMQueryWithSpy([
       `<think>I will try to read a file that does not exist.</think>
 <typescript>
