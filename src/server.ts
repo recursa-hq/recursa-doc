@@ -1,9 +1,8 @@
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
 import { loadAndValidateConfig } from './config.js';
-import { FastMCP } from 'fastmcp';
+import { FastMCP, UserError } from 'fastmcp';
 import { z } from 'zod';
-import type { StatusUpdate } from './types/loop.js';
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
@@ -16,6 +15,25 @@ const main = async () => {
     const server = new FastMCP({
       name: 'recursa-server',
       version: '0.1.0',
+      authenticate: async (request) => {
+        const authHeader = request.headers.get('authorization');
+        const token = authHeader?.startsWith('Bearer ')
+          ? authHeader.slice(7)
+          : null;
+
+        if (!token || token !== config.recursaApiKey) {
+          logger.warn('Authentication failed', {
+            remoteAddress: (request as any).socket?.remoteAddress, // Best effort IP logging
+          });
+          throw new Response(null, {
+            status: 401,
+            statusText: 'Unauthorized',
+          });
+        }
+
+        // Return an empty object for success, as we don't need to store user data in the session context itself
+        return {};
+      },
     });
 
     // 3. Add resources
@@ -38,63 +56,50 @@ const main = async () => {
         'Processes a high-level user query by running the agent loop.',
       parameters: z.object({
         query: z.string().describe('The user query to process.'),
-        sessionId: z
-          .string()
-          .describe('An optional session ID to maintain context.')
-          .optional(),
-        runId: z
-          .string()
-          .describe(
-            'A unique ID for this execution run, used for notifications.'
-          ),
       }),
-      execute: async (args, { log }) => {
-        const onStatusUpdate = (update: StatusUpdate) => {
-          // Map StatusUpdate to fastmcp logs, which are sent as notifications.
-          const { type, content, data } = update;
-          const message = `[${type}] ${content}`;
-
-          switch (type) {
-            case 'think':
-              log.info(content || 'Thinking...');
-              break;
-            case 'act':
-              log.info(message, data);
-              break;
-            case 'error':
-              log.error(message, undefined, data);
-              break;
-            default:
-              log.debug(message, data);
-          }
-        };
+      annotations: {
+        streamingHint: true,
+      },
+      execute: async (args, { log, sessionId, requestId, streamContent }) => {
+        if (!sessionId) {
+          throw new UserError(
+            'Session ID is missing. This tool requires a session.'
+          );
+        }
+        if (!requestId) {
+          throw new UserError(
+            'Request ID is missing. This tool requires a request ID.'
+          );
+        }
 
         try {
           const finalReply = await handleUserQuery(
             args.query,
             config,
-            args.sessionId,
-            undefined,
-            onStatusUpdate
+            sessionId,
+            requestId,
+            streamContent
           );
 
-          return JSON.stringify({ reply: finalReply, runId: args.runId });
+          return finalReply;
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
           log.error(`Error in process_query: ${errorMessage}`, error instanceof Error ? error : new Error(errorMessage));
-          return JSON.stringify({
-            error: errorMessage,
-            runId: args.runId,
-          });
+          throw new UserError(errorMessage);
         }
       },
     });
 
     // 5. Start the server
-    await server.start({ transportType: 'stdio' });
+    await server.start({
+      transportType: 'httpStream',
+      httpStream: { port: config.httpPort },
+    });
 
-    logger.info('Recursa MCP Server is running and listening on stdio.');
+    logger.info(
+      `Recursa MCP Server is running and listening on http://localhost:${config.httpPort}`
+    );
   } catch (error) {
     logger.error('Failed to start server', error as Error);
     process.exit(1);

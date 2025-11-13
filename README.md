@@ -9,7 +9,7 @@ A Git-Native AI agent with MCP (Model Context Protocol) support that works acros
 🔒 **Enhanced security** with cross-platform path protection
 ⚡ **Auto-detecting** platform detection and optimization
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
 ### Automatic Installation (Recommended)
 ```bash
@@ -20,6 +20,39 @@ npm run install:auto
 npm run build:auto
 npm run dev
 ```
+
+Your server is now running on `http://localhost:8080` (or the port specified in your `.env` file).
+
+### Interacting with the Server
+
+Recursa is a `fastmcp` server. You can interact with it using any MCP-compatible client, including the command-line tools that come with `fastmcp`.
+
+#### Authentication
+
+All requests to the server must be authenticated. You need to provide the `RECURSA_API_KEY` from your `.env` file as a bearer token.
+
+When using `fastmcp` tools, you can set the key via an environment variable:
+
+```bash
+export RECURSA_API_KEY="a-very-secret-key"
+```
+
+#### Testing with the Interactive CLI
+
+The `fastmcp dev` command is the quickest way to test your server. It starts your server and connects an interactive client in your terminal.
+
+```bash
+# Make sure your RECURSA_API_KEY is exported
+npx fastmcp dev src/server.ts
+```
+
+#### Inspecting with the Web UI
+
+For a more visual way to explore your server's tools and capabilities, use the `fastmcp inspect` command.
+
+```bash
+# Make sure your RECURSA_API_KEY is exported
+npx fastmcp inspect src/server.ts
 
 ### Platform-Specific Installation
 
@@ -75,6 +108,12 @@ Create a `.env` file with your configuration:
 # Required
 OPENROUTER_API_KEY=your_api_key_here
 KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
+
+# Required: API key for securing the Recursa server endpoint
+RECURSA_API_KEY=a-very-secret-key
+
+# Optional: Port for the HTTP server
+HTTP_PORT=8080
 
 # Optional (platform-specific defaults apply)
 LLM_MODEL=anthropic/claude-3-haiku-20240307

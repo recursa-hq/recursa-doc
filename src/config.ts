@@ -23,6 +23,8 @@ const getPlatformDefaults = () => {
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
   KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  RECURSA_API_KEY: z.string().min(1, 'RECURSA_API_KEY is required.'),
+  HTTP_PORT: z.coerce.number().default(8080).optional(),
   LLM_MODEL: z.string().default(getPlatformDefaults().LLM_MODEL).optional(),
   LLM_TEMPERATURE: z.coerce.number().default(getPlatformDefaults().LLM_TEMPERATURE).optional(),
   LLM_MAX_TOKENS: z.coerce.number().default(getPlatformDefaults().LLM_MAX_TOKENS).optional(),
@@ -35,6 +37,8 @@ const configSchema = z.object({
 export type AppConfig = {
   openRouterApiKey: string;
   knowledgeGraphPath: string;
+  recursaApiKey: string;
+  httpPort: number;
   llmModel: string;
   llmTemperature: number;
   llmMaxTokens: number;
@@ -159,6 +163,8 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   const {
     OPENROUTER_API_KEY,
     KNOWLEDGE_GRAPH_PATH,
+    RECURSA_API_KEY,
+    HTTP_PORT,
     LLM_MODEL,
     LLM_TEMPERATURE,
     LLM_MAX_TOKENS,
@@ -182,6 +188,8 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   return Object.freeze({
     openRouterApiKey: OPENROUTER_API_KEY,
     knowledgeGraphPath: resolvedPath,
+    recursaApiKey: RECURSA_API_KEY,
+    httpPort: HTTP_PORT!,
     llmModel: LLM_MODEL!,
     llmTemperature: LLM_TEMPERATURE!,
     llmMaxTokens: LLM_MAX_TOKENS!,

@@ -1,16 +1,48 @@
 import type { AppConfig } from '../config';
-import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
+import type { ExecutionContext, ChatMessage } from '../types';
 import { logger } from '../lib/logger.js';
 import { queryLLMWithRetries as defaultQueryLLM } from './llm.js';
 import { parseLLMResponse } from './parser.js';
 import { runInSandbox } from './sandbox.js';
 import { createMemAPI } from './mem-api/index.js';
-import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-// A mock in-memory session store. In a real app, this might be Redis, a DB, or a file store.
-const sessionHistories: Record<string, ChatMessage[]> = {};
+// Helper functions for session management
+const getSessionPath = async (
+  sessionId: string,
+  graphRoot: string,
+): Promise<string> => {
+  const sessionDir = path.join(graphRoot, '.sessions');
+  // Ensure the session directory exists
+  await fs.mkdir(sessionDir, { recursive: true });
+  return path.join(sessionDir, `${sessionId}.json`);
+};
+
+const loadSessionHistory = async (
+  sessionId: string,
+  graphRoot: string,
+): Promise<ChatMessage[] | null> => {
+  const sessionFile = await getSessionPath(sessionId, graphRoot);
+  try {
+    const data = await fs.readFile(sessionFile, 'utf-8');
+    return JSON.parse(data) as ChatMessage[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null; // File doesn't exist, new session
+    }
+    throw error; // Other errors should be thrown
+  }
+};
+
+const saveSessionHistory = async (
+  sessionId: string,
+  graphRoot: string,
+  history: ChatMessage[],
+): Promise<void> => {
+  const sessionFile = await getSessionPath(sessionId, graphRoot);
+  await fs.writeFile(sessionFile, JSON.stringify(history, null, 2), 'utf-8');
+};
 
 let systemPromptMessage: ChatMessage | null = null;
 
@@ -51,31 +83,26 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
 export const handleUserQuery = async (
   query: string,
   config: AppConfig,
-  sessionId?: string,
+  sessionId: string,
+  runId: string,
   // Allow overriding the LLM query function (with its retry logic) for testing purposes
   queryLLM: ((
     history: ChatMessage[],
-    config: AppConfig,
+    config: AppConfig
   ) => Promise<string | unknown>) = defaultQueryLLM,
-  // Optional callback for real-time status updates
-  onStatusUpdate?: (update: StatusUpdate) => void
+  streamContent: (content: { type: 'text'; text: string }) => Promise<void>
 ): Promise<string> => {
   // 1. **Initialization**
-  const runId = randomUUID();
-  const currentSessionId = sessionId || runId;
   logger.info('Starting user query handling', {
     runId,
-    sessionId: currentSessionId,
+    sessionId: sessionId,
   });
 
   const memAPI = createMemAPI(config);
 
   // Initialize or retrieve session history
-  if (!sessionHistories[currentSessionId]) {
-    sessionHistories[currentSessionId] = [await getSystemPrompt()];
-  }
-
-  const history = sessionHistories[currentSessionId];
+  const loadedHistory = await loadSessionHistory(sessionId, config.knowledgeGraphPath);
+  const history = loadedHistory || [await getSystemPrompt()];
   history.push({ role: 'user', content: query });
 
   const context: ExecutionContext = {
@@ -83,7 +110,7 @@ export const handleUserQuery = async (
     memAPI,
     config,
     runId,
-    onStatusUpdate,
+    streamContent,
   };
 
   // 2. **Execution Loop**
@@ -127,33 +154,13 @@ export const handleUserQuery = async (
         thought: parsedResponse.think,
       });
 
-      // Send real-time status update via callback if available
-      if (onStatusUpdate) {
-        const thinkUpdate: StatusUpdate = {
-          type: 'think',
-          runId,
-          timestamp: Date.now(),
-          content: parsedResponse.think,
-        };
-        onStatusUpdate(thinkUpdate);
-      }
+      // Stream the "thought" back to the client.
+      await streamContent({ type: 'text', text: `> ${parsedResponse.think}\n\n` });
     }
 
     // **Act**
     if (parsedResponse.typescript) {
       logger.info('Executing TypeScript code', { runId });
-
-      // Send action status update via callback if available
-      if (onStatusUpdate) {
-        const actUpdate: StatusUpdate = {
-          type: 'act',
-          runId,
-          timestamp: Date.now(),
-          content: 'Executing code...',
-          data: { code: parsedResponse.typescript },
-        };
-        onStatusUpdate(actUpdate);
-      }
 
       try {
         logger.info('Running code in sandbox', { runId });
@@ -169,37 +176,17 @@ export const handleUserQuery = async (
         });
         const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(executionResult)}`;
         context.history.push({ role: 'user', content: feedback });
-
-        // Send success status update
-        if (onStatusUpdate) {
-          const successUpdate: StatusUpdate = {
-            type: 'act',
-            runId,
-            timestamp: Date.now(),
-            content: 'Code executed successfully',
-            data: { result: executionResult },
-          };
-          onStatusUpdate(successUpdate);
-        }
       } catch (e) {
         logger.error('Code execution failed', e as Error, { runId });
         const feedback = `[Execution Error]: Your code failed to execute. Error: ${
           (e as Error).message
         }. You must analyze this error and correct your code in the next turn.`;
         context.history.push({ role: 'user', content: feedback });
-
-        // Send error status update
-        if (onStatusUpdate) {
-          const errorUpdate: StatusUpdate = {
-            type: 'error',
-            runId,
-            timestamp: Date.now(),
-            content: `Code execution failed: ${(e as Error).message}`,
-          };
-          onStatusUpdate(errorUpdate);
-        }
       }
     }
+
+    // Persist history at the end of the turn
+    await saveSessionHistory(sessionId, config.knowledgeGraphPath, context.history);
 
     // **Reply**
     if (parsedResponse.reply) {

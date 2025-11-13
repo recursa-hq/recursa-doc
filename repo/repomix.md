@@ -1748,282 +1748,6 @@ describe('MemAPI Git Ops Integration Tests', () => {
 });
 ````
 
-## File: tests/integration/mem-api-graph-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Graph Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    // Disable .gitignore for these tests so we can correctly search .log files
-    harness = await createTestHarness({ withGitignore: false });
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should query the graph with multiple conditions', async () => {
-    const pageAContent = `
-- # Page A
-  - prop:: value
-  - Link to [[Page B]].
-    `;
-    const pageBContent = `
-- # Page B
-  - prop:: other
-  - No links here.
-    `;
-
-    await mem.writeFile('PageA.md', pageAContent);
-    await mem.writeFile('PageB.md', pageBContent);
-
-    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(1);
-    expect(results[0]).toBeDefined();
-    expect(results[0]?.filePath).toBe('PageA.md');
-  });
-
-  it('should return an empty array for a query with no matches', async () => {
-    const pageAContent = `- # Page A\n  - prop:: value`;
-    await mem.writeFile('PageA.md', pageAContent);
-
-    const query = `(property prop:: non-existent-value)`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(0);
-  });
-
-  it('should get backlinks and outgoing links', async () => {
-    // PageA links to PageB and PageC
-    await mem.writeFile('PageA.md', 'Links to [[Page B]] and [[Page C]].');
-    // PageB links to PageC
-    await mem.writeFile('PageB.md', 'Links to [[Page C]].');
-    // PageC has no outgoing links
-    await mem.writeFile('PageC.md', 'No links.');
-    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
-    await mem.writeFile('PageD.md', 'Links to [[PageA]].');
-
-    // Test outgoing links
-    const outgoingA = await mem.getOutgoingLinks('PageA.md');
-    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
-    expect(outgoingA.length).toBe(2);
-
-    const outgoingC = await mem.getOutgoingLinks('PageC.md');
-    expect(outgoingC).toEqual([]);
-
-    // Test backlinks
-    const backlinksA = await mem.getBacklinks('PageA.md');
-    expect(backlinksA).toEqual(['PageD.md']);
-
-    const backlinksC = await mem.getBacklinks('PageC.md');
-    expect(backlinksC).toEqual(
-      expect.arrayContaining(['PageA.md', 'PageB.md'])
-    );
-    expect(backlinksC.length).toBe(2);
-  });
-
-  it('should perform a global full-text search', async () => {
-    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
-    await mem.writeFile('b.md', 'This file has a common-search-term.');
-    await mem.writeFile('c.log', 'This one also has a common-search-term.');
-    await mem.writeFile(
-      'd.txt',
-      'This file has nothing interesting to find.'
-    );
-
-    // Search for a unique term
-    const uniqueResults = await mem.searchGlobal('unique-search-term');
-    expect(uniqueResults).toEqual(['a.txt']);
-
-    // Search for a common term
-    const commonResults = await mem.searchGlobal('common-search-term');
-    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
-    expect(commonResults.length).toBe(2);
-
-    // Search for a non-existent term
-    const noResults = await mem.searchGlobal('non-existent-term');
-    expect(noResults).toEqual([]);
-  });
-});
-````
-
-## File: tests/integration/mem-api-state-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI State Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should save and revert to a checkpoint', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'version a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes and save checkpoint
-    await mem.writeFile('b.txt', 'version b');
-    const successSave = await mem.saveCheckpoint();
-    expect(successSave).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
-
-    // 3. Make more changes
-    await mem.writeFile('c.txt', 'version c');
-    expect(await mem.fileExists('c.txt')).toBe(true);
-
-    // 4. Revert by applying the stashed changes
-    const successRevert = await mem.revertToLastCheckpoint();
-    expect(successRevert).toBe(true);
-
-    // 5. Assert state
-    expect(await mem.fileExists('a.txt')).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
-    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
-  });
-
-  it('should discard all staged and unstaged changes', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'original a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes
-    await mem.writeFile('a.txt', 'modified a'); // unstaged
-    await mem.writeFile('b.txt', 'new b'); // unstaged
-    await mem.writeFile('c.txt', 'new c'); // will be staged
-    await harness.git.add('c.txt');
-
-    // 3. Discard
-    const successDiscard = await mem.discardChanges();
-    expect(successDiscard).toBe(true);
-
-    // 4. Assert state
-    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
-    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
-    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
-
-    const status = await harness.git.status();
-    expect(status.isClean()).toBe(true);
-  });
-
-  it('should handle reverting when no checkpoint exists', async () => {
-    await mem.writeFile('a.txt', 'content');
-    const success = await mem.revertToLastCheckpoint();
-
-    // It should not throw an error and return false to indicate nothing was reverted.
-    expect(success).toBe(false);
-    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
-  });
-});
-````
-
-## File: tests/integration/mem-api-util-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Util Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should return the correct graph root path', async () => {
-    const root = await mem.getGraphRoot();
-    expect(root).toBe(harness.tempDir);
-  });
-
-  it('should correctly estimate token count for a single file', async () => {
-    const content = 'This is a test sentence with several words.'; // 44 chars
-    await mem.writeFile('test.txt', content);
-    const tokenCount = await mem.getTokenCount('test.txt');
-    const expected = Math.ceil(content.length / 4); // 11
-    expect(tokenCount).toBe(expected);
-  });
-
-  it('should correctly estimate token counts for multiple files', async () => {
-    const content1 = 'File one content.'; // 17 chars -> 5 tokens
-    const content2 = 'File two has slightly more content here.'; // 38 chars -> 10 tokens
-    await mem.writeFile('file1.txt', content1);
-    await mem.writeFile('sub/file2.txt', content2);
-
-    const results = await mem.getTokenCountForPaths([
-      'file1.txt',
-      'sub/file2.txt',
-    ]);
-
-    expect(results).toHaveLength(2);
-    expect(results).toEqual(
-      expect.arrayContaining([
-        { path: 'file1.txt', tokenCount: Math.ceil(content1.length / 4) },
-        { path: 'sub/file2.txt', tokenCount: Math.ceil(content2.length / 4) },
-      ])
-    );
-  });
-
-  it('should throw an error when counting tokens for a non-existent file', async () => {
-    await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
-      /Failed to count tokens for not-real.txt/
-    );
-  });
-});
-````
-
 ## File: tests/setup.ts
 ````typescript
 // Jest setup file to handle Node.js v25+ compatibility issues
@@ -2491,6 +2215,282 @@ export const combineIgnoreFilters = (
 };
 ````
 
+## File: tests/integration/mem-api-graph-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Graph Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    // Disable .gitignore for these tests so we can correctly search .log files
+    harness = await createTestHarness({ withGitignore: false });
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should query the graph with multiple conditions', async () => {
+    const pageAContent = `
+- # Page A
+  - prop:: value
+  - Link to [[Page B]].
+    `;
+    const pageBContent = `
+- # Page B
+  - prop:: other
+  - No links here.
+    `;
+
+    await mem.writeFile('PageA.md', pageAContent);
+    await mem.writeFile('PageB.md', pageBContent);
+
+    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    expect(results[0]?.filePath).toBe('PageA.md');
+  });
+
+  it('should return an empty array for a query with no matches', async () => {
+    const pageAContent = `- # Page A\n  - prop:: value`;
+    await mem.writeFile('PageA.md', pageAContent);
+
+    const query = `(property prop:: non-existent-value)`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('should get backlinks and outgoing links', async () => {
+    // PageA links to PageB and PageC
+    await mem.writeFile('PageA.md', 'Links to [[Page B]] and [[Page C]].');
+    // PageB links to PageC
+    await mem.writeFile('PageB.md', 'Links to [[Page C]].');
+    // PageC has no outgoing links
+    await mem.writeFile('PageC.md', 'No links.');
+    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
+    await mem.writeFile('PageD.md', 'Links to [[PageA]].');
+
+    // Test outgoing links
+    const outgoingA = await mem.getOutgoingLinks('PageA.md');
+    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
+    expect(outgoingA.length).toBe(2);
+
+    const outgoingC = await mem.getOutgoingLinks('PageC.md');
+    expect(outgoingC).toEqual([]);
+
+    // Test backlinks
+    const backlinksA = await mem.getBacklinks('PageA.md');
+    expect(backlinksA).toEqual(['PageD.md']);
+
+    const backlinksC = await mem.getBacklinks('PageC.md');
+    expect(backlinksC).toEqual(
+      expect.arrayContaining(['PageA.md', 'PageB.md'])
+    );
+    expect(backlinksC.length).toBe(2);
+  });
+
+  it('should perform a global full-text search', async () => {
+    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
+    await mem.writeFile('b.md', 'This file has a common-search-term.');
+    await mem.writeFile('c.log', 'This one also has a common-search-term.');
+    await mem.writeFile(
+      'd.txt',
+      'This file has nothing interesting to find.'
+    );
+
+    // Search for a unique term
+    const uniqueResults = await mem.searchGlobal('unique-search-term');
+    expect(uniqueResults).toEqual(['a.txt']);
+
+    // Search for a common term
+    const commonResults = await mem.searchGlobal('common-search-term');
+    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
+    expect(commonResults.length).toBe(2);
+
+    // Search for a non-existent term
+    const noResults = await mem.searchGlobal('non-existent-term');
+    expect(noResults).toEqual([]);
+  });
+});
+````
+
+## File: tests/integration/mem-api-state-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI State Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should save and revert to a checkpoint', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'version a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes and save checkpoint
+    await mem.writeFile('b.txt', 'version b');
+    const successSave = await mem.saveCheckpoint();
+    expect(successSave).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
+
+    // 3. Make more changes
+    await mem.writeFile('c.txt', 'version c');
+    expect(await mem.fileExists('c.txt')).toBe(true);
+
+    // 4. Revert by applying the stashed changes
+    const successRevert = await mem.revertToLastCheckpoint();
+    expect(successRevert).toBe(true);
+
+    // 5. Assert state
+    expect(await mem.fileExists('a.txt')).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
+    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
+  });
+
+  it('should discard all staged and unstaged changes', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'original a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes
+    await mem.writeFile('a.txt', 'modified a'); // unstaged
+    await mem.writeFile('b.txt', 'new b'); // unstaged
+    await mem.writeFile('c.txt', 'new c'); // will be staged
+    await harness.git.add('c.txt');
+
+    // 3. Discard
+    const successDiscard = await mem.discardChanges();
+    expect(successDiscard).toBe(true);
+
+    // 4. Assert state
+    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
+    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
+    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
+
+    const status = await harness.git.status();
+    expect(status.isClean()).toBe(true);
+  });
+
+  it('should handle reverting when no checkpoint exists', async () => {
+    await mem.writeFile('a.txt', 'content');
+    const success = await mem.revertToLastCheckpoint();
+
+    // It should not throw an error and return false to indicate nothing was reverted.
+    expect(success).toBe(false);
+    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
+  });
+});
+````
+
+## File: tests/integration/mem-api-util-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Util Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should return the correct graph root path', async () => {
+    const root = await mem.getGraphRoot();
+    expect(root).toBe(harness.tempDir);
+  });
+
+  it('should correctly estimate token count for a single file', async () => {
+    const content = 'This is a test sentence with several words.'; // 44 chars
+    await mem.writeFile('test.txt', content);
+    const tokenCount = await mem.getTokenCount('test.txt');
+    const expected = Math.ceil(content.length / 4); // 11
+    expect(tokenCount).toBe(expected);
+  });
+
+  it('should correctly estimate token counts for multiple files', async () => {
+    const content1 = 'File one content.'; // 17 chars -> 5 tokens
+    const content2 = 'File two has slightly more content here.'; // 38 chars -> 10 tokens
+    await mem.writeFile('file1.txt', content1);
+    await mem.writeFile('sub/file2.txt', content2);
+
+    const results = await mem.getTokenCountForPaths([
+      'file1.txt',
+      'sub/file2.txt',
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        { path: 'file1.txt', tokenCount: Math.ceil(content1.length / 4) },
+        { path: 'sub/file2.txt', tokenCount: Math.ceil(content2.length / 4) },
+      ])
+    );
+  });
+
+  it('should throw an error when counting tokens for a non-existent file', async () => {
+    await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
+      /Failed to count tokens for not-real.txt/
+    );
+  });
+});
+````
+
 ## File: .dockerignore
 ````
 # Git
@@ -2655,15 +2655,6 @@ export async function* walk(
 import type { MemAPI } from './mem.js';
 import type { ChatMessage } from './llm.js';
 
-// Real-time status update types
-export type StatusUpdate = {
-  type: 'think' | 'act' | 'error' | 'complete';
-  runId: string;
-  timestamp: number;
-  content?: string;
-  data?: Record<string, unknown>;
-};
-
 // The execution context passed through the agent loop.
 export type ExecutionContext = {
   // The complete conversation history for this session.
@@ -2674,8 +2665,8 @@ export type ExecutionContext = {
   config: import('../config').AppConfig;
   // A unique ID for this execution run.
   runId: string;
-  // Optional callback for real-time status updates
-  onStatusUpdate?: (update: StatusUpdate) => void;
+  // Function to stream content back to the client.
+  streamContent: (content: { type: 'text'; text: string }) => Promise<void>;
 };
 ````
 
@@ -2709,6 +2700,88 @@ export interface ExecutionConstraints {
   allowedModules: string[];
   forbiddenAPIs: string[];
 }
+````
+
+## File: .env.test
+````
+# Test Environment Configuration
+OPENROUTER_API_KEY="mock-test-api-key"
+KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
+LLM_MODEL="mock-test-model"
+````
+
+## File: jest.config.js
+````javascript
+/** @type {import('ts-jest').JestConfigWithTsJest} */
+export default {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  moduleNameMapper: {
+    '(.+)\\.js$': '$1',
+  },
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        useESM: true,
+      },
+    ],
+  },
+  extensionsToTreatAsEsm: ['.ts'],
+  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
+  clearMocks: true,
+  collectCoverage: true,
+  coverageDirectory: 'coverage',
+  coverageProvider: 'v8',
+  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
+};
+````
+
+## File: src/types/llm.ts
+````typescript
+export type ParsedLLMResponse = {
+  think?: string;
+  typescript?: string;
+  reply?: string;
+};
+
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
+export interface LLMRequest {
+  messages: ChatMessage[];
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+export interface LLMResponse {
+  content: string;
+  model: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export interface LLMConfig {
+  apiKey: string;
+  baseUrl?: string;
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+export interface LLMProvider {
+  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
+  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
+}
+
+export type StreamingCallback = (chunk: string) => void;
 ````
 
 ## File: tests/e2e/mcp-workflow.test.ts
@@ -2852,10 +2925,12 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
     const log = await harness.git.log();
     expect(log.latest?.message).toBe('feat: add file1 and file2');
 
+    expect(log.latest).not.toBeNull();
+
     // Verify both files were part of the commit
     const commitContent = await harness.git.show([
       '--name-only',
-      log.latest.hash,
+      log.latest!.hash,
     ]);
     expect(commitContent).toContain('file1.md');
     expect(commitContent).toContain('file2.md');
@@ -2893,95 +2968,8 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 
 ## File: tests/lib/test-util.ts
 ````typescript
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
-import type { TestHarnessState } from './test-harness';
-import type {
-  MCPRequest,
-  MCPResponse,
-  MCPNotification,
-} from '../../src/types';
-````
-
-## File: .env.test
-````
-# Test Environment Configuration
-OPENROUTER_API_KEY="mock-test-api-key"
-KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
-LLM_MODEL="mock-test-model"
-````
-
-## File: jest.config.js
-````javascript
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-export default {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  moduleNameMapper: {
-    '(.+)\\.js$': '$1',
-  },
-  transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        useESM: true,
-      },
-    ],
-  },
-  extensionsToTreatAsEsm: ['.ts'],
-  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
-  clearMocks: true,
-  collectCoverage: true,
-  coverageDirectory: 'coverage',
-  coverageProvider: 'v8',
-  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
-};
-````
-
-## File: src/types/llm.ts
-````typescript
-export type ParsedLLMResponse = {
-  think?: string;
-  typescript?: string;
-  reply?: string;
-};
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
-export interface LLMRequest {
-  messages: ChatMessage[];
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-  topP?: number;
-}
-
-export interface LLMResponse {
-  content: string;
-  model: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
-
-export interface LLMConfig {
-  apiKey: string;
-  baseUrl?: string;
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-}
-
-export interface LLMProvider {
-  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
-  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
-}
-
-export type StreamingCallback = (chunk: string) => void;
+// This file can be used for shared test utilities.
+// Currently, it has no content as previous imports were unused.
 ````
 
 ## File: tests/unit/parser.test.ts
@@ -3654,100 +3642,6 @@ export type GitCommand =
   | 'branch';
 ````
 
-## File: src/core/mem-api/git-ops.ts
-````typescript
-import type { SimpleGit } from 'simple-git';
-import type { LogEntry } from '../../types';
-
-// Note: These functions take a pre-configured simple-git instance.
-
-export const gitDiff =
-  (git: SimpleGit) =>
-  async (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ): Promise<string> => {
-    try {
-      if (fromCommit && toCommit) {
-        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
-      } else if (fromCommit) {
-        return await git.diff([`${fromCommit}`, '--', filePath]);
-      } else {
-        return await git.diff([filePath]);
-      }
-    } catch (error) {
-      throw new Error(
-        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const gitLog =
-  (git: SimpleGit) =>
-  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
-    try {
-      const options = {
-        maxCount: maxCommits,
-        ...(filePath ? { file: filePath } : {}),
-      };
-      const result = await git.log(options);
-      return result.all.map((entry) => ({
-        hash: entry.hash,
-        message: entry.message,
-        date: entry.date,
-      }));
-    } catch (error) {
-      const target = filePath || 'repository';
-      throw new Error(
-        `Failed to get git log for ${target}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getChangedFiles =
-  (git: SimpleGit) => async (): Promise<string[]> => {
-    try {
-      const status = await git.status();
-      // Combine all relevant file arrays and remove duplicates
-      const allFiles = new Set([
-        ...status.staged,
-        ...status.modified,
-        ...status.created,
-        ...status.deleted,
-        ...status.not_added, // Add untracked files
-        ...status.renamed.map((r) => r.to),
-      ]);
-      return Array.from(allFiles);
-    } catch (error) {
-      throw new Error(
-        `Failed to get changed files: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const commitChanges =
-  (git: SimpleGit) =>
-  async (message: string): Promise<string> => {
-    try {
-      // Stage all changes
-      await git.add('.');
-
-      // Commit staged changes
-      const result = await git.commit(message);
-
-      // Return the commit hash
-      if (result.commit) {
-        return result.commit;
-      }
-      // If result.commit is empty or null, it means no changes were committed. This is not an error.
-      return 'No changes to commit.';
-    } catch (error) {
-      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
-    }
-  };
-````
-
 ## File: src/core/mem-api/secure-path.ts
 ````typescript
 import path from 'path';
@@ -4198,6 +4092,100 @@ export interface MCPNotification {
   method: string;
   params?: unknown;
 }
+````
+
+## File: src/core/mem-api/git-ops.ts
+````typescript
+import type { SimpleGit } from 'simple-git';
+import type { LogEntry } from '../../types';
+
+// Note: These functions take a pre-configured simple-git instance.
+
+export const gitDiff =
+  (git: SimpleGit) =>
+  async (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ): Promise<string> => {
+    try {
+      if (fromCommit && toCommit) {
+        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
+      } else if (fromCommit) {
+        return await git.diff([`${fromCommit}`, '--', filePath]);
+      } else {
+        return await git.diff([filePath]);
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const gitLog =
+  (git: SimpleGit) =>
+  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
+    try {
+      const options = {
+        maxCount: maxCommits,
+        ...(filePath ? { file: filePath } : {}),
+      };
+      const result = await git.log(options);
+      return result.all.map((entry) => ({
+        hash: entry.hash,
+        message: entry.message,
+        date: entry.date,
+      }));
+    } catch (error) {
+      const target = filePath || 'repository';
+      throw new Error(
+        `Failed to get git log for ${target}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const getChangedFiles =
+  (git: SimpleGit) => async (): Promise<string[]> => {
+    try {
+      const status = await git.status();
+      // Combine all relevant file arrays and remove duplicates
+      const allFiles = new Set([
+        ...status.staged,
+        ...status.modified,
+        ...status.created,
+        ...status.deleted,
+        ...status.not_added, // Add untracked files
+        ...status.renamed.map((r) => r.to),
+      ]);
+      return Array.from(allFiles);
+    } catch (error) {
+      throw new Error(
+        `Failed to get changed files: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const commitChanges =
+  (git: SimpleGit) =>
+  async (message: string): Promise<string> => {
+    try {
+      // Stage all changes
+      await git.add('.');
+
+      // Commit staged changes
+      const result = await git.commit(message);
+
+      // Return the commit hash
+      if (result.commit) {
+        return result.commit;
+      }
+      // If result.commit is empty or null, it means no changes were committed. This is not an error.
+      return 'No changes to commit.';
+    } catch (error) {
+      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
+    }
+  };
 ````
 
 ## File: src/core/mem-api/index.ts
@@ -4974,6 +4962,8 @@ const getPlatformDefaults = () => {
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
   KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  RECURSA_API_KEY: z.string().min(1, 'RECURSA_API_KEY is required.'),
+  HTTP_PORT: z.coerce.number().default(8080).optional(),
   LLM_MODEL: z.string().default(getPlatformDefaults().LLM_MODEL).optional(),
   LLM_TEMPERATURE: z.coerce.number().default(getPlatformDefaults().LLM_TEMPERATURE).optional(),
   LLM_MAX_TOKENS: z.coerce.number().default(getPlatformDefaults().LLM_MAX_TOKENS).optional(),
@@ -4986,6 +4976,8 @@ const configSchema = z.object({
 export type AppConfig = {
   openRouterApiKey: string;
   knowledgeGraphPath: string;
+  recursaApiKey: string;
+  httpPort: number;
   llmModel: string;
   llmTemperature: number;
   llmMaxTokens: number;
@@ -5110,6 +5102,8 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   const {
     OPENROUTER_API_KEY,
     KNOWLEDGE_GRAPH_PATH,
+    RECURSA_API_KEY,
+    HTTP_PORT,
     LLM_MODEL,
     LLM_TEMPERATURE,
     LLM_MAX_TOKENS,
@@ -5133,6 +5127,8 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   return Object.freeze({
     openRouterApiKey: OPENROUTER_API_KEY,
     knowledgeGraphPath: resolvedPath,
+    recursaApiKey: RECURSA_API_KEY,
+    httpPort: HTTP_PORT!,
     llmModel: LLM_MODEL!,
     llmTemperature: LLM_TEMPERATURE!,
     llmMaxTokens: LLM_MAX_TOKENS!,
@@ -5549,7 +5545,7 @@ const mockFetch = jest.fn().mockImplementation(() =>
     statusText: 'OK',
   })
 );
-global.fetch = mockFetch as any;
+global.fetch = mockFetch as jest.Mock;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
@@ -5781,6 +5777,60 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 - **job-id**:
 - **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
 - **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
+````
+
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
 ````
 
 ## File: src/core/mem-api/file-ops.ts
@@ -6026,7 +6076,7 @@ export const fileExists =
       const fullPath = resolveSecurePath(graphRoot, filePath);
       await fs.access(fullPath);
       return true;
-    } catch (error: unknown) {
+    } catch {
       // Any error (security, not found, permissions) results in false.
       return false;
     }
@@ -6067,237 +6117,6 @@ export const listFiles =
     } catch (error) {
       throw handleFileError(error, `list files in directory`, directoryPath || 'root');
     }
-  };
-````
-
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt"
-      //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
-````
-
-## File: src/core/mem-api/graph-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path.js';
-import { walk } from './fs-walker.js';
-import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
-
-type PropertyCondition = {
-  type: 'property';
-  key: string;
-  value: string;
-};
-
-type OutgoingLinkCondition = {
-  type: 'outgoing-link';
-  target: string;
-};
-
-type Condition = PropertyCondition | OutgoingLinkCondition;
-
-const parseCondition = (conditionStr: string): Condition | null => {
-  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-  let match = conditionStr.trim().match(propertyRegex);
-  if (match?.[1] && match[2]) {
-    return {
-      type: 'property',
-      key: match[1].trim(),
-      value: match[2].trim(),
-    };
-  }
-
-  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
-  match = conditionStr.trim().match(linkRegex);
-  if (match?.[1]) {
-    return {
-      type: 'outgoing-link',
-      target: match[1].trim(),
-    };
-  }
-
-  return null;
-};
-
-const checkCondition = (content: string, condition: Condition): string[] => {
-  const matches: string[] = [];
-  if (condition.type === 'property') {
-    const lines = content.split('\n');
-    for (const line of lines) {
-      // Handle indented properties by removing the leading list marker
-      const trimmedLine = line.trim().replace(/^- /, '');
-      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
-        matches.push(line);
-      }
-    }
-  } else if (condition.type === 'outgoing-link') {
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const outgoingLinks = new Set(
-      Array.from(content.matchAll(linkRegex), (m) => m[1])
-    );
-    if (outgoingLinks.has(condition.target)) {
-      // Return a generic match since we don't have a specific line
-      matches.push(`[[${condition.target}]]`);
-    }
-  }
-  return matches;
-};
-
-export const queryGraph =
-  (graphRoot: string) =>
-  async (query: string): Promise<GraphQueryResult[]> => {
-    const conditionStrings = query.split(/ AND /i);
-    const conditions = conditionStrings
-      .map(parseCondition)
-      .filter((c): c is Condition => c !== null);
-
-    if (conditions.length === 0) {
-      return [];
-    }
-
-    const results: GraphQueryResult[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      if (!filePath.endsWith('.md')) continue;
-
-      const content = await fs.readFile(filePath, 'utf-8');
-      const allMatchingLines: string[] = [];
-      let allConditionsMet = true;
-
-      for (const condition of conditions) {
-        const matchingLines = checkCondition(content, condition);
-        if (matchingLines.length > 0) {
-          allMatchingLines.push(...matchingLines);
-        } else {
-          allConditionsMet = false;
-          break;
-        }
-      }
-
-      if (allConditionsMet) {
-        results.push({
-          filePath: path.relative(graphRoot, filePath),
-          matches: allMatchingLines,
-        });
-      }
-    }
-    return results;
-  };
-
-export const getBacklinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const targetBaseName = path.basename(filePath, path.extname(filePath));
-    const linkPattern = `[[${targetBaseName}]]`;
-    const backlinks: string[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
-      // Don't link to self
-      if (path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)) {
-        continue;
-      }
-
-      if (currentFilePath.endsWith('.md')) {
-        try {
-          const content = await fs.readFile(currentFilePath, 'utf-8');
-          if (content.includes(linkPattern)) {
-            backlinks.push(path.relative(graphRoot, currentFilePath));
-          }
-        } catch {
-          // Ignore files that can't be read
-        }
-      }
-    }
-    return backlinks;
-  };
-
-export const getOutgoingLinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    const content = await fs.readFile(fullPath, 'utf-8');
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const matches = content.matchAll(linkRegex);
-    const uniqueLinks = new Set<string>();
-
-    for (const match of matches) {
-      if (match[1]) {
-        uniqueLinks.add(match[1]);
-      }
-    }
-    return Array.from(uniqueLinks);
-  };
-
-export const searchGlobal =
-  (graphRoot: string) =>
-  async (query: string): Promise<string[]> => {
-    const matchingFiles: string[] = [];
-    const lowerCaseQuery = query.toLowerCase();
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        if (content.toLowerCase().includes(lowerCaseQuery)) {
-          matchingFiles.push(path.relative(graphRoot, filePath));
-        }
-      } catch {
-        // Ignore binary files or files that can't be read
-      }
-    }
-    return matchingFiles;
   };
 ````
 
@@ -6469,18 +6288,50 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 ## File: src/core/loop.ts
 ````typescript
 import type { AppConfig } from '../config';
-import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
+import type { ExecutionContext, ChatMessage } from '../types';
 import { logger } from '../lib/logger.js';
 import { queryLLMWithRetries as defaultQueryLLM } from './llm.js';
 import { parseLLMResponse } from './parser.js';
 import { runInSandbox } from './sandbox.js';
 import { createMemAPI } from './mem-api/index.js';
-import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-// A mock in-memory session store. In a real app, this might be Redis, a DB, or a file store.
-const sessionHistories: Record<string, ChatMessage[]> = {};
+// Helper functions for session management
+const getSessionPath = async (
+  sessionId: string,
+  graphRoot: string,
+): Promise<string> => {
+  const sessionDir = path.join(graphRoot, '.sessions');
+  // Ensure the session directory exists
+  await fs.mkdir(sessionDir, { recursive: true });
+  return path.join(sessionDir, `${sessionId}.json`);
+};
+
+const loadSessionHistory = async (
+  sessionId: string,
+  graphRoot: string,
+): Promise<ChatMessage[] | null> => {
+  const sessionFile = await getSessionPath(sessionId, graphRoot);
+  try {
+    const data = await fs.readFile(sessionFile, 'utf-8');
+    return JSON.parse(data) as ChatMessage[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null; // File doesn't exist, new session
+    }
+    throw error; // Other errors should be thrown
+  }
+};
+
+const saveSessionHistory = async (
+  sessionId: string,
+  graphRoot: string,
+  history: ChatMessage[],
+): Promise<void> => {
+  const sessionFile = await getSessionPath(sessionId, graphRoot);
+  await fs.writeFile(sessionFile, JSON.stringify(history, null, 2), 'utf-8');
+};
 
 let systemPromptMessage: ChatMessage | null = null;
 
@@ -6521,31 +6372,26 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
 export const handleUserQuery = async (
   query: string,
   config: AppConfig,
-  sessionId?: string,
+  sessionId: string,
+  runId: string,
   // Allow overriding the LLM query function (with its retry logic) for testing purposes
   queryLLM: ((
     history: ChatMessage[],
-    config: AppConfig,
+    config: AppConfig
   ) => Promise<string | unknown>) = defaultQueryLLM,
-  // Optional callback for real-time status updates
-  onStatusUpdate?: (update: StatusUpdate) => void
+  streamContent: (content: { type: 'text'; text: string }) => Promise<void>
 ): Promise<string> => {
   // 1. **Initialization**
-  const runId = randomUUID();
-  const currentSessionId = sessionId || runId;
   logger.info('Starting user query handling', {
     runId,
-    sessionId: currentSessionId,
+    sessionId: sessionId,
   });
 
   const memAPI = createMemAPI(config);
 
   // Initialize or retrieve session history
-  if (!sessionHistories[currentSessionId]) {
-    sessionHistories[currentSessionId] = [await getSystemPrompt()];
-  }
-
-  const history = sessionHistories[currentSessionId];
+  const loadedHistory = await loadSessionHistory(sessionId, config.knowledgeGraphPath);
+  const history = loadedHistory || [await getSystemPrompt()];
   history.push({ role: 'user', content: query });
 
   const context: ExecutionContext = {
@@ -6553,7 +6399,7 @@ export const handleUserQuery = async (
     memAPI,
     config,
     runId,
-    onStatusUpdate,
+    streamContent,
   };
 
   // 2. **Execution Loop**
@@ -6597,33 +6443,13 @@ export const handleUserQuery = async (
         thought: parsedResponse.think,
       });
 
-      // Send real-time status update via callback if available
-      if (onStatusUpdate) {
-        const thinkUpdate: StatusUpdate = {
-          type: 'think',
-          runId,
-          timestamp: Date.now(),
-          content: parsedResponse.think,
-        };
-        onStatusUpdate(thinkUpdate);
-      }
+      // Stream the "thought" back to the client.
+      await streamContent({ type: 'text', text: `> ${parsedResponse.think}\n\n` });
     }
 
     // **Act**
     if (parsedResponse.typescript) {
       logger.info('Executing TypeScript code', { runId });
-
-      // Send action status update via callback if available
-      if (onStatusUpdate) {
-        const actUpdate: StatusUpdate = {
-          type: 'act',
-          runId,
-          timestamp: Date.now(),
-          content: 'Executing code...',
-          data: { code: parsedResponse.typescript },
-        };
-        onStatusUpdate(actUpdate);
-      }
 
       try {
         logger.info('Running code in sandbox', { runId });
@@ -6639,37 +6465,17 @@ export const handleUserQuery = async (
         });
         const feedback = `[Execution Result]: Code executed successfully. Result: ${JSON.stringify(executionResult)}`;
         context.history.push({ role: 'user', content: feedback });
-
-        // Send success status update
-        if (onStatusUpdate) {
-          const successUpdate: StatusUpdate = {
-            type: 'act',
-            runId,
-            timestamp: Date.now(),
-            content: 'Code executed successfully',
-            data: { result: executionResult },
-          };
-          onStatusUpdate(successUpdate);
-        }
       } catch (e) {
         logger.error('Code execution failed', e as Error, { runId });
         const feedback = `[Execution Error]: Your code failed to execute. Error: ${
           (e as Error).message
         }. You must analyze this error and correct your code in the next turn.`;
         context.history.push({ role: 'user', content: feedback });
-
-        // Send error status update
-        if (onStatusUpdate) {
-          const errorUpdate: StatusUpdate = {
-            type: 'error',
-            runId,
-            timestamp: Date.now(),
-            content: `Code execution failed: ${(e as Error).message}`,
-          };
-          onStatusUpdate(errorUpdate);
-        }
       }
     }
+
+    // Persist history at the end of the turn
+    await saveSessionHistory(sessionId, config.knowledgeGraphPath, context.history);
 
     // **Reply**
     if (parsedResponse.reply) {
@@ -6682,6 +6488,203 @@ export const handleUserQuery = async (
   logger.warn('Loop finished without a reply', { runId, turns: MAX_TURNS });
   return 'The agent finished its work without providing a final response.';
 };
+````
+
+## File: src/core/mem-api/graph-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import type { GraphQueryResult } from '../../types';
+import { resolveSecurePath } from './secure-path.js';
+import { walk } from './fs-walker.js';
+import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
+
+type PropertyCondition = {
+  type: 'property';
+  key: string;
+  value: string;
+};
+
+type OutgoingLinkCondition = {
+  type: 'outgoing-link';
+  target: string;
+};
+
+type Condition = PropertyCondition | OutgoingLinkCondition;
+
+const parseCondition = (conditionStr: string): Condition | null => {
+  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+  let match = conditionStr.trim().match(propertyRegex);
+  if (match?.[1] && match[2]) {
+    return {
+      type: 'property',
+      key: match[1].trim(),
+      value: match[2].trim(),
+    };
+  }
+
+  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
+  match = conditionStr.trim().match(linkRegex);
+  if (match?.[1]) {
+    return {
+      type: 'outgoing-link',
+      target: match[1].trim(),
+    };
+  }
+
+  return null;
+};
+
+const checkCondition = (content: string, condition: Condition): string[] => {
+  const matches: string[] = [];
+  if (condition.type === 'property') {
+    const lines = content.split('\n');
+    for (const line of lines) {
+      // Handle indented properties by removing the leading list marker
+      const trimmedLine = line.trim().replace(/^- /, '');
+      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
+        matches.push(line);
+      }
+    }
+  } else if (condition.type === 'outgoing-link') {
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const outgoingLinks = new Set(
+      Array.from(content.matchAll(linkRegex), (m) => m[1])
+    );
+    if (outgoingLinks.has(condition.target)) {
+      // Return a generic match since we don't have a specific line
+      matches.push(`[[${condition.target}]]`);
+    }
+  }
+  return matches;
+};
+
+export const queryGraph =
+  (graphRoot: string) =>
+  async (query: string): Promise<GraphQueryResult[]> => {
+    const conditionStrings = query.split(/ AND /i);
+    const conditions = conditionStrings
+      .map(parseCondition)
+      .filter((c): c is Condition => c !== null);
+
+    if (conditions.length === 0) {
+      return [];
+    }
+
+    const results: GraphQueryResult[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const filePath of walk(graphRoot, isIgnored)) {
+      if (!filePath.endsWith('.md')) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const allMatchingLines: string[] = [];
+      let allConditionsMet = true;
+
+      for (const condition of conditions) {
+        const matchingLines = checkCondition(content, condition);
+        if (matchingLines.length > 0) {
+          allMatchingLines.push(...matchingLines);
+        } else {
+          allConditionsMet = false;
+          break;
+        }
+      }
+
+      if (allConditionsMet) {
+        results.push({
+          filePath: path.relative(graphRoot, filePath),
+          matches: allMatchingLines,
+        });
+      }
+    }
+    return results;
+  };
+
+export const getBacklinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const targetBaseName = path.basename(filePath, path.extname(filePath));
+    const targetWithoutExt = path.basename(filePath, path.extname(filePath));
+    const targetWithExt = path.basename(filePath);
+
+    const backlinks: string[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
+      // Don't link to self
+      if (path.resolve(currentFilePath) === resolveSecurePath(graphRoot, filePath)) {
+        continue;
+      }
+
+      if (currentFilePath.endsWith('.md')) {
+        try {
+          const content = await fs.readFile(currentFilePath, 'utf-8');
+          // Extract all outgoing links from the current file
+          const linkRegex = /\[\[(.*?)\]\]/g;
+          const matches = content.matchAll(linkRegex);
+
+          for (const match of matches) {
+            if (match[1]) {
+              const linkTarget = match[1].trim();
+              // Check if this link points to our target file
+              // Try matching against various possible formats:
+              // - Exact basename without extension (e.g., "PageC")
+              // - Exact basename with extension (e.g., "PageC.md")
+              // - With spaces (e.g., "Page C" for "PageC")
+              if (linkTarget === targetWithoutExt ||
+                  linkTarget === targetWithExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithoutExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithExt) {
+                backlinks.push(path.relative(graphRoot, currentFilePath));
+                break; // Found a match, no need to check more links in this file
+              }
+            }
+          }
+        } catch {
+          // Ignore files that can't be read
+        }
+      }
+    }
+    return backlinks;
+  };
+
+export const getOutgoingLinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const matches = content.matchAll(linkRegex);
+    const uniqueLinks = new Set<string>();
+
+    for (const match of matches) {
+      if (match[1]) {
+        uniqueLinks.add(match[1]);
+      }
+    }
+    return Array.from(uniqueLinks);
+  };
+
+export const searchGlobal =
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    const matchingFiles: string[] = [];
+    const lowerCaseQuery = query.toLowerCase();
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const filePath of walk(graphRoot, isIgnored)) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.toLowerCase().includes(lowerCaseQuery)) {
+          matchingFiles.push(path.relative(graphRoot, filePath));
+        }
+      } catch {
+        // Ignore binary files or files that can't be read
+      }
+    }
+    return matchingFiles;
+  };
 ````
 
 ## File: src/core/sandbox.ts
@@ -6778,9 +6781,8 @@ ${code}
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
 import { loadAndValidateConfig } from './config.js';
-import { FastMCP } from 'fastmcp';
+import { FastMCP, UserError } from 'fastmcp';
 import { z } from 'zod';
-import type { StatusUpdate } from './types/loop.js';
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
@@ -6793,6 +6795,25 @@ const main = async () => {
     const server = new FastMCP({
       name: 'recursa-server',
       version: '0.1.0',
+      authenticate: async (request) => {
+        const authHeader = request.headers.get('authorization');
+        const token = authHeader?.startsWith('Bearer ')
+          ? authHeader.slice(7)
+          : null;
+
+        if (!token || token !== config.recursaApiKey) {
+          logger.warn('Authentication failed', {
+            remoteAddress: (request as any).socket?.remoteAddress, // Best effort IP logging
+          });
+          throw new Response(null, {
+            status: 401,
+            statusText: 'Unauthorized',
+          });
+        }
+
+        // Return an empty object for success, as we don't need to store user data in the session context itself
+        return {};
+      },
     });
 
     // 3. Add resources
@@ -6815,63 +6836,50 @@ const main = async () => {
         'Processes a high-level user query by running the agent loop.',
       parameters: z.object({
         query: z.string().describe('The user query to process.'),
-        sessionId: z
-          .string()
-          .describe('An optional session ID to maintain context.')
-          .optional(),
-        runId: z
-          .string()
-          .describe(
-            'A unique ID for this execution run, used for notifications.'
-          ),
       }),
-      execute: async (args, { log }) => {
-        const onStatusUpdate = (update: StatusUpdate) => {
-          // Map StatusUpdate to fastmcp logs, which are sent as notifications.
-          const { type, content, data } = update;
-          const message = `[${type}] ${content}`;
-
-          switch (type) {
-            case 'think':
-              log.info(content || 'Thinking...');
-              break;
-            case 'act':
-              log.info(message, data);
-              break;
-            case 'error':
-              log.error(message, undefined, data);
-              break;
-            default:
-              log.debug(message, data);
-          }
-        };
+      annotations: {
+        streamingHint: true,
+      },
+      execute: async (args, { log, sessionId, requestId, streamContent }) => {
+        if (!sessionId) {
+          throw new UserError(
+            'Session ID is missing. This tool requires a session.'
+          );
+        }
+        if (!requestId) {
+          throw new UserError(
+            'Request ID is missing. This tool requires a request ID.'
+          );
+        }
 
         try {
           const finalReply = await handleUserQuery(
             args.query,
             config,
-            args.sessionId,
-            undefined,
-            onStatusUpdate
+            sessionId,
+            requestId,
+            streamContent
           );
 
-          return JSON.stringify({ reply: finalReply, runId: args.runId });
+          return finalReply;
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
           log.error(`Error in process_query: ${errorMessage}`, error instanceof Error ? error : new Error(errorMessage));
-          return JSON.stringify({
-            error: errorMessage,
-            runId: args.runId,
-          });
+          throw new UserError(errorMessage);
         }
       },
     });
 
     // 5. Start the server
-    await server.start({ transportType: 'stdio' });
+    await server.start({
+      transportType: 'httpStream',
+      httpStream: { port: config.httpPort },
+    });
 
-    logger.info('Recursa MCP Server is running and listening on stdio.');
+    logger.info(
+      `Recursa MCP Server is running and listening on http://localhost:${config.httpPort}`
+    );
   } catch (error) {
     logger.error('Failed to start server', error as Error);
     process.exit(1);

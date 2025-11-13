@@ -3,8 +3,15 @@
 
 discrepancy analysis
 
+===
+
+make codebase radically DRY for less code, without causing fail tests or feature regressions
 
 ===
+
+make this recursa-server mcp publish ready as per fastmcp best practices
+
+=== DONE
 
 we need many test cases to cover all llm tools so it can function as expected readme and user specs
 
