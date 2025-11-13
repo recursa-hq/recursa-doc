@@ -53,13 +53,11 @@ tests/
     llm.test.ts
     parser.test.ts
   setup.ts
--bun run start
 .dockerignore
 .env.example
 .env.test
 .gitignore
 .prettierrc.json
-### 2. Configuration
 Dockerfile
 eslint.config.js
 INSTALL_TERMUX.md
@@ -74,298 +72,6 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
-
-## File: tests/e2e/mcp-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  jest,
-} from '@jest/globals';
-import type { ChildProcessWithoutNullStreams } from 'child_process';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import {
-  spawnServer,
-  writeMCPRequest,
-  readMCPMessages,
-  type MCPMessage,
-} from '../lib/test-util';
-import type { MCPError, MCPNotification, MCPResponse } from '../../src/types';
-import { queryLLMWithRetries } from '../../src/core/llm';
-
-// Mock the entire LLM module to control agent behavior
-jest.mock('../../src/core/llm', () => ({
-  queryLLMWithRetries: jest.fn<() => Promise<string>>(),
-}));
-
-// Cast the mock for type safety in tests
-const mockedQueryLLM = queryLLMWithRetries as jest.Mock;
-
-describe('MCP Workflow E2E Tests', () => {
-  let harness: TestHarnessState;
-  let serverProcess: ChildProcessWithoutNullStreams;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mockedQueryLLM.mockClear();
-  });
-
-  afterEach(async () => {
-    if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill();
-    }
-    await cleanupTestHarness(harness);
-  });
-
-  it('should initialize, list tools, and execute a simple query', async () => {
-    // 1. Arrange
-    mockedQueryLLM
-      .mockResolvedValueOnce(
-        `<think>Okay, creating the file.</think>
-         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Committing the file.</think>
-         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
-         <reply>File created and committed.</reply>`
-      );
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-
-    // Handshake
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: { clientInfo: { name: 'test-client' } },
-    });
-    const initResponse = (await messages.next()).value as MCPResponse;
-    expect(initResponse.id).toBe(1);
-    expect(initResponse.result).toBeDefined();
-
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'list_tools',
-    });
-    const listToolsResponse = (await messages.next()).value as MCPResponse;
-    expect(listToolsResponse.id).toBe(2);
-    expect((listToolsResponse.result as any).tools).toHaveLength(1);
-
-    // Execute
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'execute_tool',
-      params: { name: 'process_query', args: { query: 'create file' } },
-    });
-
-    const notifications: MCPNotification[] = [];
-    let finalResponse: MCPResponse | undefined;
-
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message as MCPResponse;
-        break;
-      } else {
-        notifications.push(message as MCPNotification);
-      }
-    }
-
-    // 3. Assert
-    expect(notifications.length).toBeGreaterThanOrEqual(2);
-    expect(
-      notifications.some((n) => n.method === 'mcp/log/info')
-    ).toBeTruthy();
-
-    expect(finalResponse).toBeDefined();
-    expect(finalResponse?.id).toBe(3);
-    const result = JSON.parse((finalResponse?.result as any).result);
-    expect(result.reply).toBe('File created and committed.');
-
-    // Verify side-effects
-    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: create hello.txt');
-  });
-
-  it('should correctly handle the Dr. Aris Thorne example', async () => {
-    // 1. Arrange
-    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
-<typescript>
-const orgPath = 'AI Research Institute.md';
-if (!await mem.fileExists(orgPath)) {
-  await mem.writeFile(orgPath, \`- # AI Research Institute
-  - type:: organization\`);
-}
-await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
-  - type:: person
-  - affiliation:: [[AI Research Institute]]
-  - field:: [[Symbolic Reasoning]]\`);
-</typescript>`;
-    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
-
-    mockedQueryLLM
-      .mockResolvedValueOnce(turn1Response)
-      .mockResolvedValueOnce(turn2Response);
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'execute_tool',
-      params: {
-        name: 'process_query',
-        args: { query: 'Create Dr. Aris Thorne' },
-      },
-    });
-
-    let finalResponse: MCPResponse | undefined;
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message;
-        break;
-      }
-    }
-
-    // 3. Assert
-    const result = JSON.parse((finalResponse?.result as any).result);
-    expect(result.reply).toBe(
-      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
-    );
-
-    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
-    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
-
-    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe(
-      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
-    );
-  });
-
-  it('should save a checkpoint and successfully revert to it', async () => {
-    // 1. Arrange
-    mockedQueryLLM
-      .mockResolvedValueOnce(
-        `<think>Writing file 1.</think>
-         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Saving checkpoint.</think>
-         <typescript>await mem.saveCheckpoint();</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Writing file 2.</think>
-         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Reverting to checkpoint.</think>
-         <typescript>await mem.revertToLastCheckpoint();</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Committing.</think>
-         <typescript>await mem.commitChanges('feat: add file1 only');</typescript>
-         <reply>Reverted and committed.</reply>`
-      );
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'execute_tool',
-      params: { name: 'process_query', args: { query: 'test checkpoints' } },
-    });
-
-    let finalResponse: MCPResponse | undefined;
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message;
-        break;
-      }
-    }
-
-    // 3. Assert
-    expect(JSON.parse((finalResponse?.result as any).result).reply).toBe(
-      'Reverted and committed.'
-    );
-    expect(await harness.mem.fileExists('file1.md')).toBe(true);
-    expect(await harness.mem.fileExists('file2.md')).toBe(false);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: add file1 only');
-  });
-
-  it('should block and gracefully handle path traversal attempts', async () => {
-    // 1. Arrange
-    mockedQueryLLM
-      .mockResolvedValueOnce(
-        `<think>I will try to read a sensitive file.</think>
-         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>The previous action failed as expected due to security. I will inform the user.</think>
-         <reply>I was unable to access that file due to security restrictions.</reply>`
-      );
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'execute_tool',
-      params: {
-        name: 'process_query',
-        args: { query: 'read sensitive file' },
-      },
-    });
-
-    const notifications: MCPNotification[] = [];
-    let finalResponse: MCPResponse | undefined;
-
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message;
-        break;
-      }
-      notifications.push(message as MCPNotification);
-    }
-
-    // 3. Assert
-    const errorNotification = notifications.find(
-      (n) => n.method === 'mcp/log/error'
-    );
-    expect(errorNotification).toBeDefined();
-    expect((errorNotification?.params as any).message).toContain(
-      'Path traversal attempt detected'
-    );
-
-    const result = JSON.parse((finalResponse?.result as any).result);
-    expect(result.reply).toBe(
-      'I was unable to access that file due to security restrictions.'
-    );
-  });
-});
-````
 
 ## File: docs/PLATFORM_SUPPORT.md
 ````markdown
@@ -1739,66 +1445,296 @@ export const platform = {
 export default platform;
 ````
 
-## File: tests/lib/test-util.ts
+## File: tests/e2e/mcp-workflow.test.ts
 ````typescript
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
-import type { TestHarnessState } from './test-harness';
-import type {
-  MCPRequest,
-  MCPResponse,
-  MCPNotification,
-} from '../../src/types';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import {
+  spawnServer,
+  writeMCPRequest,
+  readMCPMessages,
+  type MCPMessage,
+} from '../lib/test-util';
+import type { MCPError, MCPNotification, MCPResponse } from '../../src/types';
+import { queryLLMWithRetries } from '../../src/core/llm';
 
-export const spawnServer = (
-  harness: TestHarnessState
-): ChildProcessWithoutNullStreams => {
-  const serverProcess = spawn('node', ['dist/server.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
-      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
-    },
+// Mock the entire LLM module to control agent behavior
+jest.mock('../../src/core/llm', () => ({
+  queryLLMWithRetries: jest.fn(),
+}));
+
+// Cast the mock for type safety in tests
+const mockedQueryLLM = queryLLMWithRetries as jest.Mock;
+
+describe('MCP Workflow E2E Tests', () => {
+  let harness: TestHarnessState;
+  let serverProcess: ChildProcessWithoutNullStreams;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mockedQueryLLM.mockClear();
   });
 
-  serverProcess.stderr.on('data', (data) => {
-    console.error(`SERVER STDERR: ${data}`);
+  afterEach(async () => {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill();
+    }
+    await cleanupTestHarness(harness);
   });
 
-  return serverProcess;
-};
+  it('should initialize, list tools, and execute a simple query', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>Okay, creating the file.</think>
+         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Committing the file.</think>
+         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
+         <reply>File created and committed.</reply>`
+      );
 
-export const writeMCPRequest = (
-  serverProcess: ChildProcessWithoutNullStreams,
-  request: MCPRequest
-): void => {
-  const message = JSON.stringify(request) + '\n';
-  serverProcess.stdin.write(message);
-};
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
 
-export type MCPMessage = MCPResponse | MCPNotification;
+    // Handshake
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { clientInfo: { name: 'test-client' } },
+    });
+    const initResponse = (await messages.next()).value as MCPResponse;
+    expect(initResponse.id).toBe(1);
+    expect(initResponse.result).toBeDefined();
 
-export async function* readMCPMessages(
-  serverProcess: ChildProcessWithoutNullStreams
-): AsyncGenerator<MCPMessage> {
-  let buffer = '';
-  for await (const chunk of serverProcess.stdout) {
-    buffer += chunk.toString();
-    let newlineIndex;
-    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, newlineIndex);
-      buffer = buffer.slice(newlineIndex + 1);
-      if (line.trim()) {
-        try {
-          const parsed = JSON.parse(line);
-          yield parsed as MCPMessage;
-        } catch (error) {
-          console.error('Failed to parse MCP message:', line);
-        }
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'list_tools',
+    });
+    const listToolsResponse = (await messages.next()).value as MCPResponse;
+    expect(listToolsResponse.id).toBe(2);
+    expect((listToolsResponse.result as any).tools).toHaveLength(1);
+
+    // Execute
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'execute_tool',
+      params: { name: 'process_query', args: { query: 'create file' } },
+    });
+
+    const notifications: MCPNotification[] = [];
+    let finalResponse: MCPResponse | undefined;
+
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message as MCPResponse;
+        break;
+      } else {
+        notifications.push(message as MCPNotification);
       }
     }
-  }
+
+    // 3. Assert
+    expect(notifications.length).toBeGreaterThanOrEqual(2);
+    expect(
+      notifications.some((n) => n.method === 'mcp/log/info')
+    ).toBeTruthy();
+
+    expect(finalResponse).toBeDefined();
+    expect(finalResponse?.id).toBe(3);
+    const result = JSON.parse((finalResponse?.result as any).result);
+    expect(result.reply).toBe('File created and committed.');
+
+    // Verify side-effects
+    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: create hello.txt');
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example', async () => {
+    // 1. Arrange
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(orgPath, \`- # AI Research Institute
+  - type:: organization\`);
 }
+await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
+  - type:: person
+  - affiliation:: [[AI Research Institute]]
+  - field:: [[Symbolic Reasoning]]\`);
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
+
+    mockedQueryLLM
+      .mockResolvedValueOnce(turn1Response)
+      .mockResolvedValueOnce(turn2Response);
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: {
+        name: 'process_query',
+        args: { query: 'Create Dr. Aris Thorne' },
+      },
+    });
+
+    let finalResponse: MCPResponse | undefined;
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+    }
+
+    // 3. Assert
+    const result = JSON.parse((finalResponse?.result as any).result);
+    expect(result.reply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+
+    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+
+  it('should save a checkpoint and successfully revert to it', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>Writing file 1.</think>
+         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Saving checkpoint.</think>
+         <typescript>await mem.saveCheckpoint();</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Writing file 2.</think>
+         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Reverting to checkpoint.</think>
+         <typescript>await mem.revertToLastCheckpoint();</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Committing.</think>
+         <typescript>await mem.commitChanges('feat: add file1 only');</typescript>
+         <reply>Reverted and committed.</reply>`
+      );
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: { name: 'process_query', args: { query: 'test checkpoints' } },
+    });
+
+    let finalResponse: MCPResponse | undefined;
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+    }
+
+    // 3. Assert
+    expect(JSON.parse((finalResponse?.result as any).result).reply).toBe(
+      'Reverted and committed.'
+    );
+    expect(await harness.mem.fileExists('file1.md')).toBe(true);
+    expect(await harness.mem.fileExists('file2.md')).toBe(false);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: add file1 only');
+  });
+
+  it('should block and gracefully handle path traversal attempts', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>I will try to read a sensitive file.</think>
+         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>The previous action failed as expected due to security. I will inform the user.</think>
+         <reply>I was unable to access that file due to security restrictions.</reply>`
+      );
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: {
+        name: 'process_query',
+        args: { query: 'read sensitive file' },
+      },
+    });
+
+    const notifications: MCPNotification[] = [];
+    let finalResponse: MCPResponse | undefined;
+
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+      notifications.push(message as MCPNotification);
+    }
+
+    // 3. Assert
+    const errorNotification = notifications.find(
+      (n) => n.method === 'mcp/log/error'
+    );
+    expect(errorNotification).toBeDefined();
+    expect((errorNotification?.params as any).message).toContain(
+      'Path traversal attempt detected'
+    );
+
+    const result = JSON.parse((finalResponse?.result as any).result);
+    expect(result.reply).toBe(
+      'I was unable to access that file due to security restrictions.'
+    );
+  });
+});
 ````
 
 ## File: tests/setup.ts
@@ -1813,57 +1749,6 @@ Object.defineProperty(global, 'localStorage', {
   },
   writable: true,
 });
-````
-
-## File: -bun run start
-````
-+npm start
-````
-
-## File: ### 2. Configuration
-````
-Create a `.env` file in the root of the project by copying the example:
-````
-
-## File: eslint.config.js
-````javascript
-import js from '@eslint/js';
-import typescript from '@typescript-eslint/eslint-plugin';
-import typescriptParser from '@typescript-eslint/parser';
-
-export default [
-  js.configs.recommended,
-  {
-    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js', 'tests/**/*.ts'],
-    languageOptions: {
-      parser: typescriptParser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-      globals: {
-        console: 'readonly',
-        process: 'readonly',
-        Buffer: 'readonly',
-        __dirname: 'readonly',
-        __filename: 'readonly',
-      },
-    },
-    plugins: {
-      '@typescript-eslint': typescript,
-    },
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { argsIgnorePattern: '^_' }
-      ],
-      'no-console': 'off', // Allow console for build scripts and logging
-      'no-unused-vars': 'off', // Let TypeScript handle this
-      'no-undef': 'off', // Let TypeScript handle this
-    },
-  },
-];
 ````
 
 ## File: INSTALL_TERMUX.md
@@ -2348,6 +2233,68 @@ export type ExecutionContext = {
 };
 ````
 
+## File: tests/lib/test-util.ts
+````typescript
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import type { TestHarnessState } from './test-harness';
+import type {
+  MCPRequest,
+  MCPResponse,
+  MCPNotification,
+} from '../../src/types';
+
+export const spawnServer = (
+  harness: TestHarnessState
+): ChildProcessWithoutNullStreams => {
+  const serverProcess = spawn('node', ['dist/server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
+      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
+    },
+  });
+
+  serverProcess.stderr.on('data', (data) => {
+    console.error(`SERVER STDERR: ${data}`);
+  });
+
+  return serverProcess;
+};
+
+export const writeMCPRequest = (
+  serverProcess: ChildProcessWithoutNullStreams,
+  request: MCPRequest
+): void => {
+  const message = JSON.stringify(request) + '\n';
+  serverProcess.stdin.write(message);
+};
+
+export type MCPMessage = MCPResponse | MCPNotification;
+
+export async function* readMCPMessages(
+  serverProcess: ChildProcessWithoutNullStreams
+): AsyncGenerator<MCPMessage> {
+  let buffer = '';
+  for await (const chunk of serverProcess.stdout) {
+    buffer += chunk.toString();
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.trim()) {
+        try {
+          const parsed = JSON.parse(line);
+          yield parsed as MCPMessage;
+        } catch (error) {
+          console.error('Failed to parse MCP message:', line);
+        }
+      }
+    }
+  }
+}
+````
+
 ## File: .dockerignore
 ````
 # Git
@@ -2432,6 +2379,47 @@ EXPOSE 3000
 
 # The command to run the application
 CMD ["node", "dist/server.js"]
+````
+
+## File: eslint.config.js
+````javascript
+import js from '@eslint/js';
+import typescript from '@typescript-eslint/eslint-plugin';
+import typescriptParser from '@typescript-eslint/parser';
+
+export default [
+  js.configs.recommended,
+  {
+    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js', 'tests/**/*.ts'],
+    languageOptions: {
+      parser: typescriptParser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+      },
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': typescript,
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_' }
+      ],
+      'no-console': 'off', // Allow console for build scripts and logging
+      'no-unused-vars': 'off', // Let TypeScript handle this
+      'no-undef': 'off', // Let TypeScript handle this
+    },
+  },
+];
 ````
 
 ## File: src/core/mem-api/fs-walker.ts
@@ -3215,6 +3203,238 @@ General-purpose operations for the sandbox environment.
 | **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
 ````
 
+## File: src/types/git.ts
+````typescript
+export interface GitOptions {
+  baseDir?: string;
+}
+
+// Structure for a single Git log entry.
+export type LogEntry = {
+  hash: string;
+  message: string;
+  date: string;
+};
+
+export interface GitDiffResult {
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface GitStatus {
+  staged: string[];
+  unstaged: string[];
+  untracked: string[];
+}
+
+export type GitCommand =
+  | 'init'
+  | 'add'
+  | 'commit'
+  | 'status'
+  | 'log'
+  | 'diff'
+  | 'branch';
+````
+
+## File: src/types/index.ts
+````typescript
+export * from './mem.js';
+export * from './git.js';
+export * from './sandbox.js';
+export * from './llm.js';
+export * from './loop.js';
+export * from './mcp.js';
+
+export interface RecursaConfig {
+  knowledgeGraphPath: string;
+  llm: {
+    apiKey: string;
+    baseUrl?: string;
+    model: string;
+    maxTokens?: number;
+    temperature?: number;
+  };
+  sandbox: {
+    timeout: number;
+    memoryLimit: number;
+  };
+  git: {
+    userName: string;
+    userEmail: string;
+  };
+}
+
+export interface EnvironmentVariables {
+  KNOWLEDGE_GRAPH_PATH: string;
+  OPENROUTER_API_KEY: string;
+  OPENROUTER_MODEL?: string;
+  LLM_TEMPERATURE?: string;
+  LLM_MAX_TOKENS?: string;
+  SANDBOX_TIMEOUT?: string;
+  SANDBOX_MEMORY_LIMIT?: string;
+  GIT_USER_NAME?: string;
+  GIT_USER_EMAIL?: string;
+}
+````
+
+## File: src/core/mem-api/git-ops.ts
+````typescript
+import type { SimpleGit } from 'simple-git';
+import type { LogEntry } from '../../types';
+
+// Note: These functions take a pre-configured simple-git instance.
+
+export const gitDiff =
+  (git: SimpleGit) =>
+  async (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ): Promise<string> => {
+    try {
+      if (fromCommit && toCommit) {
+        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
+      } else if (fromCommit) {
+        return await git.diff([`${fromCommit}`, '--', filePath]);
+      } else {
+        return await git.diff([filePath]);
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const gitLog =
+  (git: SimpleGit) =>
+  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
+    try {
+      const options = {
+        maxCount: maxCommits,
+        ...(filePath ? { file: filePath } : {}),
+      };
+      const result = await git.log(options);
+      return result.all.map((entry) => ({
+        hash: entry.hash,
+        message: entry.message,
+        date: entry.date,
+      }));
+    } catch (error) {
+      const target = filePath || 'repository';
+      throw new Error(
+        `Failed to get git log for ${target}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const getChangedFiles =
+  (git: SimpleGit) => async (): Promise<string[]> => {
+    try {
+      const status = await git.status();
+      // Combine all relevant file arrays and remove duplicates
+      const allFiles = new Set([
+        ...status.staged,
+        ...status.modified,
+        ...status.created,
+        ...status.deleted,
+        ...status.renamed.map((r) => r.to),
+      ]);
+      return Array.from(allFiles);
+    } catch (error) {
+      throw new Error(
+        `Failed to get changed files: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const commitChanges =
+  (git: SimpleGit) =>
+  async (message: string): Promise<string> => {
+    try {
+      // Stage all changes
+      await git.add('.');
+
+      // Commit staged changes
+      const result = await git.commit(message);
+
+      // Return the commit hash
+      if (result.commit) {
+        return result.commit;
+      }
+      // If result.commit is empty or null, it means no changes were committed. This is not an error.
+      return 'No changes to commit.';
+    } catch (error) {
+      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
+    }
+  };
+````
+
+## File: src/core/mem-api/index.ts
+````typescript
+import type { MemAPI } from '../../types';
+import type { AppConfig } from '../../config';
+import simpleGit from 'simple-git';
+
+import * as fileOps from './file-ops';
+import * as gitOps from './git-ops';
+import * as graphOps from './graph-ops';
+import * as stateOps from './state-ops';
+import * as utilOps from './util-ops';
+
+/**
+ * Creates a fully-functional MemAPI object.
+ * This is a Higher-Order Function that takes the application configuration
+ * and returns an object where each method is pre-configured with the necessary
+ * context (like the knowledge graph path or a git instance).
+ *
+ * @param config The application configuration.
+ * @returns A complete MemAPI object ready to be used by the sandbox.
+ */
+export const createMemAPI = (config: AppConfig): MemAPI => {
+  const git = simpleGit(config.knowledgeGraphPath)
+    .addConfig('user.name', config.gitUserName)
+    .addConfig('user.email', config.gitUserEmail);
+  const graphRoot = config.knowledgeGraphPath;
+
+  return {
+    // Core File I/O
+    readFile: fileOps.readFile(graphRoot),
+    writeFile: fileOps.writeFile(graphRoot),
+    updateFile: fileOps.updateFile(graphRoot),
+    deletePath: fileOps.deletePath(graphRoot),
+    rename: fileOps.rename(graphRoot),
+    fileExists: fileOps.fileExists(graphRoot),
+    createDir: fileOps.createDir(graphRoot),
+    listFiles: fileOps.listFiles(graphRoot),
+
+    // Git-Native Operations
+    gitDiff: gitOps.gitDiff(git),
+    gitLog: gitOps.gitLog(git),
+    getChangedFiles: gitOps.getChangedFiles(git),
+    commitChanges: gitOps.commitChanges(git),
+
+    // Intelligent Graph Operations
+    queryGraph: graphOps.queryGraph(graphRoot),
+    getBacklinks: graphOps.getBacklinks(graphRoot),
+    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
+    searchGlobal: graphOps.searchGlobal(graphRoot),
+
+    // State Management & Checkpoints
+    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
+    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
+    discardChanges: stateOps.discardChanges(git), // Implemented
+
+    // Utility & Diagnostics
+    getGraphRoot: utilOps.getGraphRoot(graphRoot),
+    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
+    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
+  };
+};
+````
+
 ## File: src/core/mem-api/secure-path.ts
 ````typescript
 import path from 'path';
@@ -3447,238 +3667,6 @@ export default {
   sanitizePath,
   SecurityError,
   pathValidation
-};
-````
-
-## File: src/types/git.ts
-````typescript
-export interface GitOptions {
-  baseDir?: string;
-}
-
-// Structure for a single Git log entry.
-export type LogEntry = {
-  hash: string;
-  message: string;
-  date: string;
-};
-
-export interface GitDiffResult {
-  additions: number;
-  deletions: number;
-  patch: string;
-}
-
-export interface GitStatus {
-  staged: string[];
-  unstaged: string[];
-  untracked: string[];
-}
-
-export type GitCommand =
-  | 'init'
-  | 'add'
-  | 'commit'
-  | 'status'
-  | 'log'
-  | 'diff'
-  | 'branch';
-````
-
-## File: src/types/index.ts
-````typescript
-export * from './mem.js';
-export * from './git.js';
-export * from './sandbox.js';
-export * from './llm.js';
-export * from './loop.js';
-export * from './mcp.js';
-
-export interface RecursaConfig {
-  knowledgeGraphPath: string;
-  llm: {
-    apiKey: string;
-    baseUrl?: string;
-    model: string;
-    maxTokens?: number;
-    temperature?: number;
-  };
-  sandbox: {
-    timeout: number;
-    memoryLimit: number;
-  };
-  git: {
-    userName: string;
-    userEmail: string;
-  };
-}
-
-export interface EnvironmentVariables {
-  KNOWLEDGE_GRAPH_PATH: string;
-  OPENROUTER_API_KEY: string;
-  OPENROUTER_MODEL?: string;
-  LLM_TEMPERATURE?: string;
-  LLM_MAX_TOKENS?: string;
-  SANDBOX_TIMEOUT?: string;
-  SANDBOX_MEMORY_LIMIT?: string;
-  GIT_USER_NAME?: string;
-  GIT_USER_EMAIL?: string;
-}
-````
-
-## File: src/core/mem-api/git-ops.ts
-````typescript
-import type { SimpleGit } from 'simple-git';
-import type { LogEntry } from '../../types';
-
-// Note: These functions take a pre-configured simple-git instance.
-
-export const gitDiff =
-  (git: SimpleGit) =>
-  async (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ): Promise<string> => {
-    try {
-      if (fromCommit && toCommit) {
-        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
-      } else if (fromCommit) {
-        return await git.diff([`${fromCommit}`, '--', filePath]);
-      } else {
-        return await git.diff([filePath]);
-      }
-    } catch (error) {
-      throw new Error(
-        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const gitLog =
-  (git: SimpleGit) =>
-  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
-    try {
-      const options = {
-        maxCount: maxCommits,
-        ...(filePath ? { file: filePath } : {}),
-      };
-      const result = await git.log(options);
-      return result.all.map((entry) => ({
-        hash: entry.hash,
-        message: entry.message,
-        date: entry.date,
-      }));
-    } catch (error) {
-      const target = filePath || 'repository';
-      throw new Error(
-        `Failed to get git log for ${target}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getChangedFiles =
-  (git: SimpleGit) => async (): Promise<string[]> => {
-    try {
-      const status = await git.status();
-      // Combine all relevant file arrays and remove duplicates
-      const allFiles = new Set([
-        ...status.staged,
-        ...status.modified,
-        ...status.created,
-        ...status.deleted,
-        ...status.renamed.map((r) => r.to),
-      ]);
-      return Array.from(allFiles);
-    } catch (error) {
-      throw new Error(
-        `Failed to get changed files: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const commitChanges =
-  (git: SimpleGit) =>
-  async (message: string): Promise<string> => {
-    try {
-      // Stage all changes
-      await git.add('.');
-
-      // Commit staged changes
-      const result = await git.commit(message);
-
-      // Return the commit hash
-      if (result.commit) {
-        return result.commit;
-      }
-      // If result.commit is empty or null, it means no changes were committed. This is not an error.
-      return 'No changes to commit.';
-    } catch (error) {
-      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
-    }
-  };
-````
-
-## File: src/core/mem-api/index.ts
-````typescript
-import type { MemAPI } from '../../types';
-import type { AppConfig } from '../../config';
-import simpleGit from 'simple-git';
-
-import * as fileOps from './file-ops';
-import * as gitOps from './git-ops';
-import * as graphOps from './graph-ops';
-import * as stateOps from './state-ops';
-import * as utilOps from './util-ops';
-
-/**
- * Creates a fully-functional MemAPI object.
- * This is a Higher-Order Function that takes the application configuration
- * and returns an object where each method is pre-configured with the necessary
- * context (like the knowledge graph path or a git instance).
- *
- * @param config The application configuration.
- * @returns A complete MemAPI object ready to be used by the sandbox.
- */
-export const createMemAPI = (config: AppConfig): MemAPI => {
-  const git = simpleGit(config.knowledgeGraphPath)
-    .addConfig('user.name', config.gitUserName)
-    .addConfig('user.email', config.gitUserEmail);
-  const graphRoot = config.knowledgeGraphPath;
-
-  return {
-    // Core File I/O
-    readFile: fileOps.readFile(graphRoot),
-    writeFile: fileOps.writeFile(graphRoot),
-    updateFile: fileOps.updateFile(graphRoot),
-    deletePath: fileOps.deletePath(graphRoot),
-    rename: fileOps.rename(graphRoot),
-    fileExists: fileOps.fileExists(graphRoot),
-    createDir: fileOps.createDir(graphRoot),
-    listFiles: fileOps.listFiles(graphRoot),
-
-    // Git-Native Operations
-    gitDiff: gitOps.gitDiff(git),
-    gitLog: gitOps.gitLog(git),
-    getChangedFiles: gitOps.getChangedFiles(git),
-    commitChanges: gitOps.commitChanges(git),
-
-    // Intelligent Graph Operations
-    queryGraph: graphOps.queryGraph(graphRoot),
-    getBacklinks: graphOps.getBacklinks(graphRoot),
-    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
-    searchGlobal: graphOps.searchGlobal(graphRoot),
-
-    // State Management & Checkpoints
-    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
-    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
-    discardChanges: stateOps.discardChanges(git), // Implemented
-
-    // Utility & Diagnostics
-    getGraphRoot: utilOps.getGraphRoot(graphRoot),
-    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
-    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
-  };
 };
 ````
 
@@ -5300,6 +5288,83 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
 });
 ````
 
+## File: tasks.md
+````markdown
+# Tasks
+
+Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
+
+## Part 1: Purge `any` Types to Enforce Strict Type Safety
+
+### Task 1.1: Harden Emitter with `unknown`
+
+- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
+- **status**: done
+- **job-id**: job-44fc2242
+- **depends-on**: []
+- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
+- **files**: src/lib/events.ts
+
+### Task 1.2: Add Strict Types to MCP E2E Test
+
+- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
+- **status**: done
+- **job-id**: job-44fc2242
+- **depends-on**: []
+- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
+- **files**: tests/e2e/mcp-protocol.test.ts
+
+## Part 2: Abstract Test Environment Setup (DRY)
+
+### Task 2.1: Create a `TestHarness` for Environment Management
+
+- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
+- **status**: done
+- **job-id**: job-b2ec7d18
+- **depends-on**: []
+- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
+- **files**: tests/lib/test-harness.ts (new)
+
+### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
+
+- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
+- **status**: done
+- **job-id**: job-b2ec7d18
+- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
+- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
+- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
+
+## Part 3: Consolidate Mock LLM Utility (DRY)
+
+### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
+
+- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
+- **status**: done
+- **job-id**: job-11bd80d6
+- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
+- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
+- **files**: tests/lib/test-harness.ts
+
+### Task 3.2: Refactor Tests to Use Shared LLM Mock
+
+- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
+- **status**: done
+- **job-id**: job-11bd80d6
+- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
+- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
+- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
+
+## Audit Task
+
+### Task A.1: Final Audit and Merge
+
+- **uuid**: audit-001
+- **status**: todo
+- **job-id**:
+- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
+- **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
+````
+
 ## File: src/core/mem-api/file-ops.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -5594,83 +5659,6 @@ export const listFiles =
   };
 ````
 
-## File: tasks.md
-````markdown
-# Tasks
-
-Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
-
-## Part 1: Purge `any` Types to Enforce Strict Type Safety
-
-### Task 1.1: Harden Emitter with `unknown`
-
-- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
-- **files**: src/lib/events.ts
-
-### Task 1.2: Add Strict Types to MCP E2E Test
-
-- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
-- **files**: tests/e2e/mcp-protocol.test.ts
-
-## Part 2: Abstract Test Environment Setup (DRY)
-
-### Task 2.1: Create a `TestHarness` for Environment Management
-
-- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: []
-- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
-- **files**: tests/lib/test-harness.ts (new)
-
-### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
-
-- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
-- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Part 3: Consolidate Mock LLM Utility (DRY)
-
-### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
-
-- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
-- **files**: tests/lib/test-harness.ts
-
-### Task 3.2: Refactor Tests to Use Shared LLM Mock
-
-- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
-- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
-- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Audit Task
-
-### Task A.1: Final Audit and Merge
-
-- **uuid**: audit-001
-- **status**: todo
-- **job-id**:
-- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
-- **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
-````
-
 ## File: src/core/mem-api/graph-ops.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -5865,7 +5853,7 @@ export const searchGlobal =
     "dev:termux": "npm run dev",
     "dev:standard": "npm run dev",
     "test": "jest",
-    "lint": "eslint 'src/**/*.ts'",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
     "install:auto": "node scripts/install.js",
     "install:termux": "node scripts/install.js termux",
     "install:standard": "node scripts/install.js standard",

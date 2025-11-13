@@ -49,7 +49,7 @@ export async function* readMCPMessages(
         try {
           const parsed = JSON.parse(line);
           yield parsed as MCPMessage;
-        } catch (error) {
+        } catch {
           console.error('Failed to parse MCP message:', line);
         }
       }

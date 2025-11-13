@@ -21,7 +21,7 @@ const mockFetch = jest.fn().mockImplementation(() =>
     statusText: 'OK',
   })
 );
-(global as any).fetch = mockFetch;
+(global as typeof globalThis).fetch = mockFetch;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
@@ -41,7 +41,7 @@ const mockHistory: ChatMessage[] = [
 ];
 
 beforeEach(() => {
-  (global.fetch as jest.Mock).mockClear();
+  (fetch as jest.Mock).mockClear();
 });
 
 describe('LLM Module', () => {

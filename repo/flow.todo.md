@@ -8,7 +8,7 @@ discrepancy analysis
 
 we need many test cases to cover all llm tools so it can function as expected readme and user specs
 
-=== DOING
+=== DONE
 
 create mcp test cases to guardrails project expectations from readme.md and specs
 
@@ -20,14 +20,14 @@ create mcp test cases to guardrails project expectations from readme.md and spec
 - test.util.ts to be used by test files
 ```
 
-===
+=== DOING
 
 fix fail test
 
 
 fix all fail test without bandaids fake fix to comply with readme.md spec and real Implementation verification
 
-=== DOING
+=== DONE
 
 lets use fastmcp programmatic api instead, so we can have fewer codebase. do it without causing fail test cases
 

@@ -18,7 +18,13 @@ import {
   readMCPMessages,
   type MCPMessage,
 } from '../lib/test-util';
-import type { MCPError, MCPNotification, MCPResponse } from '../../src/types';
+import type {
+  MCPNotification,
+  MCPResponse,
+  AppConfig,
+  ChatMessage,
+  ListToolsResult,
+} from '../../src/types';
 import { queryLLMWithRetries } from '../../src/core/llm';
 
 // Mock the entire LLM module to control agent behavior
@@ -27,7 +33,10 @@ jest.mock('../../src/core/llm', () => ({
 }));
 
 // Cast the mock for type safety in tests
-const mockedQueryLLM = queryLLMWithRetries as jest.Mock;
+const mockedQueryLLM = queryLLMWithRetries as jest.Mock<
+  Promise<string>,
+  [ChatMessage[], AppConfig]
+>;
 
 describe('MCP Workflow E2E Tests', () => {
   let harness: TestHarnessState;
@@ -80,7 +89,7 @@ describe('MCP Workflow E2E Tests', () => {
     });
     const listToolsResponse = (await messages.next()).value as MCPResponse;
     expect(listToolsResponse.id).toBe(2);
-    expect((listToolsResponse.result as any).tools).toHaveLength(1);
+    expect((listToolsResponse.result as ListToolsResult).tools).toHaveLength(1);
 
     // Execute
     writeMCPRequest(serverProcess, {
@@ -110,7 +119,9 @@ describe('MCP Workflow E2E Tests', () => {
 
     expect(finalResponse).toBeDefined();
     expect(finalResponse?.id).toBe(3);
-    const result = JSON.parse((finalResponse?.result as any).result);
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
     expect(result.reply).toBe('File created and committed.');
 
     // Verify side-effects
@@ -159,13 +170,15 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
     let finalResponse: MCPResponse | undefined;
     for await (const message of messages) {
       if ('id' in message) {
-        finalResponse = message;
+        finalResponse = message as MCPResponse;
         break;
       }
     }
 
     // 3. Assert
-    const result = JSON.parse((finalResponse?.result as any).result);
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
     expect(result.reply).toBe(
       "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
     );
@@ -219,15 +232,16 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
     let finalResponse: MCPResponse | undefined;
     for await (const message of messages) {
       if ('id' in message) {
-        finalResponse = message;
+        finalResponse = message as MCPResponse;
         break;
       }
     }
 
     // 3. Assert
-    expect(JSON.parse((finalResponse?.result as any).result).reply).toBe(
-      'Reverted and committed.'
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
     );
+    expect(result.reply).toBe('Reverted and committed.');
     expect(await harness.mem.fileExists('file1.md')).toBe(true);
     expect(await harness.mem.fileExists('file2.md')).toBe(false);
 
@@ -276,11 +290,13 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       (n) => n.method === 'mcp/log/error'
     );
     expect(errorNotification).toBeDefined();
-    expect((errorNotification?.params as any).message).toContain(
+    expect((errorNotification?.params as { message: string }).message).toContain(
       'Path traversal attempt detected'
     );
 
-    const result = JSON.parse((finalResponse?.result as any).result);
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
     expect(result.reply).toBe(
       'I was unable to access that file due to security restrictions.'
     );
