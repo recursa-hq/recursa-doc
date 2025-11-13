@@ -1,5 +1,7 @@
 # Directory Structure
 ```
+.claude/
+  settings.local.json
 src/
   core/
     mem-api/
@@ -65,10 +67,22 @@ relay.config.json
 repomix.config.json
 tasks.md
 tsconfig.json
-tsconfig.tsbuildinfo
 ```
 
 # Files
+
+## File: .claude/settings.local.json
+````json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
+````
 
 ## File: src/lib/logseq-validator.ts
 ````typescript
@@ -2366,11 +2380,6 @@ worktrees/*/.git/
 }
 ````
 
-## File: tsconfig.tsbuildinfo
-````
-{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
-````
-
 ## File: src/types/git.ts
 ````typescript
 export interface GitOptions {
@@ -3362,66 +3371,6 @@ export const getTokenCountForPaths =
   };
 ````
 
-## File: src/core/llm.ts
-````typescript
-import { generateText } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import type { AppConfig } from '../config';
-import { logger } from '../lib/logger.js';
-import type { ChatMessage } from '../types';
-
-export const queryLLM = async (
-  history: ChatMessage[],
-  config: AppConfig
-): Promise<string> => {
-  try {
-    // 1. Create a configured OpenRouter provider instance
-    const openrouter = createOpenRouter({
-      apiKey: config.openRouterApiKey,
-      headers: {
-        'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
-        'X-Title': 'Recursa',
-      },
-    });
-
-    // 2. Separate system prompt from the rest of the message history
-    const systemPrompt = history.find((m) => m.role === 'system')?.content;
-    const messages = history.filter(
-      (m) => m.role === 'user' || m.role === 'assistant'
-    );
-
-    // 3. Call the AI SDK's generateText function
-    const { text } = await generateText({
-      model: openrouter(config.llmModel),
-      system: systemPrompt,
-      messages,
-      temperature: config.llmTemperature,
-      maxTokens: config.llmMaxTokens,
-    });
-
-    // 4. Validate and return the response
-    if (!text) {
-      throw new Error('Empty content received from OpenRouter API');
-    }
-
-    return text;
-  } catch (error) {
-    logger.error('Failed to query OpenRouter API', error as Error);
-    // Re-throw the error to be handled by the agent loop
-    throw new Error(
-      `Failed to query OpenRouter API: ${(error as Error).message}`
-    );
-  }
-};
-
-// The AI SDK's underlying `fetch` implementation (`ofetch`) has built-in retry logic
-// for transient network errors and 5xx server errors, so our custom `withRetry` HOF is no longer needed.
-// We export `queryLLM` as `queryLLMWithRetries` to maintain the same interface for the agent loop.
-export const queryLLMWithRetries = queryLLM as (
-  ...args: unknown[]
-) => Promise<unknown>;
-````
-
 ## File: src/types/mem.ts
 ````typescript
 import type { LogEntry } from './git.js';
@@ -3526,6 +3475,64 @@ GIT_USER_EMAIL=recursa@local
 # 2. Update OPENROUTER_API_KEY and RECURSA_API_KEY with your actual keys
 # 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
 # 4. Run the server: npm run dev
+````
+
+## File: src/core/llm.ts
+````typescript
+import { generateText } from 'ai';
+import { openrouter } from '@openrouter/ai-sdk-provider';
+import type { AppConfig } from '../config';
+import { logger } from '../lib/logger.js';
+import type { ChatMessage } from '../types';
+
+export const queryLLM = async (
+  history: ChatMessage[],
+  config: AppConfig
+): Promise<string> => {
+  try {
+    // Set environment variables for the default openrouter provider
+    process.env.OPENROUTER_API_KEY = config.openRouterApiKey;
+    process.env['HTTP-REFERER'] = 'https://github.com/rec/ursa';
+    process.env['X-TITLE'] = 'Recursa';
+
+    const model = openrouter(config.llmModel);
+
+    // 2. Separate system prompt from the rest of the message history
+    const systemPrompt = history.find((m) => m.role === 'system')?.content;
+    const messages = history.filter(
+      (m) => m.role === 'user' || m.role === 'assistant'
+    );
+
+    // 3. Call the AI SDK's generateText function
+    const { text } = await generateText({
+      model,
+      system: systemPrompt,
+      messages,
+      temperature: config.llmTemperature,
+      maxTokens: config.llmMaxTokens,
+    });
+
+    // 4. Validate and return the response
+    if (!text) {
+      throw new Error('Empty content received from OpenRouter API');
+    }
+
+    return text;
+  } catch (error) {
+    logger.error('Failed to query OpenRouter API', error as Error);
+    // Re-throw the error to be handled by the agent loop
+    throw new Error(
+      `Failed to query OpenRouter API: ${(error as Error).message}`
+    );
+  }
+};
+
+// The AI SDK's underlying `fetch` implementation (`ofetch`) has built-in retry logic
+// for transient network errors and 5xx server errors, so our custom `withRetry` HOF is no longer needed.
+// We export `queryLLM` as `queryLLMWithRetries` to maintain the same interface for the agent loop.
+export const queryLLMWithRetries = queryLLM as (
+  ...args: unknown[]
+) => Promise<unknown>;
 ````
 
 ## File: src/config.ts
@@ -4163,7 +4170,7 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { queryLLM } from '../../src/core/llm';
 import { generateText } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { openrouter } from '@openrouter/ai-sdk-provider';
 import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 
@@ -4173,19 +4180,15 @@ jest.mock('ai', () => ({
 }));
 
 jest.mock('@openrouter/ai-sdk-provider', () => ({
-  // createOpenRouter returns a function that, when called, returns a model instance.
-  // So we mock it as a Jest mock that returns another Jest mock.
-  createOpenRouter: jest.fn(() =>
-    jest.fn((modelId: string) => ({
-      modelId,
-      provider: 'mockOpenRouterProvider',
-    }))
-  ),
+  openrouter: jest.fn((modelId: string) => ({
+    modelId,
+    provider: 'mockOpenRouterProvider',
+  })),
 }));
 
 // Cast the mocked functions to Jest's mock type for type safety
 const mockGenerateText = generateText as jest.MockedFunction<typeof generateText>;
-const mockCreateOpenRouter = createOpenRouter as jest.Mock;
+const mockOpenRouter = openrouter as unknown as jest.Mock;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
@@ -4215,7 +4218,30 @@ beforeEach(() => {
 describe('LLM Module with AI SDK', () => {
   it('should call generateText with correct parameters', async () => {
     // Arrange: Mock the successful response from the AI SDK
-    mockGenerateText.mockResolvedValue({ text: 'Test response from AI SDK' });
+    mockGenerateText.mockResolvedValue({
+      text: 'Test response from AI SDK',
+      toolCalls: [],
+      toolResults: [],
+      finishReason: 'stop',
+      usage: {
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      },
+      warnings: undefined,
+      request: {
+        body: '{}',
+      },
+      response: {
+        id: 'test-response-id',
+        timestamp: new Date(),
+        modelId: 'anthropic/claude-3-haiku-20240307',
+        headers: {},
+        messages: [],
+      },
+      logprobs: undefined,
+      experimental_providerMetadata: undefined,
+    });
 
     // Act: Call our queryLLM function
     const response = await queryLLM(mockHistory, mockConfig);
@@ -4223,15 +4249,9 @@ describe('LLM Module with AI SDK', () => {
     // Assert: Check the response and that our mocks were called correctly
     expect(response).toBe('Test response from AI SDK');
 
-    // Verify createOpenRouter was called with the API key and headers
-    expect(mockCreateOpenRouter).toHaveBeenCalledTimes(1);
-    expect(mockCreateOpenRouter).toHaveBeenCalledWith({
-      apiKey: 'test-api-key',
-      headers: {
-        'HTTP-Referer': 'https://github.com/rec/ursa',
-        'X-Title': 'Recursa',
-      },
-    });
+    // Verify openrouter was called with the correct model ID
+    expect(mockOpenRouter).toHaveBeenCalledTimes(1);
+    expect(mockOpenRouter).toHaveBeenCalledWith('anthropic/claude-3-haiku-20240307');
 
     // Verify generateText was called correctly
     expect(mockGenerateText).toHaveBeenCalledTimes(1);
@@ -4265,7 +4285,30 @@ describe('LLM Module with AI SDK', () => {
 
   it('should handle empty content in the AI SDK response', async () => {
     // Arrange: Mock a response with an empty text field
-    mockGenerateText.mockResolvedValue({ text: '' });
+    mockGenerateText.mockResolvedValue({
+      text: '',
+      toolCalls: [],
+      toolResults: [],
+      finishReason: 'stop',
+      usage: {
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      },
+      warnings: undefined,
+      request: {
+        body: '{}',
+      },
+      response: {
+        id: 'test-response-id',
+        timestamp: new Date(),
+        modelId: 'anthropic/claude-3-haiku-20240307',
+        headers: {},
+        messages: [],
+      },
+      logprobs: undefined,
+      experimental_providerMetadata: undefined,
+    });
 
     // Act & Assert: Expect an error for empty content
     await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
@@ -4474,60 +4517,6 @@ await mem.commitChanges('fix: create missing file after read error');
     expect(content).toBe('- # Created After Error');
   });
 });
-````
-
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/server.js",
-    "start:termux": "npm run start",
-    "start:standard": "npm run start",
-    "build": "tsc",
-    "build:auto": "node scripts/build.js",
-    "build:termux": "node scripts/build.js termux",
-    "build:standard": "node scripts/build.js standard",
-    "dev": "tsx watch src/server.ts",
-    "dev:termux": "npm run dev",
-    "dev:standard": "npm run dev",
-    "test": "jest",
-    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
-    "install:auto": "node scripts/install.js",
-    "install:termux": "node scripts/install.js termux",
-    "install:standard": "node scripts/install.js standard",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@openrouter/ai-sdk-provider": "^1.2.2",
-    "ai": "^3.2.36",
-    "dotenv": "^16.4.5",
-    "fastmcp": "^1.21.0",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^4.0.2",
-    "ts-jest": "^29.1.2",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "license": "MIT"
-}
 ````
 
 ## File: src/core/mem-api/file-ops.ts
@@ -4840,60 +4829,57 @@ export const listFiles =
   };
 ````
 
-## File: repomix.config.json
+## File: package.json
 ````json
 {
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
   },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "^0.7.5",
+    "ai": "^4.3.17",
+    "dotenv": "^16.4.5",
+    "fastmcp": "^1.21.0",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
   },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt",
-      "scripts",
-      "docs",
-      "coverage"
-      //   "tests"
-    ]
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
   },
-  "security": {
-    "enableSecurityCheck": true
+  "engines": {
+    "node": ">=18.0.0"
   },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
+  "license": "MIT"
 }
 ````
 
@@ -5100,6 +5086,63 @@ export const handleUserQuery = async (
   logger.warn('Loop finished without a reply', { runId, turns: MAX_TURNS });
   return 'The agent finished its work without providing a final response.';
 };
+````
+
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt",
+      "scripts",
+      "docs",
+      "coverage"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
 ````
 
 ## File: src/core/mem-api/graph-ops.ts
@@ -5392,8 +5435,18 @@ ${code}
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
 import { loadAndValidateConfig } from './config.js';
-import { FastMCP, UserError } from 'fastmcp';
+import { FastMCP, UserError, type Context } from 'fastmcp';
 import { z } from 'zod';
+import { queryLLMWithRetries } from './core/llm.js';
+import { IncomingMessage } from 'http';
+
+interface SessionContext extends Record<string, unknown> {
+  sessionId: string;
+  requestId: string;
+  stream: {
+    write: (content: { type: 'text'; text: string }) => Promise<void>;
+  };
+}
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
@@ -5403,20 +5456,18 @@ const main = async () => {
     const config = await loadAndValidateConfig();
 
     // 2. Create FastMCP server
-    const server = new FastMCP({
+    const server = new FastMCP<SessionContext>({
       name: 'recursa-server',
       version: '0.1.0',
-      authenticate: async (request) => {
-        const authHeader = request.headers.get('authorization');
-        const token = authHeader?.startsWith('Bearer ')
+      authenticate: async (request: IncomingMessage) => {
+        const authHeader = request.headers['authorization'];
+        const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
           ? authHeader.slice(7)
           : null;
 
         if (!token || token !== config.recursaApiKey) {
           logger.warn('Authentication failed', {
-            remoteAddress: (
-              request as { socket?: { remoteAddress?: string } }
-            ).socket?.remoteAddress, // Best effort IP logging
+            remoteAddress: request.socket?.remoteAddress, // Best effort IP logging
           });
           throw new Response(null, {
             status: 401,
@@ -5424,8 +5475,15 @@ const main = async () => {
           });
         }
 
-        // Return an empty object for success, as we don't need to store user data in the session context itself
-        return {};
+        // For simplicity, we'll create minimal session context
+        // In a real implementation, you might extract more session info from the request
+        return {
+          sessionId: 'default-session', // You'd typically generate or extract this
+          requestId: 'default-request', // You'd typically generate or extract this
+          stream: {
+            write: async () => {}, // Placeholder - actual stream will be provided by FastMCP
+          },
+        } as SessionContext;
       },
     });
 
@@ -5450,10 +5508,9 @@ const main = async () => {
       parameters: z.object({
         query: z.string().describe('The user query to process.'),
       }),
-      annotations: {
-        streamingHint: true,
-      },
-      execute: async (args, { log, sessionId, requestId, streamContent }) => {
+      execute: async (args, context: Context<SessionContext>) => {
+        const { log, session } = context;
+        const { sessionId, requestId, stream } = session!;
         if (!sessionId) {
           throw new UserError(
             'Session ID is missing. This tool requires a session.'
@@ -5464,13 +5521,21 @@ const main = async () => {
             'Request ID is missing. This tool requires a request ID.'
           );
         }
+        if (!stream) {
+          throw new UserError('This tool requires a streaming connection.');
+        }
 
         try {
+          const streamContent = (content: { type: 'text'; text: string }) => {
+            return stream.write(content);
+          };
+
           const finalReply = await handleUserQuery(
             args.query,
             config,
             sessionId,
             requestId,
+            queryLLMWithRetries,
             streamContent
           );
 
@@ -5478,7 +5543,11 @@ const main = async () => {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          log.error(`Error in process_query: ${errorMessage}`, error instanceof Error ? error : new Error(errorMessage));
+          const errorContext =
+            error instanceof Error
+              ? { message: error.message, stack: error.stack }
+              : { message: errorMessage };
+          log.error(`Error in process_query: ${errorMessage}`, errorContext);
           throw new UserError(errorMessage);
         }
       },
@@ -5487,7 +5556,7 @@ const main = async () => {
     // 5. Start the server
     await server.start({
       transportType: 'httpStream',
-      httpStream: { port: config.httpPort },
+      httpStream: { port: config.httpPort, endpoint: '/mcp' },
     });
 
     logger.info(

@@ -72,7 +72,7 @@ describe('LLM Module with AI SDK', () => {
       },
       logprobs: undefined,
       experimental_providerMetadata: undefined,
-    } as any);
+    });
 
     // Act: Call our queryLLM function
     const response = await queryLLM(mockHistory, mockConfig);
@@ -139,7 +139,7 @@ describe('LLM Module with AI SDK', () => {
       },
       logprobs: undefined,
       experimental_providerMetadata: undefined,
-    } as any);
+    });
 
     // Act & Assert: Expect an error for empty content
     await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(

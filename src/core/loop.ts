@@ -5,6 +5,7 @@ import { queryLLMWithRetries as defaultQueryLLM } from './llm.js';
 import { parseLLMResponse } from './parser.js';
 import { runInSandbox } from './sandbox.js';
 import { createMemAPI } from './mem-api/index.js';
+import { sanitizeTenantId } from './mem-api/secure-path.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -90,25 +91,40 @@ export const handleUserQuery = async (
     history: ChatMessage[],
     config: AppConfig
   ) => Promise<string | unknown>) = defaultQueryLLM,
-  streamContent: (content: { type: 'text'; text: string }) => Promise<void>
+  streamContent: (content: { type: 'text'; text: string }) => Promise<void>,
+  tenantId?: string
 ): Promise<string> => {
   // 1. **Initialization**
   logger.info('Starting user query handling', {
     runId,
     sessionId: sessionId,
+    tenantId,
   });
 
-  const memAPI = createMemAPI(config);
+  // Determine the graph root for this request (tenant-specific or global)
+  let graphRoot: string;
+  if (tenantId) {
+    const sanitizedId = sanitizeTenantId(tenantId);
+    graphRoot = path.join(config.knowledgeGraphPath, sanitizedId);
+    // Ensure the tenant directory exists
+    await fs.mkdir(graphRoot, { recursive: true });
+  } else {
+    graphRoot = config.knowledgeGraphPath;
+  }
+
+  // The MemAPI is now created per-request with a tenant-aware config.
+  const memAPI = createMemAPI({ ...config, knowledgeGraphPath: graphRoot });
 
   // Initialize or retrieve session history
-  const loadedHistory = await loadSessionHistory(sessionId, config.knowledgeGraphPath);
+  const loadedHistory = await loadSessionHistory(sessionId, graphRoot);
   const history = loadedHistory || [await getSystemPrompt()];
   history.push({ role: 'user', content: query });
 
   const context: ExecutionContext = {
     history,
     memAPI,
-    config,
+    // Pass the potentially tenant-scoped config to the context
+    config: { ...config, knowledgeGraphPath: graphRoot },
     runId,
     streamContent,
   };
@@ -186,7 +202,7 @@ export const handleUserQuery = async (
     }
 
     // Persist history at the end of the turn
-    await saveSessionHistory(sessionId, config.knowledgeGraphPath, context.history);
+    await saveSessionHistory(sessionId, graphRoot, context.history);
 
     // **Reply**
     if (parsedResponse.reply) {

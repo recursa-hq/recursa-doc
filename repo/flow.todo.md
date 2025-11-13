@@ -7,11 +7,16 @@ discrepancy analysis
 
 programmatic API
 
+
 ===
+
+extract out the recursa-core to another monorepo to separate all about mcp... so can be use with recursa-mcp and recursa-sdk as programmatic api
+
+=== DONE
 
 need optional multitenancy
 
-===
+=== 
 
 bun tsc -b problems
 

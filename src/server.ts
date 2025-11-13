@@ -73,6 +73,12 @@ const main = async () => {
         'Processes a high-level user query by running the agent loop.',
       parameters: z.object({
         query: z.string().describe('The user query to process.'),
+        tenantId: z
+          .string()
+          .optional()
+          .describe(
+            'An optional ID to scope operations to a specific tenant workspace.'
+          ),
       }),
       execute: async (args, context: Context<SessionContext>) => {
         const { log, session } = context;
@@ -102,7 +108,8 @@ const main = async () => {
             sessionId,
             requestId,
             queryLLMWithRetries,
-            streamContent
+            streamContent,
+            args.tenantId
           );
 
           return finalReply;

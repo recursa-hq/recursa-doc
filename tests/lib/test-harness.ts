@@ -262,6 +262,21 @@ export const verifyTestFiles = async (
 };
 
 /**
+ * Creates a tenant-specific workspace directory within the test harness.
+ * @param harness The test harness state.
+ * @param tenantId The ID of the tenant.
+ */
+export const setupTenantWorkspace = async (
+  harness: TestHarnessState,
+  tenantId: string
+): Promise<void> => {
+  // Note: handleUserQuery also creates this, but this helper is useful
+  // for explicit setup or pre-populating a tenant's workspace.
+  const tenantPath = path.join(harness.tempDir, tenantId);
+  await fs.mkdir(tenantPath, { recursive: true });
+};
+
+/**
  * Creates a mock LLM query function for testing purposes.
  * This replaces the duplicate Mock LLM utilities found across different test files.
  *

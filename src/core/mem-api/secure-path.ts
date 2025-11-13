@@ -165,6 +165,28 @@ export const sanitizePath = (userPath: string): string => {
 };
 
 /**
+ * Sanitize a tenant ID to ensure it's a safe directory name.
+ * @param tenantId The user-provided tenant ID.
+ * @returns A sanitized, safe-to-use tenant ID.
+ * @throws If the tenantId is empty or becomes empty after sanitization.
+ */
+export const sanitizeTenantId = (tenantId: string): string => {
+  if (!tenantId || !tenantId.trim()) {
+    throw new Error('Tenant ID cannot be empty.');
+  }
+
+  // Remove potentially dangerous characters and patterns.
+  // This regex replaces any character that is not a letter, number, hyphen, or underscore.
+  const sanitized = tenantId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  if (!sanitized) {
+    throw new Error('Sanitized tenant ID is empty, please provide a valid ID.');
+  }
+
+  return sanitized;
+};
+
+/**
  * Security error class for path traversal attempts
  */
 export class SecurityError extends Error {
@@ -226,6 +248,7 @@ export default {
   getCanonicalPath,
   validatePathBounds,
   sanitizePath,
+  sanitizeTenantId,
   SecurityError,
   pathValidation
 };
