@@ -243,7 +243,7 @@ Successfully performed complex file operations including creating multiple docum
 
       // Verify status updates were captured throughout the process
       expect(streamContentMock).toHaveBeenCalled();
-      if (streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0].length > 0) {
+      if (streamContentMock.mock.calls && streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0] && streamContentMock.mock.calls[0].length > 0) {
         const firstCallArg = streamContentMock.mock.calls[0][0];
         expect(firstCallArg).toHaveProperty('type', 'text');
         expect(firstCallArg.text).toContain('demonstrate complex file operations');
@@ -351,7 +351,7 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
 
       // Verify status updates were captured (should include think and act updates)
       expect(streamContentMock).toHaveBeenCalled();
-      if (streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0].length > 0) {
+      if (streamContentMock.mock.calls && streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0] && streamContentMock.mock.calls[0].length > 0) {
         const firstCallArg = streamContentMock.mock.calls[0][0];
         expect(firstCallArg).toHaveProperty('type', 'text');
         expect(firstCallArg.text).toContain('attempt various operations');
