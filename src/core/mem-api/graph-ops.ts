@@ -111,9 +111,8 @@ export const getBacklinks =
   (graphRoot: string) =>
   async (filePath: string): Promise<string[]> => {
     const targetBaseName = path.basename(filePath, path.extname(filePath));
-    // Escape special regex characters in the base name and allow for whitespace
-    const escapedTarget = targetBaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const linkPatternRegex = new RegExp(`\\[\\[\\s*${escapedTarget}\\s*\\]\\]`);
+    const targetWithoutExt = path.basename(filePath, path.extname(filePath));
+    const targetWithExt = path.basename(filePath);
 
     const backlinks: string[] = [];
     const isIgnored = await createIgnoreFilter(graphRoot);
@@ -127,8 +126,26 @@ export const getBacklinks =
       if (currentFilePath.endsWith('.md')) {
         try {
           const content = await fs.readFile(currentFilePath, 'utf-8');
-          if (linkPatternRegex.test(content)) {
-            backlinks.push(path.relative(graphRoot, currentFilePath));
+          // Extract all outgoing links from the current file
+          const linkRegex = /\[\[(.*?)\]\]/g;
+          const matches = content.matchAll(linkRegex);
+
+          for (const match of matches) {
+            if (match[1]) {
+              const linkTarget = match[1].trim();
+              // Check if this link points to our target file
+              // Try matching against various possible formats:
+              // - Exact basename without extension (e.g., "PageC")
+              // - Exact basename with extension (e.g., "PageC.md")
+              // - With spaces (e.g., "Page C" for "PageC")
+              if (linkTarget === targetWithoutExt ||
+                  linkTarget === targetWithExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithoutExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithExt) {
+                backlinks.push(path.relative(graphRoot, currentFilePath));
+                break; // Found a match, no need to check more links in this file
+              }
+            }
           }
         } catch {
           // Ignore files that can't be read
