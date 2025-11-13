@@ -61,13 +61,13 @@ describe('MemAPI Graph Ops Integration Tests', () => {
 
   it('should get backlinks and outgoing links', async () => {
     // PageA links to PageB and PageC
-    await mem.writeFile('PageA.md', 'Links to [[Page B]] and [[Page C]].');
+    await mem.writeFile('PageA.md', '- Links to [[Page B]] and [[Page C]].');
     // PageB links to PageC
-    await mem.writeFile('PageB.md', 'Links to [[Page C]].');
+    await mem.writeFile('PageB.md', '- Links to [[Page C]].');
     // PageC has no outgoing links
-    await mem.writeFile('PageC.md', 'No links.');
+    await mem.writeFile('PageC.md', '- No links.');
     // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
-    await mem.writeFile('PageD.md', 'Links to [[PageA]].');
+    await mem.writeFile('PageD.md', '- Links to [[PageA]].');
 
     // Test outgoing links
     const outgoingA = await mem.getOutgoingLinks('PageA.md');
@@ -90,7 +90,7 @@ describe('MemAPI Graph Ops Integration Tests', () => {
 
   it('should perform a global full-text search', async () => {
     await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
-    await mem.writeFile('b.md', 'This file has a common-search-term.');
+    await mem.writeFile('b.md', '- This file has a common-search-term.');
     await mem.writeFile('c.log', 'This one also has a common-search-term.');
     await mem.writeFile(
       'd.txt',

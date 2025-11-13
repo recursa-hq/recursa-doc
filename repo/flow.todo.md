@@ -5,11 +5,19 @@ discrepancy analysis
 
 ===
 
-make codebase radically DRY for less code, without causing fail tests or feature regressions
+programmatic API
+
+=== DONE
+
+we need logseq-org-mode validator
 
 ===
 
-does the llm gets useful feedback on failure on succesfull sandbox code run?
+lets create complex test cases to imitate docs/overview.md
+
+=== DOING
+
+make codebase radically DRY for less code, without causing fail tests or feature regressions
 
 === DONE
 

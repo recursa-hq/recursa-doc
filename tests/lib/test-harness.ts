@@ -99,13 +99,43 @@ export const createTestHarness = async (
 };
 
 /**
+ * Type guard to check if an error object has a 'code' property.
+ */
+const hasErrorCode = (error: unknown): error is { code: string } => {
+  return typeof error === 'object' && error !== null && 'code' in error;
+};
+
+/**
  * Cleans up a test harness by removing the temporary directory
  * @param harness - The test harness state to clean up
  */
 export const cleanupTestHarness = async (
   harness: TestHarnessState
 ): Promise<void> => {
-  await fs.rm(harness.tempDir, { recursive: true, force: true });
+  const maxRetries = 5;
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      await fs.rm(harness.tempDir, { recursive: true, force: true });
+      return; // Success
+    } catch (error: unknown) {
+      // Retry on common race condition errors during cleanup
+      if (
+        hasErrorCode(error) &&
+        (error.code === 'ENOTEMPTY' ||
+          error.code === 'EBUSY' ||
+          error.code === 'EPERM')
+      ) {
+        attempt++;
+        if (attempt >= maxRetries) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      } else {
+        throw error; // Rethrow unexpected errors
+      }
+    }
+  }
 };
 
 /**
@@ -275,6 +305,43 @@ export const createMockLLMQueryWithSpy = (responses: string[]) => {
     }
   );
 };
+
+/**
+ * Default mock configuration for tests
+ */
+export const createMockConfig = (
+  overrides: Partial<AppConfig> = {}
+): AppConfig => ({
+  openRouterApiKey: 'test-api-key',
+  knowledgeGraphPath: '/test/path',
+  recursaApiKey: 'test-api-key',
+  httpPort: 8080,
+  llmModel: 'anthropic/claude-3-haiku-20240307',
+  llmTemperature: 0.7,
+  llmMaxTokens: 4000,
+  sandboxTimeout: 10000,
+  sandboxMemoryLimit: 100,
+  gitUserName: 'Test User',
+  gitUserEmail: 'test@example.com',
+  ...overrides,
+});
+
+/**
+ * Default mock chat history for tests
+ */
+export const createMockHistory = (
+  customMessages: Partial<ChatMessage>[] = []
+): ChatMessage[] => [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'Hello, world!' },
+  ...customMessages.map(
+    (msg) =>
+      ({
+        role: msg.role || 'user',
+        content: msg.content || '',
+      }) as ChatMessage
+  ),
+];
 
 /**
  * Default mock configuration for tests

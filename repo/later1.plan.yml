@@ -1,0 +1,177 @@
+This is a refactor plan to make the codebase radically DRY. We'll be hitting repeated logic in test harnesses, platform detection scripts, and documentation. The goal is less code, easier maintenance, no regressions.
+
+The strategy is to consolidate duplicated logic into single sources of truth. For tests, this means centralizing all environment setup and mock utilities into the `test-harness`. For build scripts, it means unifying the platform detection logic. For docs, we'll eliminate redundant installation guides and point to canonical documents.
+
+This cleanup will reduce the cognitive overhead for new devs and make future changes faster and safer. We're cutting out the cruft so we can focus on shipping features.
+
+```yaml
+plan:
+  uuid: 'a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e'
+  status: 'todo'
+  title: 'Radical Codebase DRYing and Consolidation'
+  introduction: |
+    This master plan aims to refactor the codebase to be radically DRY (Don't Repeat Yourself). We've identified significant repetition across test setups, build scripts, and documentation. By eliminating this redundancy, we'll create a more maintainable, leaner, and easier-to-understand project.
+
+    The approach is straightforward: centralize, abstract, and link. We will enhance the existing `test-harness` to become the single source for all test environment setup and mocking. Platform detection logic currently scattered across scripts will be unified. Redundant documentation files will be pruned, and we will establish clear, canonical sources for installation and troubleshooting, linking to them from higher-level documents like the main README.
+
+    This refactor will not introduce new features or intentionally alter existing functionality. The primary outcomes will be a reduced line count, improved developer experience, and a more robust foundation for future work.
+  parts:
+    - uuid: '4c2b9f3d-5e8a-4f6b-8c1d-9a0b3e5f7c1d'
+      status: 'todo'
+      name: 'Part 1: Unify Platform Detection Logic'
+      reason: |
+        The platform detection object, especially the `isTermux` logic, is repeated with slight variations in `scripts/install.js`, `scripts/build.js`, and `src/lib/platform.ts`. The logic in the scripts is less robust. Unifying this ensures consistent behavior and a single point of maintenance for platform-specific logic.
+      steps:
+        - uuid: 'd9e8f7c6-b5a4-4d3c-8b1a-0c9d8e7f6b5a'
+          status: 'todo'
+          name: '1. Standardize Platform Logic in Build Script'
+          reason: |
+            The `build.js` script has a less comprehensive Termux check than `src/lib/platform.ts`. Aligning it prevents inconsistencies in the build process. It also lacks a `platformString` property used for logging, which should be added for consistency.
+          files:
+            - 'scripts/build.js'
+          operations:
+            - "In `scripts/build.js`, update the `isTermux` getter in the `platform` object to be more robust: `return this.isAndroid || process.env.TERMUX === 'true' || process.env.PREFIX?.includes('/com.termux') || process.env.TERMUX_VERSION !== undefined;`."
+            - "Add the `platformString` getter to the `platform` object for consistent logging: `get platformString() { const parts = [process.platform, process.arch]; if (this.isTermux) parts.push('termux'); return parts.join('-'); }`."
+            - "In the `main` function of `scripts/build.js`, update the log message to use the new getter: `console.log(`🚀 Starting build for platform: ${platform.platformString}`);`"
+        - uuid: 'a3b2c1d0-e9f8-4a7b-6c5d-4e3f2a1b0c9d'
+          status: 'todo'
+          name: '2. Standardize Platform Logic in Install Script'
+          reason: |
+            The `install.js` script's Termux detection is already quite good, but we will ensure it's identical to the new standard for absolute consistency across all scripts.
+          files:
+            - 'scripts/install.js'
+          operations:
+            - "In `scripts/install.js`, verify the `isTermux` getter matches the new standardized version: `return this.isAndroid || process.env.TERMUX === 'true' || process.env.PREFIX?.includes('/com.termux') || process.env.TERMUX_VERSION !== undefined;`."
+            - "Ensure the `platformString` getter is present and correct."
+      context_files:
+        compact:
+          - 'scripts/build.js'
+          - 'scripts/install.js'
+        medium:
+          - 'scripts/build.js'
+          - 'scripts/install.js'
+          - 'src/lib/platform.ts'
+        extended:
+          - 'scripts/build.js'
+          - 'scripts/install.js'
+          - 'src/lib/platform.ts'
+    - uuid: 'b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7e'
+      status: 'todo'
+      name: 'Part 2: Centralize Test Utilities'
+      reason: |
+        The `agent-workflow.test.ts` file defines a local `createMockQueryLLM` function, which is redundant as `test-harness.ts` already provides a more powerful spy-based version (`createMockLLMQueryWithSpy`). Consolidating on the harness's version makes tests more consistent and powerful.
+      steps:
+        - uuid: 'f8a7b6c5-d4e3-4a2b-1c0d-9e8f7a6b5c4d'
+          status: 'todo'
+          name: '1. Refactor Agent Workflow E2E Test'
+          reason: |
+            To eliminate the redundant mock LLM utility and standardize on the version from the test harness.
+          files:
+            - 'tests/e2e/agent-workflow.test.ts'
+          operations:
+            - "In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function."
+            - "Update the import from `../lib/test-harness` to include `createMockLLMQueryWithSpy`."
+            - "In the test case `it('should correctly handle the Dr. Aris Thorne example from the docs')`, change the mock creation to use the spy version: `const mockQueryLLM = createMockLLMQueryWithSpy([turn1Response, turn2Response]);`."
+            - "The old response for the Dr. Aris Thorne example in this test file uses invalid multiline strings. Fix the `typescript` blocks to use template literals (`` ` ``) for multiline content, which also aligns it with the format in `mcp-workflow.test.ts`."
+      context_files:
+        compact:
+          - 'tests/e2e/agent-workflow.test.ts'
+          - 'tests/lib/test-harness.ts'
+        medium:
+          - 'tests/e2e/agent-workflow.test.ts'
+          - 'tests/lib/test-harness.ts'
+          - 'tests/e2e/mcp-workflow.test.ts'
+        extended:
+          - 'tests/e2e/agent-workflow.test.ts'
+          - 'tests/lib/test-harness.ts'
+          - 'tests/e2e/mcp-workflow.test.ts'
+          - 'tests/integration/workflow.test.ts'
+    - uuid: 'a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5f'
+      status: 'todo'
+      name: 'Part 3: Streamline and Consolidate Documentation'
+      reason: |
+        Multiple documents contain overlapping or redundant installation and troubleshooting instructions (`INSTALL_TERMUX.md`, `PLATFORM_SUPPORT.md`, `README.md`). This creates maintenance overhead and can confuse users. Consolidating this information into single sources of truth is essential.
+      steps:
+        - uuid: 'c7d6b5a4-e3f2-4a1b-0c9d-8e7f6a5b4c3d'
+          status: 'todo'
+          name: '1. Purge Redundant Termux Installation Guide'
+          reason: |
+            The `INSTALL_TERMUX.md` file is obsolete. The `npm run install:termux` script automates the process, and `PLATFORM_SUPPORT.md` provides better, more integrated documentation. Deleting this file removes a source of outdated information.
+          files:
+            - 'INSTALL_TERMUX.md'
+          operations:
+            - 'Delete the file `INSTALL_TERMUX.md`.'
+        - uuid: 'b5a4c3d2-e1f0-4a9b-8c7d-6b5a4c3d2e1f'
+          status: 'todo'
+          name: '2. Refactor Platform Support Document'
+          reason: |
+            To reduce content duplication by linking to the main troubleshooting guide instead of repeating solutions.
+          files:
+            - 'docs/PLATFORM_SUPPORT.md'
+          operations:
+            - "In the `## Troubleshooting` section, replace the detailed code blocks for `Permission Denied (Termux)` and `Symlink Errors (Windows)` with links to `TROUBLESHOOTING.md`."
+            - "For the Termux issue, change the content to: `See the [Termux Permission Issues](TROUBLESHOOTING.md#permission-denied-errors) section in our troubleshooting guide.`"
+            - "For the Windows issue, change the content to: `See the [Windows Symlink Errors](TROUBLESHOOTING.md#symlink-errors-during-installation) section in our troubleshooting guide.`"
+        - uuid: 'a4b3c2d1-e0f9-4a8b-7c6d-5b4a3c2d1e0f'
+          status: 'todo'
+          name: '3. Refactor Main README'
+          reason: |
+            To make the main README a clear and concise entry point that directs users to more detailed documentation, rather than duplicating it.
+          files:
+            - 'README.md'
+          operations:
+            - "In the `## 🐛 Troubleshooting` section, at the end, add a sentence: `For detailed troubleshooting, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).`"
+            - "In the `## 🌟 Cross-Platform Support` section, add a sentence at the end: `For a detailed breakdown of supported platforms and optimizations, see our [Platform Support Guide](docs/PLATFORM_SUPPORT.md).`"
+      context_files:
+        compact:
+          - 'INSTALL_TERMUX.md'
+          - 'docs/PLATFORM_SUPPORT.md'
+          - 'README.md'
+          - 'docs/TROUBLESHOOTING.md'
+        medium:
+          - 'INSTALL_TERMUX.md'
+          - 'docs/PLATFORM_SUPPORT.md'
+          - 'README.md'
+          - 'docs/TROUBLESHOOTING.md'
+        extended:
+          - 'INSTALL_TERMUX.md'
+          - 'docs/PLATFORM_SUPPORT.md'
+          - 'README.md'
+          - 'docs/TROUBLESHOOTING.md'
+  conclusion: |
+    Upon completion of this refactoring plan, the codebase will be significantly more streamlined and maintainable. The test suite will be more robust and easier to extend, thanks to a centralized test harness. Platform-specific logic will be consistent and located in predictable places. Finally, the documentation will be clearer and more authoritative, guiding users to the right information without redundancy.
+
+    This effort pays down technical and documentation debt, improving the developer experience and setting a higher standard for code quality within the project. The result is a stronger foundation for building future capabilities.
+  context_files:
+    compact:
+      - 'scripts/build.js'
+      - 'scripts/install.js'
+      - 'tests/e2e/agent-workflow.test.ts'
+      - 'tests/lib/test-harness.ts'
+      - 'INSTALL_TERMUX.md'
+      - 'docs/PLATFORM_SUPPORT.md'
+      - 'README.md'
+    medium:
+      - 'scripts/build.js'
+      - 'scripts/install.js'
+      - 'src/lib/platform.ts'
+      - 'tests/e2e/agent-workflow.test.ts'
+      - 'tests/lib/test-harness.ts'
+      - 'tests/e2e/mcp-workflow.test.ts'
+      - 'INSTALL_TERMUX.md'
+      - 'docs/PLATFORM_SUPPORT.md'
+      - 'README.md'
+      - 'docs/TROUBLESHOOTING.md'
+    extended:
+      - 'scripts/build.js'
+      - 'scripts/install.js'
+      - 'src/lib/platform.ts'
+      - 'tests/e2e/agent-workflow.test.ts'
+      - 'tests/lib/test-harness.ts'
+      - 'tests/e2e/mcp-workflow.test.ts'
+      - 'tests/integration/workflow.test.ts'
+      - 'INSTALL_TERMUX.md'
+      - 'docs/PLATFORM_SUPPORT.md'
+      - 'README.md'
+      - 'docs/TROUBLESHOOTING.md'
+```

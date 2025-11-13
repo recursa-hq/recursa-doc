@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { resolveSecurePath, validatePathBounds } from './secure-path.js';
 import platform from '../../lib/platform.js';
+import { validateLogseqContent } from '../../lib/logseq-validator.js';
 
 // Note: Each function here is a HOF that takes dependencies (like graphRoot)
 // and returns the actual function to be exposed on the mem API.
@@ -137,6 +138,17 @@ export const writeFile =
     const fullPath = resolveSecurePath(graphRoot, filePath);
 
     try {
+      if (filePath.endsWith('.md')) {
+        const validation = validateLogseqContent(content);
+        if (!validation.isValid) {
+          throw new Error(
+            `Invalid Logseq content for ${filePath}: ${validation.errors.join(
+              ', '
+            )}`
+          );
+        }
+      }
+
       // Additional validation - allow non-existent files for write operations
       if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false, requireExistence: false })) {
         throw new Error(`Security violation: Path validation failed for ${filePath}`);
@@ -163,6 +175,17 @@ export const updateFile =
     const fullPath = resolveSecurePath(graphRoot, filePath);
 
     try {
+      if (filePath.endsWith('.md')) {
+        const validation = validateLogseqContent(newContent);
+        if (!validation.isValid) {
+          throw new Error(
+            `Invalid Logseq content for ${filePath}: ${validation.errors.join(
+              ', '
+            )}`
+          );
+        }
+      }
+
       // Additional validation
       if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
         throw new Error(`Security violation: Path validation failed for ${filePath}`);

@@ -27,7 +27,7 @@ describe('MemAPI Git Ops Integration Tests', () => {
 
   it('should commit a change and log it', async () => {
     const filePath = 'a.md';
-    const content = 'content';
+    const content = '- content';
     const commitMessage = 'feat: add a.md';
 
     await mem.writeFile(filePath, content);
@@ -46,26 +46,26 @@ describe('MemAPI Git Ops Integration Tests', () => {
 
   it('should return diff for a file', async () => {
     const filePath = 'a.md';
-    await mem.writeFile(filePath, 'version 1');
+    await mem.writeFile(filePath, '- version 1');
     await mem.commitChanges('v1');
 
-    await mem.writeFile(filePath, 'version 1\nversion 2');
+    await mem.writeFile(filePath, '- version 1\n- version 2');
     const commitV2Hash = await mem.commitChanges('v2');
 
-    await mem.writeFile(filePath, 'version 1\nversion 2\nversion 3');
+    await mem.writeFile(filePath, '- version 1\n- version 2\n- version 3');
 
     // Diff against HEAD (working tree vs last commit)
     const diffWorking = await mem.gitDiff(filePath);
-    expect(diffWorking).toContain('+version 3');
+    expect(diffWorking).toContain('+ - version 3');
 
     // Diff between two commits
     const diffCommits = await mem.gitDiff(filePath, 'HEAD~1', 'HEAD');
-    expect(diffCommits).toContain('+version 2');
-    expect(diffCommits).not.toContain('+version 3');
+    expect(diffCommits).toContain('+ - version 2');
+    expect(diffCommits).not.toContain('+ - version 3');
 
     // Diff from a specific commit to HEAD
     const diffFromCommit = await mem.gitDiff(filePath, commitV2Hash);
-    expect(diffFromCommit).toContain('+version 3');
+    expect(diffFromCommit).toContain('+ - version 3');
   });
 
   it('should get changed files from the working tree', async () => {

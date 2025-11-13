@@ -29,7 +29,7 @@ describe('MemAPI File Ops Integration Tests', () => {
 
   it('should write, read, and check existence of a file', async () => {
     const filePath = 'test.md';
-    const content = 'hello world';
+    const content = '- hello world';
 
     await mem.writeFile(filePath, content);
 

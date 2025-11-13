@@ -112,11 +112,11 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 
     const mockQueryLLM = createMockLLMQueryWithSpy([
       `<think>Writing file 1.</think>
-         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`,
+         <typescript>await mem.writeFile('file1.md', '- content1');</typescript>`,
       `<think>Saving checkpoint.</think>
          <typescript>await mem.saveCheckpoint();</typescript>`,
       `<think>Writing file 2.</think>
-         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`,
+         <typescript>await mem.writeFile('file2.md', '- content2');</typescript>`,
       `<think>Reverting to checkpoint.</think>
          <typescript>await mem.revertToLastCheckpoint();</typescript>`,
       `<think>Committing.</think>
