@@ -44,7 +44,11 @@ tests/
     agent-workflow.test.ts
     mcp-workflow.test.ts
   integration/
-    mem-api.test.ts
+    mem-api-file-ops.test.ts
+    mem-api-git-ops.test.ts
+    mem-api-graph-ops.test.ts
+    mem-api-state-ops.test.ts
+    mem-api-util-ops.test.ts
     workflow.test.ts
   lib/
     test-harness.ts
@@ -72,6 +76,580 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
+
+## File: tests/integration/mem-api-file-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+import path from 'path';
+import { promises as fs } from 'fs';
+
+describe('MemAPI File Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should write, read, and check existence of a file', async () => {
+    const filePath = 'test.md';
+    const content = 'hello world';
+
+    await mem.writeFile(filePath, content);
+
+    const readContent = await mem.readFile(filePath);
+    expect(readContent).toBe(content);
+
+    const exists = await mem.fileExists(filePath);
+    expect(exists).toBe(true);
+
+    const nonExistent = await mem.fileExists('not-real.md');
+    expect(nonExistent).toBe(false);
+  });
+
+  it('should create nested directories', async () => {
+    const dirPath = 'a/b/c';
+    await mem.createDir(dirPath);
+    const stats = await fs.stat(path.join(harness.tempDir, dirPath));
+    expect(stats.isDirectory()).toBe(true);
+  });
+
+  it('should list files in a directory', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.writeFile('b.txt', 'b');
+    await mem.createDir('subdir');
+    await mem.writeFile('subdir/c.txt', 'c');
+
+    const rootFiles = await mem.listFiles();
+    expect(rootFiles).toEqual(
+      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
+    );
+    expect(rootFiles.length).toBeGreaterThanOrEqual(3); // .gitignore might be there
+
+    const subdirFiles = await mem.listFiles('subdir');
+    expect(subdirFiles).toEqual(['c.txt']);
+
+    await mem.createDir('empty');
+    const emptyFiles = await mem.listFiles('empty');
+    expect(emptyFiles).toEqual([]);
+  });
+
+  it('should update a file atomically and fail if content changes', async () => {
+    const filePath = 'atomic.txt';
+    const originalContent = 'version 1';
+    const newContent = 'version 2';
+
+    // 1. Successful update
+    await mem.writeFile(filePath, originalContent);
+    const success = await mem.updateFile(filePath, originalContent, newContent);
+    expect(success).toBe(true);
+    const readContent1 = await mem.readFile(filePath);
+    expect(readContent1).toBe(newContent);
+
+    // 2. Failed update (content changed underneath)
+    const currentContent = await mem.readFile(filePath); // "version 2"
+    const nextContent = 'version 3';
+
+    // Simulate another process changing the file
+    await fs.writeFile(path.join(harness.tempDir, filePath), 'version 2.5');
+
+    // The update should fail because 'currentContent' ("version 2") no longer matches the file on disk ("version 2.5")
+    await expect(
+      mem.updateFile(filePath, currentContent, nextContent)
+    ).rejects.toThrow(/File content has changed since it was last read/);
+
+    // Verify the file was NOT changed by the failed update
+    const readContent2 = await mem.readFile(filePath);
+    expect(readContent2).toBe('version 2.5');
+  });
+
+  it('should delete a file and a directory recursively', async () => {
+    // Delete file
+    await mem.writeFile('file-to-delete.txt', 'content');
+    expect(await mem.fileExists('file-to-delete.txt')).toBe(true);
+    await mem.deletePath('file-to-delete.txt');
+    expect(await mem.fileExists('file-to-delete.txt')).toBe(false);
+
+    // Delete directory
+    await mem.createDir('dir-to-delete/subdir');
+    await mem.writeFile('dir-to-delete/subdir/file.txt', 'content');
+    expect(await mem.fileExists('dir-to-delete/subdir/file.txt')).toBe(true);
+    await mem.deletePath('dir-to-delete');
+    expect(await mem.fileExists('dir-to-delete')).toBe(false);
+  });
+
+  it('should rename a file and a directory', async () => {
+    // Rename file
+    await mem.writeFile('old-name.txt', 'content');
+    expect(await mem.fileExists('old-name.txt')).toBe(true);
+    await mem.rename('old-name.txt', 'new-name.txt');
+    expect(await mem.fileExists('old-name.txt')).toBe(false);
+    expect(await mem.fileExists('new-name.txt')).toBe(true);
+    expect(await mem.readFile('new-name.txt')).toBe('content');
+
+    // Rename directory
+    await mem.createDir('old-dir/subdir');
+    await mem.writeFile('old-dir/subdir/file.txt', 'content');
+    expect(await mem.fileExists('old-dir')).toBe(true);
+    await mem.rename('old-dir', 'new-dir');
+    expect(await mem.fileExists('old-dir')).toBe(false);
+    expect(await mem.fileExists('new-dir/subdir/file.txt')).toBe(true);
+  });
+
+  describe('Path Traversal Security', () => {
+    const maliciousPath = '../../../etc/malicious';
+    const ops: { name: string; fn: (mem: MemAPI) => Promise<unknown> }[] = [
+      { name: 'readFile', fn: (mem) => mem.readFile(maliciousPath) },
+      { name: 'writeFile', fn: (mem) => mem.writeFile(maliciousPath, '...') },
+      {
+        name: 'updateFile',
+        fn: (mem) => mem.updateFile(maliciousPath, 'old', 'new'),
+      },
+      { name: 'deletePath', fn: (mem) => mem.deletePath(maliciousPath) },
+      { name: 'rename_from', fn: (mem) => mem.rename(maliciousPath, 'safe') },
+      { name: 'rename_to', fn: (mem) => mem.rename('safe', maliciousPath) },
+      { name: 'fileExists', fn: (mem) => mem.fileExists(maliciousPath) },
+      { name: 'createDir', fn: (mem) => mem.createDir(maliciousPath) },
+      { name: 'listFiles', fn: (mem) => mem.listFiles(maliciousPath) },
+    ];
+
+    for (const op of ops) {
+      it(`should block path traversal for ${op.name}`, async () => {
+        // fileExists should return false, not throw, for security reasons.
+        if (op.name === 'fileExists') {
+          await expect(op.fn(mem)).resolves.toBe(false);
+        } else {
+          // All other ops should reject with a security error.
+          await expect(op.fn(mem)).rejects.toThrow(
+            /Path traversal attempt detected|Security violation/
+          );
+        }
+      });
+    }
+  });
+});
+````
+
+## File: tests/integration/mem-api-git-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Git Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should commit a change and log it', async () => {
+    const filePath = 'a.md';
+    const content = 'content';
+    const commitMessage = 'feat: add a.md';
+
+    await mem.writeFile(filePath, content);
+
+    const commitHash = await mem.commitChanges(commitMessage);
+
+    expect(typeof commitHash).toBe('string');
+    expect(commitHash.length).toBeGreaterThan(5);
+
+    const log = await mem.gitLog(filePath, 1);
+
+    expect(log).toHaveLength(1);
+    expect(log[0]).toBeDefined();
+    expect(log[0]?.message).toBe(commitMessage);
+  });
+
+  it('should return diff for a file', async () => {
+    const filePath = 'a.md';
+    await mem.writeFile(filePath, 'version 1');
+    await mem.commitChanges('v1');
+
+    await mem.writeFile(filePath, 'version 1\nversion 2');
+    const commitV2Hash = await mem.commitChanges('v2');
+
+    await mem.writeFile(filePath, 'version 1\nversion 2\nversion 3');
+
+    // Diff against HEAD (working tree vs last commit)
+    const diffWorking = await mem.gitDiff(filePath);
+    expect(diffWorking).toContain('+version 3');
+
+    // Diff between two commits
+    const diffCommits = await mem.gitDiff(filePath, 'HEAD~1', 'HEAD');
+    expect(diffCommits).toContain('+version 2');
+    expect(diffCommits).not.toContain('+version 3');
+
+    // Diff from a specific commit to HEAD
+    const diffFromCommit = await mem.gitDiff(filePath, commitV2Hash);
+    expect(diffFromCommit).toContain('+version 3');
+  });
+
+  it('should get changed files from the working tree', async () => {
+    // Setup
+    await mem.writeFile('a.txt', 'a');
+    await mem.writeFile('b.txt', 'b');
+    await mem.commitChanges('initial commit');
+
+    // 1. Modify a.txt
+    await mem.writeFile('a.txt', 'a modified');
+
+    // 2. Create c.txt
+    await mem.writeFile('c.txt', 'c');
+
+    // 3. Delete b.txt
+    await mem.deletePath('b.txt');
+
+    // 4. Create and stage d.txt
+    await mem.writeFile('d.txt', 'd');
+    await harness.git.add('d.txt');
+
+    const changedFiles = await mem.getChangedFiles();
+
+    expect(changedFiles).toEqual(
+      expect.arrayContaining(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
+    );
+    expect(changedFiles.length).toBe(4);
+  });
+
+  it('should handle commit with no changes', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.commitChanges('commit 1');
+
+    // Calling commitChanges with no changes should not throw an error
+    const commitHash = await mem.commitChanges('no changes');
+    expect(commitHash).toBe('No changes to commit.');
+
+    // Verify no new commit was created
+    const log = await mem.gitLog(undefined, 2);
+    expect(log).toHaveLength(2); // commit 1 + initial .gitignore commit
+    expect(log[0]?.message).toBe('commit 1');
+  });
+
+  it('should get git log for the whole repo', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.commitChanges('commit A');
+    await mem.writeFile('b.txt', 'b');
+    await mem.commitChanges('commit B');
+
+    // Get full repo log
+    const log = await mem.gitLog(undefined, 3);
+    expect(log).toHaveLength(3); // A, B, and initial .gitignore
+    expect(log[0]?.message).toBe('commit B');
+    expect(log[1]?.message).toBe('commit A');
+    expect(log[2]?.message).toContain('Initial commit');
+  });
+});
+````
+
+## File: tests/integration/mem-api-graph-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Graph Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should query the graph with multiple conditions', async () => {
+    const pageAContent = `
+- # Page A
+  - prop:: value
+  - Link to [[Page B]].
+    `;
+    const pageBContent = `
+- # Page B
+  - prop:: other
+  - No links here.
+    `;
+
+    await mem.writeFile('PageA.md', pageAContent);
+    await mem.writeFile('PageB.md', pageBContent);
+
+    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    expect(results[0]?.filePath).toBe('PageA.md');
+  });
+
+  it('should return an empty array for a query with no matches', async () => {
+    const pageAContent = `- # Page A\n  - prop:: value`;
+    await mem.writeFile('PageA.md', pageAContent);
+
+    const query = `(property prop:: non-existent-value)`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('should get backlinks and outgoing links', async () => {
+    // PageA links to PageB and PageC
+    await mem.writeFile('PageA.md', 'Links to [[Page B]] and [[Page C]].');
+    // PageB links to PageC
+    await mem.writeFile('PageB.md', 'Links to [[Page C]].');
+    // PageC has no outgoing links
+    await mem.writeFile('PageC.md', 'No links.');
+    // PageD links to PageA
+    await mem.writeFile('PageD.md', 'Links to [[Page A]].');
+
+    // Test outgoing links
+    const outgoingA = await mem.getOutgoingLinks('PageA.md');
+    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
+    expect(outgoingA.length).toBe(2);
+
+    const outgoingC = await mem.getOutgoingLinks('PageC.md');
+    expect(outgoingC).toEqual([]);
+
+    // Test backlinks
+    const backlinksA = await mem.getBacklinks('PageA.md');
+    expect(backlinksA).toEqual(['PageD.md']);
+
+    const backlinksC = await mem.getBacklinks('PageC.md');
+    expect(backlinksC).toEqual(
+      expect.arrayContaining(['PageA.md', 'PageB.md'])
+    );
+    expect(backlinksC.length).toBe(2);
+  });
+
+  it('should perform a global full-text search', async () => {
+    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
+    await mem.writeFile('b.md', 'This file has a common-search-term.');
+    await mem.writeFile('c.log', 'This one also has a common-search-term.');
+    await mem.writeFile(
+      'd.txt',
+      'This file has nothing interesting to find.'
+    );
+
+    // Search for a unique term
+    const uniqueResults = await mem.searchGlobal('unique-search-term');
+    expect(uniqueResults).toEqual(['a.txt']);
+
+    // Search for a common term
+    const commonResults = await mem.searchGlobal('common-search-term');
+    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
+    expect(commonResults.length).toBe(2);
+
+    // Search for a non-existent term
+    const noResults = await mem.searchGlobal('non-existent-term');
+    expect(noResults).toEqual([]);
+  });
+});
+````
+
+## File: tests/integration/mem-api-state-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI State Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should save and revert to a checkpoint', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'version a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes and save checkpoint
+    await mem.writeFile('b.txt', 'version b');
+    const successSave = await mem.saveCheckpoint();
+    expect(successSave).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(true);
+
+    // 3. Make more changes
+    await mem.writeFile('c.txt', 'version c');
+    expect(await mem.fileExists('c.txt')).toBe(true);
+
+    // 4. Revert
+    const successRevert = await mem.revertToLastCheckpoint();
+    expect(successRevert).toBe(true);
+
+    // 5. Assert state
+    expect(await mem.fileExists('a.txt')).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(true); // From checkpoint
+    expect(await mem.fileExists('c.txt')).toBe(false); // Should be gone
+  });
+
+  it('should discard all staged and unstaged changes', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'original a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes
+    await mem.writeFile('a.txt', 'modified a'); // unstaged
+    await mem.writeFile('b.txt', 'new b'); // unstaged
+    await mem.writeFile('c.txt', 'new c'); // will be staged
+    await harness.git.add('c.txt');
+
+    // 3. Discard
+    const successDiscard = await mem.discardChanges();
+    expect(successDiscard).toBe(true);
+
+    // 4. Assert state
+    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
+    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
+    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
+
+    const status = await harness.git.status();
+    expect(status.isClean()).toBe(true);
+  });
+
+  it('should handle reverting when no checkpoint exists', async () => {
+    await mem.writeFile('a.txt', 'content');
+    const success = await mem.revertToLastCheckpoint();
+
+    // It should not throw an error and return false to indicate nothing was reverted.
+    expect(success).toBe(false);
+    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
+  });
+});
+````
+
+## File: tests/integration/mem-api-util-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Util Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should return the correct graph root path', async () => {
+    const root = await mem.getGraphRoot();
+    expect(root).toBe(harness.tempDir);
+  });
+
+  it('should correctly estimate token count for a single file', async () => {
+    const content = 'This is a test sentence with several words.'; // 44 chars
+    await mem.writeFile('test.txt', content);
+    const tokenCount = await mem.getTokenCount('test.txt');
+    const expected = Math.ceil(content.length / 4); // 11
+    expect(tokenCount).toBe(expected);
+  });
+
+  it('should correctly estimate token counts for multiple files', async () => {
+    const content1 = 'File one content.'; // 17 chars -> 5 tokens
+    const content2 = 'File two has slightly more content here.'; // 38 chars -> 10 tokens
+    await mem.writeFile('file1.txt', content1);
+    await mem.writeFile('sub/file2.txt', content2);
+
+    const results = await mem.getTokenCountForPaths([
+      'file1.txt',
+      'sub/file2.txt',
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        { path: 'file1.txt', tokenCount: Math.ceil(content1.length / 4) },
+        { path: 'sub/file2.txt', tokenCount: Math.ceil(content2.length / 4) },
+      ])
+    );
+  });
+
+  it('should throw an error when counting tokens for a non-existent file', async () => {
+    await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
+      /Failed to read file/
+    );
+  });
+});
+````
 
 ## File: docs/PLATFORM_SUPPORT.md
 ````markdown
@@ -1912,10 +2490,169 @@ export const combineIgnoreFilters = (
 };
 ````
 
+## File: .dockerignore
+````
+# Git
+.git
+.gitignore
+
+# Node
+node_modules
+
+# Local Environment
+.env
+.env.*
+! .env.example
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Logs and temp files
+npm-debug.log*
+yarn-debug.log*
+*.log
+
+# Build output & test artifacts
+dist
+coverage
+jest.config.js
+
+# Docker
+Dockerfile
+.dockerignore
+````
+
+## File: .prettierrc.json
+````json
+{
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 80,
+  "tabWidth": 2,
+  "endOfLine": "lf"
+}
+````
+
+## File: Dockerfile
+````dockerfile
+# ---- Base Stage ----
+# Use an official Node.js image.
+FROM node:20-slim as base
+WORKDIR /usr/src/app
+
+# ---- Dependencies Stage ----
+# Install dependencies. This layer is cached to speed up subsequent builds
+# if dependencies haven't changed.
+FROM base as deps
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# ---- Build Stage ----
+# Copy source code and build the application.
+FROM base as build
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# ---- Production Stage ----
+# Create a smaller final image.
+# We only copy the necessary files to run the application.
+FROM node:20-slim as production
+WORKDIR /usr/src/app
+
+# Copy production dependencies and built source code
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY --from=build /usr/src/app/dist ./dist
+COPY --from=build /usr/src/app/package.json ./package.json
+COPY .env.example ./.env.example
+
+# Expose the port the app runs on
+EXPOSE 3000
+
+# The command to run the application
+CMD ["node", "dist/server.js"]
+````
+
+## File: eslint.config.js
+````javascript
+import js from '@eslint/js';
+import typescript from '@typescript-eslint/eslint-plugin';
+import typescriptParser from '@typescript-eslint/parser';
+
+export default [
+  js.configs.recommended,
+  {
+    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js', 'tests/**/*.ts'],
+    languageOptions: {
+      parser: typescriptParser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+      },
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': typescript,
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_' }
+      ],
+      'no-console': 'off', // Allow console for build scripts and logging
+      'no-unused-vars': 'off', // Let TypeScript handle this
+      'no-undef': 'off', // Let TypeScript handle this
+    },
+  },
+];
+````
+
+## File: src/core/mem-api/fs-walker.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+
+/**
+ * Asynchronously and recursively walks a directory, yielding the full path of each file.
+ * @param dir The directory to walk.
+ * @param isIgnored Optional function to determine if a path should be ignored.
+ * @returns An async generator that yields file paths.
+ */
+export async function* walk(
+  dir: string,
+  isIgnored: (path: string) => boolean = () => false
+): AsyncGenerator<string> {
+  for await (const d of await fs.opendir(dir)) {
+    const entry = path.join(dir, d.name);
+    
+    // Skip ignored entries
+    if (isIgnored(entry)) {
+      continue;
+    }
+    
+    if (d.isDirectory()) {
+      yield* walk(entry, isIgnored);
+    } else if (d.isFile()) {
+      yield entry;
+    }
+  }
+}
+````
+
 ## File: src/types/loop.ts
 ````typescript
-import type { MemAPI } from './mem';
-import type { ChatMessage } from './llm';
+import type { MemAPI } from './mem.js';
+import type { ChatMessage } from './llm.js';
 
 // Real-time status update types
 export type StatusUpdate = {
@@ -1939,6 +2676,38 @@ export type ExecutionContext = {
   // Optional callback for real-time status updates
   onStatusUpdate?: (update: StatusUpdate) => void;
 };
+````
+
+## File: src/types/sandbox.ts
+````typescript
+export interface SandboxOptions {
+  timeout?: number;
+  memoryLimit?: number;
+  allowedGlobals?: string[];
+  forbiddenGlobals?: string[];
+}
+
+export interface SandboxExecutionContext {
+  mem: import('./mem.js').MemAPI;
+  console: Console;
+}
+
+export interface SandboxResult {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+  output?: string;
+  executionTime: number;
+}
+
+export type SandboxCode = string;
+
+export interface ExecutionConstraints {
+  maxExecutionTime: number;
+  maxMemoryBytes: number;
+  allowedModules: string[];
+  forbiddenAPIs: string[];
+}
 ````
 
 ## File: tests/e2e/mcp-workflow.test.ts
@@ -2244,197 +3013,6 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
     );
   });
 });
-````
-
-## File: .dockerignore
-````
-# Git
-.git
-.gitignore
-
-# Node
-node_modules
-
-# Local Environment
-.env
-.env.*
-! .env.example
-
-# IDE / OS
-.vscode
-.idea
-.DS_Store
-
-# Logs and temp files
-npm-debug.log*
-yarn-debug.log*
-*.log
-
-# Build output & test artifacts
-dist
-coverage
-jest.config.js
-
-# Docker
-Dockerfile
-.dockerignore
-````
-
-## File: .prettierrc.json
-````json
-{
-  "semi": true,
-  "trailingComma": "es5",
-  "singleQuote": true,
-  "printWidth": 80,
-  "tabWidth": 2,
-  "endOfLine": "lf"
-}
-````
-
-## File: Dockerfile
-````dockerfile
-# ---- Base Stage ----
-# Use an official Node.js image.
-FROM node:20-slim as base
-WORKDIR /usr/src/app
-
-# ---- Dependencies Stage ----
-# Install dependencies. This layer is cached to speed up subsequent builds
-# if dependencies haven't changed.
-FROM base as deps
-COPY package.json package-lock.json* ./
-RUN npm ci
-
-# ---- Build Stage ----
-# Copy source code and build the application.
-FROM base as build
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY . .
-RUN npm run build
-
-# ---- Production Stage ----
-# Create a smaller final image.
-# We only copy the necessary files to run the application.
-FROM node:20-slim as production
-WORKDIR /usr/src/app
-
-# Copy production dependencies and built source code
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY --from=build /usr/src/app/dist ./dist
-COPY --from=build /usr/src/app/package.json ./package.json
-COPY .env.example ./.env.example
-
-# Expose the port the app runs on
-EXPOSE 3000
-
-# The command to run the application
-CMD ["node", "dist/server.js"]
-````
-
-## File: eslint.config.js
-````javascript
-import js from '@eslint/js';
-import typescript from '@typescript-eslint/eslint-plugin';
-import typescriptParser from '@typescript-eslint/parser';
-
-export default [
-  js.configs.recommended,
-  {
-    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js', 'tests/**/*.ts'],
-    languageOptions: {
-      parser: typescriptParser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-      globals: {
-        console: 'readonly',
-        process: 'readonly',
-        Buffer: 'readonly',
-        __dirname: 'readonly',
-        __filename: 'readonly',
-      },
-    },
-    plugins: {
-      '@typescript-eslint': typescript,
-    },
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { argsIgnorePattern: '^_' }
-      ],
-      'no-console': 'off', // Allow console for build scripts and logging
-      'no-unused-vars': 'off', // Let TypeScript handle this
-      'no-undef': 'off', // Let TypeScript handle this
-    },
-  },
-];
-````
-
-## File: src/core/mem-api/fs-walker.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-
-/**
- * Asynchronously and recursively walks a directory, yielding the full path of each file.
- * @param dir The directory to walk.
- * @param isIgnored Optional function to determine if a path should be ignored.
- * @returns An async generator that yields file paths.
- */
-export async function* walk(
-  dir: string,
-  isIgnored: (path: string) => boolean = () => false
-): AsyncGenerator<string> {
-  for await (const d of await fs.opendir(dir)) {
-    const entry = path.join(dir, d.name);
-    
-    // Skip ignored entries
-    if (isIgnored(entry)) {
-      continue;
-    }
-    
-    if (d.isDirectory()) {
-      yield* walk(entry, isIgnored);
-    } else if (d.isFile()) {
-      yield entry;
-    }
-  }
-}
-````
-
-## File: src/types/sandbox.ts
-````typescript
-export interface SandboxOptions {
-  timeout?: number;
-  memoryLimit?: number;
-  allowedGlobals?: string[];
-  forbiddenGlobals?: string[];
-}
-
-export interface SandboxExecutionContext {
-  mem: import('./mem.js').MemAPI;
-  console: Console;
-}
-
-export interface SandboxResult {
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  output?: string;
-  executionTime: number;
-}
-
-export type SandboxCode = string;
-
-export interface ExecutionConstraints {
-  maxExecutionTime: number;
-  maxMemoryBytes: number;
-  allowedModules: string[];
-  forbiddenAPIs: string[];
-}
 ````
 
 ## File: tests/lib/test-util.ts
@@ -3251,50 +3829,6 @@ export type GitCommand =
   | 'branch';
 ````
 
-## File: src/types/index.ts
-````typescript
-export * from './mem.js';
-export * from './git.js';
-export * from './sandbox.js';
-export * from './llm.js';
-export * from './loop.js';
-export * from './mcp.js';
-
-// Re-export AppConfig from config module
-export type { AppConfig } from '../config.js';
-
-export interface RecursaConfig {
-  knowledgeGraphPath: string;
-  llm: {
-    apiKey: string;
-    baseUrl?: string;
-    model: string;
-    maxTokens?: number;
-    temperature?: number;
-  };
-  sandbox: {
-    timeout: number;
-    memoryLimit: number;
-  };
-  git: {
-    userName: string;
-    userEmail: string;
-  };
-}
-
-export interface EnvironmentVariables {
-  KNOWLEDGE_GRAPH_PATH: string;
-  OPENROUTER_API_KEY: string;
-  OPENROUTER_MODEL?: string;
-  LLM_TEMPERATURE?: string;
-  LLM_MAX_TOKENS?: string;
-  SANDBOX_TIMEOUT?: string;
-  SANDBOX_MEMORY_LIMIT?: string;
-  GIT_USER_NAME?: string;
-  GIT_USER_EMAIL?: string;
-}
-````
-
 ## File: src/core/mem-api/git-ops.ts
 ````typescript
 import type { SimpleGit } from 'simple-git';
@@ -3386,69 +3920,6 @@ export const commitChanges =
       throw new Error(`Failed to commit changes: ${(error as Error).message}`);
     }
   };
-````
-
-## File: src/core/mem-api/index.ts
-````typescript
-import type { MemAPI } from '../../types';
-import type { AppConfig } from '../../config';
-import simpleGit from 'simple-git';
-
-import * as fileOps from './file-ops';
-import * as gitOps from './git-ops';
-import * as graphOps from './graph-ops';
-import * as stateOps from './state-ops';
-import * as utilOps from './util-ops';
-
-/**
- * Creates a fully-functional MemAPI object.
- * This is a Higher-Order Function that takes the application configuration
- * and returns an object where each method is pre-configured with the necessary
- * context (like the knowledge graph path or a git instance).
- *
- * @param config The application configuration.
- * @returns A complete MemAPI object ready to be used by the sandbox.
- */
-export const createMemAPI = (config: AppConfig): MemAPI => {
-  const git = simpleGit(config.knowledgeGraphPath)
-    .addConfig('user.name', config.gitUserName)
-    .addConfig('user.email', config.gitUserEmail);
-  const graphRoot = config.knowledgeGraphPath;
-
-  return {
-    // Core File I/O
-    readFile: fileOps.readFile(graphRoot),
-    writeFile: fileOps.writeFile(graphRoot),
-    updateFile: fileOps.updateFile(graphRoot),
-    deletePath: fileOps.deletePath(graphRoot),
-    rename: fileOps.rename(graphRoot),
-    fileExists: fileOps.fileExists(graphRoot),
-    createDir: fileOps.createDir(graphRoot),
-    listFiles: fileOps.listFiles(graphRoot),
-
-    // Git-Native Operations
-    gitDiff: gitOps.gitDiff(git),
-    gitLog: gitOps.gitLog(git),
-    getChangedFiles: gitOps.getChangedFiles(git),
-    commitChanges: gitOps.commitChanges(git),
-
-    // Intelligent Graph Operations
-    queryGraph: graphOps.queryGraph(graphRoot),
-    getBacklinks: graphOps.getBacklinks(graphRoot),
-    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
-    searchGlobal: graphOps.searchGlobal(graphRoot),
-
-    // State Management & Checkpoints
-    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
-    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
-    discardChanges: stateOps.discardChanges(git), // Implemented
-
-    // Utility & Diagnostics
-    getGraphRoot: utilOps.getGraphRoot(graphRoot),
-    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
-    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
-  };
-};
 ````
 
 ## File: src/core/mem-api/secure-path.ts
@@ -3803,6 +4274,50 @@ export const createLogger = (): Logger => createLoggerInternal();
 export const logger = createLogger();
 ````
 
+## File: src/types/index.ts
+````typescript
+export * from './mem.js';
+export * from './git.js';
+export * from './sandbox.js';
+export * from './llm.js';
+export * from './loop.js';
+export * from './mcp.js';
+
+// Re-export AppConfig from config module
+export type { AppConfig } from '../config.js';
+
+export interface RecursaConfig {
+  knowledgeGraphPath: string;
+  llm: {
+    apiKey: string;
+    baseUrl?: string;
+    model: string;
+    maxTokens?: number;
+    temperature?: number;
+  };
+  sandbox: {
+    timeout: number;
+    memoryLimit: number;
+  };
+  git: {
+    userName: string;
+    userEmail: string;
+  };
+}
+
+export interface EnvironmentVariables {
+  KNOWLEDGE_GRAPH_PATH: string;
+  OPENROUTER_API_KEY: string;
+  OPENROUTER_MODEL?: string;
+  LLM_TEMPERATURE?: string;
+  LLM_MAX_TOKENS?: string;
+  SANDBOX_TIMEOUT?: string;
+  SANDBOX_MEMORY_LIMIT?: string;
+  GIT_USER_NAME?: string;
+  GIT_USER_EMAIL?: string;
+}
+````
+
 ## File: src/types/mcp.ts
 ````typescript
 // Based on MCP Specification
@@ -3859,6 +4374,69 @@ export interface MCPNotification {
 }
 ````
 
+## File: src/core/mem-api/index.ts
+````typescript
+import type { MemAPI } from '../../types';
+import type { AppConfig } from '../../config';
+import simpleGit from 'simple-git';
+
+import * as fileOps from './file-ops.js';
+import * as gitOps from './git-ops.js';
+import * as graphOps from './graph-ops.js';
+import * as stateOps from './state-ops.js';
+import * as utilOps from './util-ops.js';
+
+/**
+ * Creates a fully-functional MemAPI object.
+ * This is a Higher-Order Function that takes the application configuration
+ * and returns an object where each method is pre-configured with the necessary
+ * context (like the knowledge graph path or a git instance).
+ *
+ * @param config The application configuration.
+ * @returns A complete MemAPI object ready to be used by the sandbox.
+ */
+export const createMemAPI = (config: AppConfig): MemAPI => {
+  const git = simpleGit(config.knowledgeGraphPath)
+    .addConfig('user.name', config.gitUserName)
+    .addConfig('user.email', config.gitUserEmail);
+  const graphRoot = config.knowledgeGraphPath;
+
+  return {
+    // Core File I/O
+    readFile: fileOps.readFile(graphRoot),
+    writeFile: fileOps.writeFile(graphRoot),
+    updateFile: fileOps.updateFile(graphRoot),
+    deletePath: fileOps.deletePath(graphRoot),
+    rename: fileOps.rename(graphRoot),
+    fileExists: fileOps.fileExists(graphRoot),
+    createDir: fileOps.createDir(graphRoot),
+    listFiles: fileOps.listFiles(graphRoot),
+
+    // Git-Native Operations
+    gitDiff: gitOps.gitDiff(git),
+    gitLog: gitOps.gitLog(git),
+    getChangedFiles: gitOps.getChangedFiles(git),
+    commitChanges: gitOps.commitChanges(git),
+
+    // Intelligent Graph Operations
+    queryGraph: graphOps.queryGraph(graphRoot),
+    getBacklinks: graphOps.getBacklinks(graphRoot),
+    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
+    searchGlobal: graphOps.searchGlobal(graphRoot),
+
+    // State Management & Checkpoints
+    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
+    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
+    discardChanges: stateOps.discardChanges(git), // Implemented
+
+    // Utility & Diagnostics
+    getGraphRoot: utilOps.getGraphRoot(graphRoot),
+    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
+    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
+  };
+};
+````
+
 ## File: src/core/mem-api/state-ops.ts
 ````typescript
 import type { SimpleGit } from 'simple-git';
@@ -3901,266 +4479,6 @@ export const discardChanges =
     // 3. Return true on success.
     return true;
   };
-````
-
-## File: src/core/mem-api/util-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import type { PathTokenCount } from '../../types';
-import { resolveSecurePath } from './secure-path';
-
-// A private helper to centralize token counting logic.
-// This is a simple estimation and should be replaced with a proper
-// tokenizer library like tiktoken if higher accuracy is needed.
-const countTokensForContent = (content: string): number => {
-  // A common rough estimate is 4 characters per token.
-  return Math.ceil(content.length / 4);
-};
-
-// Note: HOFs returning the final mem API functions.
-
-export const getGraphRoot =
-  (graphRoot: string) => async (): Promise<string> => {
-    return graphRoot;
-  };
-
-export const getTokenCount =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<number> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    try {
-      const content = await fs.readFile(fullPath, 'utf-8');
-      return countTokensForContent(content);
-    } catch (error) {
-      throw new Error(
-        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getTokenCountForPaths =
-  (graphRoot: string) =>
-  async (paths: string[]): Promise<PathTokenCount[]> => {
-    return Promise.all(
-      paths.map(async (filePath) => {
-        const tokenCount = await getTokenCount(graphRoot)(filePath);
-        return {
-          path: filePath,
-          tokenCount,
-        };
-      })
-    );
-  };
-````
-
-## File: src/core/llm.ts
-````typescript
-import type { AppConfig } from '../config';
-import { logger } from '../lib/logger';
-import type { ChatMessage } from '../types';
-
-// Custom error class for HTTP errors with status code
-class HttpError extends Error {
-  constructor(
-    message: string,
-    public statusCode: number,
-    public responseText?: string
-  ) {
-    super(message);
-    this.name = 'HttpError';
-  }
-}
-
-const withRetry =
-  <T extends (...args: unknown[]) => Promise<unknown>>(queryFn: T) =>
-  async (...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> => {
-    const maxAttempts = 3;
-    const initialDelay = 1000;
-    const backoffFactor = 2;
-    let lastError: Error;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        return (await queryFn(...args)) as Awaited<ReturnType<T>>;
-      } catch (error) {
-        lastError = error as Error;
-
-        // Don't retry on non-retryable errors (4xx status codes)
-        if (
-          error instanceof HttpError &&
-          error.statusCode >= 400 &&
-          error.statusCode < 500
-        ) {
-          throw error;
-        }
-
-        // If this is the last attempt, throw the error
-        if (attempt === maxAttempts - 1) {
-          throw lastError;
-        }
-
-        // Calculate exponential backoff delay
-        const delay = initialDelay * Math.pow(backoffFactor, attempt);
-        logger.warn(
-          `Retry attempt ${attempt + 1}/${maxAttempts} after ${delay}ms delay. Error: ${lastError.message}`
-        );
-
-        // Wait for the delay
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-
-    throw lastError!;
-  };
-
-export const queryLLM = async (
-  history: ChatMessage[],
-  config: AppConfig
-): Promise<string> => {
-  // OpenRouter API endpoint
-  const openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
-
-  // Create request body
-  const requestBody = {
-    model: config.llmModel,
-    messages: history,
-    temperature: config.llmTemperature,
-    max_tokens: config.llmMaxTokens,
-  };
-
-  try {
-    // Make POST request to OpenRouter API
-    const response = await fetch(openRouterUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.openRouterApiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
-        'X-Title': 'Recursa',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    // Check if response is successful
-    if (!response.ok) {
-      let errorDetails = 'Unknown error';
-      try {
-        const errorData = (await response.json()) as {
-          error?: { message?: string };
-        };
-        errorDetails = errorData.error?.message || JSON.stringify(errorData);
-      } catch {
-        errorDetails = await response.text();
-      }
-
-      throw new HttpError(
-        `OpenRouter API error: ${response.status} ${response.statusText}`,
-        response.status,
-        errorDetails
-      );
-    }
-
-    // Parse JSON response
-    const data = (await response.json()) as {
-      choices: Array<{
-        message: {
-          content: string;
-        };
-      }>;
-    };
-
-    // Extract and validate content
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      throw new Error('Invalid response format from OpenRouter API');
-    }
-
-    const content = data.choices[0].message.content;
-    if (!content) {
-      throw new Error('Empty content received from OpenRouter API');
-    }
-
-    return content;
-  } catch (error) {
-    // Re-throw HttpError instances
-    if (error instanceof HttpError) {
-      throw error;
-    }
-
-    // Wrap other errors
-    throw new Error(
-      `Failed to query OpenRouter API: ${(error as Error).message}`
-    );
-  }
-};
-
-export const queryLLMWithRetries = withRetry(
-  queryLLM as (...args: unknown[]) => Promise<unknown>
-);
-````
-
-## File: src/types/mem.ts
-````typescript
-import type { LogEntry } from './git';
-
-// --- Knowledge Graph & Git ---
-
-// Structure for a graph query result.
-export type GraphQueryResult = {
-  filePath: string;
-  matches: string[];
-};
-
-// Structure for token count results for multiple paths.
-export type PathTokenCount = {
-  path: string;
-  tokenCount: number;
-};
-
-// --- MemAPI Interface (Matches tools.md) ---
-
-// This is the "cheatsheet" for what's available in the sandbox.
-// It must be kept in sync with the tools documentation.
-export type MemAPI = {
-  // Core File I/O
-  readFile: (filePath: string) => Promise<string>;
-  writeFile: (filePath: string, content: string) => Promise<boolean>;
-  updateFile: (
-    filePath: string,
-    oldContent: string,
-    newContent: string
-  ) => Promise<boolean>;
-  deletePath: (filePath: string) => Promise<boolean>;
-  rename: (oldPath: string, newPath: string) => Promise<boolean>;
-  fileExists: (filePath: string) => Promise<boolean>;
-  createDir: (directoryPath: string) => Promise<boolean>;
-  listFiles: (directoryPath?: string) => Promise<string[]>;
-
-  // Git-Native Operations
-  gitDiff: (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ) => Promise<string>;
-  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
-  getChangedFiles: () => Promise<string[]>;
-  commitChanges: (message: string) => Promise<string>;
-
-  // Intelligent Graph Operations
-  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
-  getBacklinks: (filePath: string) => Promise<string[]>;
-  getOutgoingLinks: (filePath: string) => Promise<string[]>;
-  searchGlobal: (query: string) => Promise<string[]>;
-
-  // State Management
-  saveCheckpoint: () => Promise<boolean>;
-  revertToLastCheckpoint: () => Promise<boolean>;
-  discardChanges: () => Promise<boolean>;
-
-  // Utility
-  getGraphRoot: () => Promise<string>;
-  getTokenCount: (filePath: string) => Promise<number>;
-  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
-};
 ````
 
 ## File: tests/lib/test-harness.ts
@@ -4543,6 +4861,266 @@ GIT_USER_EMAIL=recursa@local
 }
 ````
 
+## File: src/core/mem-api/util-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import type { PathTokenCount } from '../../types';
+import { resolveSecurePath } from './secure-path.js';
+
+// A private helper to centralize token counting logic.
+// This is a simple estimation and should be replaced with a proper
+// tokenizer library like tiktoken if higher accuracy is needed.
+const countTokensForContent = (content: string): number => {
+  // A common rough estimate is 4 characters per token.
+  return Math.ceil(content.length / 4);
+};
+
+// Note: HOFs returning the final mem API functions.
+
+export const getGraphRoot =
+  (graphRoot: string) => async (): Promise<string> => {
+    return graphRoot;
+  };
+
+export const getTokenCount =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<number> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    try {
+      const content = await fs.readFile(fullPath, 'utf-8');
+      return countTokensForContent(content);
+    } catch (error) {
+      throw new Error(
+        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const getTokenCountForPaths =
+  (graphRoot: string) =>
+  async (paths: string[]): Promise<PathTokenCount[]> => {
+    return Promise.all(
+      paths.map(async (filePath) => {
+        const tokenCount = await getTokenCount(graphRoot)(filePath);
+        return {
+          path: filePath,
+          tokenCount,
+        };
+      })
+    );
+  };
+````
+
+## File: src/core/llm.ts
+````typescript
+import type { AppConfig } from '../config';
+import { logger } from '../lib/logger.js';
+import type { ChatMessage } from '../types';
+
+// Custom error class for HTTP errors with status code
+class HttpError extends Error {
+  constructor(
+    message: string,
+    public statusCode: number,
+    public responseText?: string
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
+const withRetry =
+  <T extends (...args: unknown[]) => Promise<unknown>>(queryFn: T) =>
+  async (...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> => {
+    const maxAttempts = 3;
+    const initialDelay = 1000;
+    const backoffFactor = 2;
+    let lastError: Error;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return (await queryFn(...args)) as Awaited<ReturnType<T>>;
+      } catch (error) {
+        lastError = error as Error;
+
+        // Don't retry on non-retryable errors (4xx status codes)
+        if (
+          error instanceof HttpError &&
+          error.statusCode >= 400 &&
+          error.statusCode < 500
+        ) {
+          throw error;
+        }
+
+        // If this is the last attempt, throw the error
+        if (attempt === maxAttempts - 1) {
+          throw lastError;
+        }
+
+        // Calculate exponential backoff delay
+        const delay = initialDelay * Math.pow(backoffFactor, attempt);
+        logger.warn(
+          `Retry attempt ${attempt + 1}/${maxAttempts} after ${delay}ms delay. Error: ${lastError.message}`
+        );
+
+        // Wait for the delay
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError!;
+  };
+
+export const queryLLM = async (
+  history: ChatMessage[],
+  config: AppConfig
+): Promise<string> => {
+  // OpenRouter API endpoint
+  const openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
+
+  // Create request body
+  const requestBody = {
+    model: config.llmModel,
+    messages: history,
+    temperature: config.llmTemperature,
+    max_tokens: config.llmMaxTokens,
+  };
+
+  try {
+    // Make POST request to OpenRouter API
+    const response = await fetch(openRouterUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.openRouterApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
+        'X-Title': 'Recursa',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    // Check if response is successful
+    if (!response.ok) {
+      let errorDetails = 'Unknown error';
+      try {
+        const errorData = (await response.json()) as {
+          error?: { message?: string };
+        };
+        errorDetails = errorData.error?.message || JSON.stringify(errorData);
+      } catch {
+        errorDetails = await response.text();
+      }
+
+      throw new HttpError(
+        `OpenRouter API error: ${response.status} ${response.statusText}`,
+        response.status,
+        errorDetails
+      );
+    }
+
+    // Parse JSON response
+    const data = (await response.json()) as {
+      choices: Array<{
+        message: {
+          content: string;
+        };
+      }>;
+    };
+
+    // Extract and validate content
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response format from OpenRouter API');
+    }
+
+    const content = data.choices[0].message.content;
+    if (!content) {
+      throw new Error('Empty content received from OpenRouter API');
+    }
+
+    return content;
+  } catch (error) {
+    // Re-throw HttpError instances
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
+    // Wrap other errors
+    throw new Error(
+      `Failed to query OpenRouter API: ${(error as Error).message}`
+    );
+  }
+};
+
+export const queryLLMWithRetries = withRetry(
+  queryLLM as (...args: unknown[]) => Promise<unknown>
+);
+````
+
+## File: src/types/mem.ts
+````typescript
+import type { LogEntry } from './git.js';
+
+// --- Knowledge Graph & Git ---
+
+// Structure for a graph query result.
+export type GraphQueryResult = {
+  filePath: string;
+  matches: string[];
+};
+
+// Structure for token count results for multiple paths.
+export type PathTokenCount = {
+  path: string;
+  tokenCount: number;
+};
+
+// --- MemAPI Interface (Matches tools.md) ---
+
+// This is the "cheatsheet" for what's available in the sandbox.
+// It must be kept in sync with the tools documentation.
+export type MemAPI = {
+  // Core File I/O
+  readFile: (filePath: string) => Promise<string>;
+  writeFile: (filePath: string, content: string) => Promise<boolean>;
+  updateFile: (
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ) => Promise<boolean>;
+  deletePath: (filePath: string) => Promise<boolean>;
+  rename: (oldPath: string, newPath: string) => Promise<boolean>;
+  fileExists: (filePath: string) => Promise<boolean>;
+  createDir: (directoryPath: string) => Promise<boolean>;
+  listFiles: (directoryPath?: string) => Promise<string[]>;
+
+  // Git-Native Operations
+  gitDiff: (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ) => Promise<string>;
+  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
+  getChangedFiles: () => Promise<string[]>;
+  commitChanges: (message: string) => Promise<string>;
+
+  // Intelligent Graph Operations
+  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
+  getBacklinks: (filePath: string) => Promise<string[]>;
+  getOutgoingLinks: (filePath: string) => Promise<string[]>;
+  searchGlobal: (query: string) => Promise<string[]>;
+
+  // State Management
+  saveCheckpoint: () => Promise<boolean>;
+  revertToLastCheckpoint: () => Promise<boolean>;
+  discardChanges: () => Promise<boolean>;
+
+  // Utility
+  getGraphRoot: () => Promise<string>;
+  getTokenCount: (filePath: string) => Promise<number>;
+  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
+};
+````
+
 ## File: src/config.ts
 ````typescript
 import 'dotenv/config';
@@ -4738,188 +5316,6 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     gitUserEmail: GIT_USER_EMAIL!,
   });
 };
-````
-
-## File: tests/unit/llm.test.ts
-````typescript
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
-import type { AppConfig } from '../../src/config';
-import type { ChatMessage } from '../../src/types';
-
-// Mock fetch globally
-const mockFetch = jest.fn().mockImplementation(() =>
-  Promise.resolve({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        choices: [
-          {
-            message: {
-              content: 'Test response from LLM',
-            },
-          },
-        ],
-      }),
-    status: 200,
-    statusText: 'OK',
-  })
-);
-(global as any).fetch = mockFetch;
-
-const mockConfig: AppConfig = {
-  openRouterApiKey: 'test-api-key',
-  knowledgeGraphPath: '/test/path',
-  llmModel: 'anthropic/claude-3-haiku-20240307',
-  llmTemperature: 0.7,
-  llmMaxTokens: 4000,
-  sandboxTimeout: 10000,
-  sandboxMemoryLimit: 100,
-  gitUserName: 'Test User',
-  gitUserEmail: 'test@example.com',
-};
-
-const mockHistory: ChatMessage[] = [
-  { role: 'system', content: 'You are a helpful assistant.' },
-  { role: 'user', content: 'Hello, world!' },
-];
-
-beforeEach(() => {
-  (fetch as jest.Mock).mockClear();
-});
-
-describe('LLM Module', () => {
-  describe('queryLLM', () => {
-    it('should make a successful request to OpenRouter API', async () => {
-      const response = await queryLLM(mockHistory, mockConfig);
-
-      expect(response).toBe('Test response from LLM');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://openrouter.ai/api/v1/chat/completions',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            Authorization: 'Bearer test-api-key',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
-            'X-Title': 'Recursa',
-          },
-          body: JSON.stringify({
-            model: 'anthropic/claude-3-haiku-20240307',
-            messages: mockHistory,
-            temperature: 0.7,
-            max_tokens: 4000,
-          }),
-        })
-      );
-    });
-
-    it('should handle API errors properly', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Invalid API key' },
-            }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'OpenRouter API error: 401 Unauthorized'
-      );
-    });
-
-    it('should handle malformed API responses', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ invalid: 'response' }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Invalid response format from OpenRouter API'
-      );
-    });
-
-    it('should handle empty content in response', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: { content: '' },
-                },
-              ],
-            }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Empty content received from OpenRouter API'
-      );
-    });
-  });
-
-  describe('queryLLMWithRetries', () => {
-    it('should retry on retryable errors', async () => {
-      // First call fails with server error
-      // Second call succeeds
-      (global.fetch as jest.Mock)
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: false,
-            status: 500,
-            statusText: 'Internal Server Error',
-            json: () => Promise.resolve({ error: 'Server error' }),
-          })
-        )
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                choices: [
-                  {
-                    message: { content: 'Success after retry' },
-                  },
-                ],
-              }),
-          })
-        );
-
-      const response = await queryLLMWithRetries(mockHistory, mockConfig);
-
-      expect(response).toBe('Success after retry');
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('should not retry on non-retryable errors (4xx)', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          statusText: 'Bad Request',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Bad request' },
-            }),
-        })
-      );
-
-      await expect(
-        queryLLMWithRetries(mockHistory, mockConfig)
-      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
-      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
-    });
-  });
-});
 ````
 
 ## File: tests/integration/workflow.test.ts
@@ -5302,6 +5698,188 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
 });
 ````
 
+## File: tests/unit/llm.test.ts
+````typescript
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
+import type { AppConfig } from '../../src/config';
+import type { ChatMessage } from '../../src/types';
+
+// Mock fetch globally
+const mockFetch = jest.fn().mockImplementation(() =>
+  Promise.resolve({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        choices: [
+          {
+            message: {
+              content: 'Test response from LLM',
+            },
+          },
+        ],
+      }),
+    status: 200,
+    statusText: 'OK',
+  })
+);
+(global as any).fetch = mockFetch;
+
+const mockConfig: AppConfig = {
+  openRouterApiKey: 'test-api-key',
+  knowledgeGraphPath: '/test/path',
+  llmModel: 'anthropic/claude-3-haiku-20240307',
+  llmTemperature: 0.7,
+  llmMaxTokens: 4000,
+  sandboxTimeout: 10000,
+  sandboxMemoryLimit: 100,
+  gitUserName: 'Test User',
+  gitUserEmail: 'test@example.com',
+};
+
+const mockHistory: ChatMessage[] = [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'Hello, world!' },
+];
+
+beforeEach(() => {
+  (fetch as jest.Mock).mockClear();
+});
+
+describe('LLM Module', () => {
+  describe('queryLLM', () => {
+    it('should make a successful request to OpenRouter API', async () => {
+      const response = await queryLLM(mockHistory, mockConfig);
+
+      expect(response).toBe('Test response from LLM');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
+            'X-Title': 'Recursa',
+          },
+          body: JSON.stringify({
+            model: 'anthropic/claude-3-haiku-20240307',
+            messages: mockHistory,
+            temperature: 0.7,
+            max_tokens: 4000,
+          }),
+        })
+      );
+    });
+
+    it('should handle API errors properly', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 401,
+          statusText: 'Unauthorized',
+          json: () =>
+            Promise.resolve({
+              error: { message: 'Invalid API key' },
+            }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'OpenRouter API error: 401 Unauthorized'
+      );
+    });
+
+    it('should handle malformed API responses', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ invalid: 'response' }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'Invalid response format from OpenRouter API'
+      );
+    });
+
+    it('should handle empty content in response', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              choices: [
+                {
+                  message: { content: '' },
+                },
+              ],
+            }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'Empty content received from OpenRouter API'
+      );
+    });
+  });
+
+  describe('queryLLMWithRetries', () => {
+    it('should retry on retryable errors', async () => {
+      // First call fails with server error
+      // Second call succeeds
+      (global.fetch as jest.Mock)
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            json: () => Promise.resolve({ error: 'Server error' }),
+          })
+        )
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                choices: [
+                  {
+                    message: { content: 'Success after retry' },
+                  },
+                ],
+              }),
+          })
+        );
+
+      const response = await queryLLMWithRetries(mockHistory, mockConfig);
+
+      expect(response).toBe('Success after retry');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not retry on non-retryable errors (4xx)', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          json: () =>
+            Promise.resolve({
+              error: { message: 'Bad request' },
+            }),
+        })
+      );
+
+      await expect(
+        queryLLMWithRetries(mockHistory, mockConfig)
+      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
+      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
+    });
+  });
+});
+````
+
 ## File: tasks.md
 ````markdown
 # Tasks
@@ -5383,7 +5961,7 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 ````typescript
 import { promises as fs } from 'fs';
 import path from 'path';
-import { resolveSecurePath, validatePathBounds } from './secure-path';
+import { resolveSecurePath, validatePathBounds } from './secure-path.js';
 import platform from '../../lib/platform.js';
 
 // Note: Each function here is a HOF that takes dependencies (like graphRoot)
@@ -5673,14 +6251,68 @@ export const listFiles =
   };
 ````
 
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
+````
+
 ## File: src/core/mem-api/graph-ops.ts
 ````typescript
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path';
-import { walk } from './fs-walker';
-import { createIgnoreFilter } from '../../lib/gitignore-parser';
+import { resolveSecurePath } from './secure-path.js';
+import { walk } from './fs-walker.js';
+import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
 
 type PropertyCondition = {
   type: 'property';
@@ -5848,57 +6480,168 @@ export const searchGlobal =
   };
 ````
 
-## File: repomix.config.json
+## File: tests/e2e/agent-workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterEach,
+  beforeEach,
+} from '@jest/globals';
+import { handleUserQuery } from '../../src/core/loop';
+import type { AppConfig } from '../../src/config';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockQueryLLM,
+  type TestHarnessState,
+} from '../lib/test-harness';
+
+describe('Agent End-to-End Workflow', () => {
+  let appConfig: AppConfig;
+  let harness: TestHarnessState;
+
+  beforeAll(() => {
+    // Create a mock config for E2E tests to avoid environment variable dependencies
+    appConfig = {
+      openRouterApiKey: 'test-api-key',
+      knowledgeGraphPath: '/tmp/test-knowledge-graph',
+      llmModel: 'test-model',
+      llmTemperature: 0.7,
+      llmMaxTokens: 4000,
+      sandboxTimeout: 10000,
+      sandboxMemoryLimit: 100,
+      gitUserName: 'Test User',
+      gitUserEmail: 'test@example.com',
+    };
+  });
+
+  beforeEach(async () => {
+    // Create a test harness that inherits from real config but uses temp directory
+    harness = await createTestHarness({
+      apiKey: appConfig.openRouterApiKey,
+      model: appConfig.llmModel,
+      gitUserName: appConfig.gitUserName,
+      gitEmail: appConfig.gitUserEmail,
+    });
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example from the docs', async () => {
+    // 1. SETUP
+    // Define the multi-turn LLM responses as XML strings based on the example.
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+if (!orgExists) {
+  await mem.writeFile(orgPath, '# AI Research Institute\\ntype:: organization\\n');
+}
+await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\\ntype:: person\\naffiliation:: [[AI Research Institute]]\\nfield:: [[Symbolic Reasoning]]');
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>`;
+
+    // Create a mock LLM function for this specific test case.
+    const mockQueryLLM = createMockQueryLLM([turn1Response, turn2Response]);
+
+    // 2. EXECUTE
+    // Call the main loop with the user query and the mocked LLM function.
+    const query =
+      'I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation.';
+    const finalReply = await handleUserQuery(
+      query,
+      harness.mockConfig,
+      undefined,
+      mockQueryLLM
+    );
+
+    // 3. ASSERT
+    // Assert the final user-facing reply is correct.
+    expect(finalReply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
+    const thorneExists = await harness.mem.fileExists('Dr. Aris Thorne.md');
+    const orgExists = await harness.mem.fileExists('AI Research Institute.md');
+
+    expect(thorneExists).toBe(true);
+    expect(orgExists).toBe(true);
+
+    // Verify file content. Read 'Dr. Aris Thorne.md' and check for `affiliation:: [[AI Research Institute]]`.
+    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+    expect(thorneContent).toContain('field:: [[Symbolic Reasoning]]');
+
+    // Verify the git commit. Use `simple-git` to check the log of the test repo.
+    const log = await harness.git.log({ maxCount: 1 });
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+});
+````
+
+## File: package.json
 ````json
 {
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
   },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
+  "dependencies": {
+    "fastmcp": "^1.21.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
   },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt"
-      //   "tests"
-    ]
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
   },
-  "security": {
-    "enableSecurityCheck": true
+  "engines": {
+    "node": ">=18.0.0"
   },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
+  "license": "MIT"
 }
 ````
 
@@ -5906,11 +6649,11 @@ export const searchGlobal =
 ````typescript
 import type { AppConfig } from '../config';
 import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
-import { logger } from '../lib/logger';
-import { queryLLMWithRetries as defaultQueryLLM } from './llm';
-import { parseLLMResponse } from './parser';
-import { runInSandbox } from './sandbox';
-import { createMemAPI } from './mem-api';
+import { logger } from '../lib/logger.js';
+import { queryLLMWithRetries as defaultQueryLLM } from './llm.js';
+import { parseLLMResponse } from './parser.js';
+import { runInSandbox } from './sandbox.js';
+import { createMemAPI } from './mem-api/index.js';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -6120,176 +6863,11 @@ export const handleUserQuery = async (
 };
 ````
 
-## File: tests/e2e/agent-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterEach,
-  beforeEach,
-} from '@jest/globals';
-import { handleUserQuery } from '../../src/core/loop';
-import type { AppConfig } from '../../src/config';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  createMockQueryLLM,
-  type TestHarnessState,
-} from '../lib/test-harness';
-
-describe('Agent End-to-End Workflow', () => {
-  let appConfig: AppConfig;
-  let harness: TestHarnessState;
-
-  beforeAll(() => {
-    // Create a mock config for E2E tests to avoid environment variable dependencies
-    appConfig = {
-      openRouterApiKey: 'test-api-key',
-      knowledgeGraphPath: '/tmp/test-knowledge-graph',
-      llmModel: 'test-model',
-      llmTemperature: 0.7,
-      llmMaxTokens: 4000,
-      sandboxTimeout: 10000,
-      sandboxMemoryLimit: 100,
-      gitUserName: 'Test User',
-      gitUserEmail: 'test@example.com',
-    };
-  });
-
-  beforeEach(async () => {
-    // Create a test harness that inherits from real config but uses temp directory
-    harness = await createTestHarness({
-      apiKey: appConfig.openRouterApiKey,
-      model: appConfig.llmModel,
-      gitUserName: appConfig.gitUserName,
-      gitEmail: appConfig.gitUserEmail,
-    });
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should correctly handle the Dr. Aris Thorne example from the docs', async () => {
-    // 1. SETUP
-    // Define the multi-turn LLM responses as XML strings based on the example.
-    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
-<typescript>
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-if (!orgExists) {
-  await mem.writeFile(orgPath, '# AI Research Institute\\ntype:: organization\\n');
-}
-await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\\ntype:: person\\naffiliation:: [[AI Research Institute]]\\nfield:: [[Symbolic Reasoning]]');
-</typescript>`;
-    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>`;
-
-    // Create a mock LLM function for this specific test case.
-    const mockQueryLLM = createMockQueryLLM([turn1Response, turn2Response]);
-
-    // 2. EXECUTE
-    // Call the main loop with the user query and the mocked LLM function.
-    const query =
-      'I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation.';
-    const finalReply = await handleUserQuery(
-      query,
-      harness.mockConfig,
-      undefined,
-      mockQueryLLM
-    );
-
-    // 3. ASSERT
-    // Assert the final user-facing reply is correct.
-    expect(finalReply).toBe(
-      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
-    );
-
-    // Verify file creation. Check that 'Dr. Aris Thorne.md' and 'AI Research Institute.md' exist.
-    const thorneExists = await harness.mem.fileExists('Dr. Aris Thorne.md');
-    const orgExists = await harness.mem.fileExists('AI Research Institute.md');
-
-    expect(thorneExists).toBe(true);
-    expect(orgExists).toBe(true);
-
-    // Verify file content. Read 'Dr. Aris Thorne.md' and check for `affiliation:: [[AI Research Institute]]`.
-    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
-    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
-    expect(thorneContent).toContain('field:: [[Symbolic Reasoning]]');
-
-    // Verify the git commit. Use `simple-git` to check the log of the test repo.
-    const log = await harness.git.log({ maxCount: 1 });
-    expect(log.latest?.message).toBe(
-      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
-    );
-  });
-});
-````
-
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/server.js",
-    "start:termux": "npm run start",
-    "start:standard": "npm run start",
-    "build": "tsc",
-    "build:auto": "node scripts/build.js",
-    "build:termux": "node scripts/build.js termux",
-    "build:standard": "node scripts/build.js standard",
-    "dev": "tsx watch src/server.ts",
-    "dev:termux": "npm run dev",
-    "dev:standard": "npm run dev",
-    "test": "jest",
-    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
-    "install:auto": "node scripts/install.js",
-    "install:termux": "node scripts/install.js termux",
-    "install:standard": "node scripts/install.js standard",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "fastmcp": "^1.21.0",
-    "dotenv": "^16.4.5",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^4.0.2",
-    "ts-jest": "^29.1.2",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "license": "MIT"
-}
-````
-
 ## File: src/core/sandbox.ts
 ````typescript
 import { createContext, runInContext } from 'node:vm';
 import type { MemAPI } from '../types/mem';
-import { logger } from '../lib/logger';
+import { logger } from '../lib/logger.js';
 
 /**
  * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
@@ -6374,168 +6952,6 @@ ${code}
 };
 ````
 
-## File: tests/integration/mem-api.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should write, read, and check existence of a file', async () => {
-    const filePath = 'test.md';
-    const content = 'hello world';
-
-    await mem.writeFile(filePath, content);
-
-    const readContent = await mem.readFile(filePath);
-    expect(readContent).toBe(content);
-
-    const exists = await mem.fileExists(filePath);
-    expect(exists).toBe(true);
-
-    const nonExistent = await mem.fileExists('not-real.md');
-    expect(nonExistent).toBe(false);
-  });
-
-  it('should throw an error for path traversal attempts', async () => {
-    const maliciousPath = '../../../etc/passwd';
-
-    await expect(mem.readFile(maliciousPath)).rejects.toThrow(
-      'Path traversal attempt detected.'
-    );
-
-    await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
-      'Path traversal attempt detected.'
-    );
-
-    await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
-      'Path traversal attempt detected.'
-    );
-
-    await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
-      'Path traversal attempt detected.'
-    );
-  });
-
-  it('should commit a change and log it', async () => {
-    const filePath = 'a.md';
-    const content = 'content';
-    const commitMessage = 'feat: add a.md';
-
-    await mem.writeFile(filePath, content);
-
-    const commitHash = await mem.commitChanges(commitMessage);
-
-    expect(typeof commitHash).toBe('string');
-    expect(commitHash.length).toBeGreaterThan(5);
-
-    const log = await mem.gitLog(filePath, 1);
-
-    expect(log).toHaveLength(1);
-    expect(log[0]).toBeDefined();
-    expect(log[0]?.message).toBe(commitMessage);
-  });
-
-  it('should list files in a directory', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.writeFile('b.txt', 'b');
-    await mem.createDir('subdir');
-    await mem.writeFile('subdir/c.txt', 'c');
-
-    const rootFiles = await mem.listFiles();
-    expect(rootFiles).toEqual(
-      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
-    );
-    expect(rootFiles.length).toBeGreaterThanOrEqual(3);
-
-    const subdirFiles = await mem.listFiles('subdir');
-    expect(subdirFiles).toEqual(['c.txt']);
-
-    await mem.createDir('empty');
-    const emptyFiles = await mem.listFiles('empty');
-    expect(emptyFiles).toEqual([]);
-  });
-
-  it('should query the graph with multiple conditions', async () => {
-    const pageAContent = `
-# Page A
-prop:: value
-
-Link to [[Page B]].
-    `;
-    const pageBContent = `
-# Page B
-prop:: other
-
-No links here.
-    `;
-
-    await mem.writeFile('PageA.md', pageAContent);
-    await mem.writeFile('PageB.md', pageBContent);
-
-    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(1);
-    expect(results[0]).toBeDefined();
-    expect(results[0]?.filePath).toBe('PageA.md');
-  });
-
-  it('should update a file atomically and fail if content changes', async () => {
-    const filePath = 'atomic.txt';
-    const originalContent = 'version 1';
-    const newContent = 'version 2';
-
-    // 1. Successful update
-    await mem.writeFile(filePath, originalContent);
-    const success = await mem.updateFile(filePath, originalContent, newContent);
-    expect(success).toBe(true);
-    const readContent1 = await mem.readFile(filePath);
-    expect(readContent1).toBe(newContent);
-
-    // 2. Failed update (content changed underneath)
-    const currentContent = await mem.readFile(filePath); // "version 2"
-    const nextContent = 'version 3';
-
-    // Simulate another process changing the file
-    const { promises: fs } = await import('fs');
-    const path = await import('path');
-    await fs.writeFile(path.join(harness.tempDir, filePath), 'version 2.5');
-
-    // The update should fail because 'currentContent' ("version 2") no longer matches the file on disk ("version 2.5")
-    await expect(
-      mem.updateFile(filePath, currentContent, nextContent)
-    ).rejects.toThrow('File content has changed since it was last read');
-
-    // Verify the file was NOT changed
-    const readContent2 = await mem.readFile(filePath);
-    expect(readContent2).toBe('version 2.5');
-  });
-});
-````
-
 ## File: src/server.ts
 ````typescript
 import { handleUserQuery } from './core/loop.js';
@@ -6596,16 +7012,16 @@ const main = async () => {
 
           switch (type) {
             case 'think':
-              log.info(content);
+              log.info(content || 'Thinking...');
               break;
             case 'act':
-              log.info(message, data);
+              log.info(message, data as any);
               break;
             case 'error':
-              log.error(message, data);
+              log.error(message, data as any);
               break;
             default:
-              log.debug(message, data);
+              log.debug(message, data as any);
           }
         };
 
