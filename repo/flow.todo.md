@@ -11,11 +11,11 @@ programmatic API
 
 we need logseq-org-mode validator
 
-===
+=== DOING
 
 lets create complex test cases to imitate docs/overview.md
 
-=== DOING
+=== 
 
 make codebase radically DRY for less code, without causing fail tests or feature regressions
 

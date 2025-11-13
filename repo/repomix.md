@@ -1,5 +1,13 @@
 # Directory Structure
 ```
+docs/
+  overview.md
+  PLATFORM_SUPPORT.md
+  readme.md
+  rules.md
+  system-prompt.md
+  tools.md
+  TROUBLESHOOTING.md
 scripts/
   build.js
   install.js
@@ -37,6 +45,7 @@ tests/
   e2e/
     mcp-workflow.test.ts
   integration/
+    knowledge-graph-workflow.test.ts
     mem-api-file-ops.test.ts
     mem-api-git-ops.test.ts
     mem-api-graph-ops.test.ts
@@ -71,6 +80,1143 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
+
+## File: tests/integration/knowledge-graph-workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness.js';
+
+// This test suite is intentionally stateful.
+// Each `it` block builds on the state created by the previous ones
+// to simulate a real, multi-turn agent workflow.
+describe('Knowledge Graph Workflow Integration Test', () => {
+  let harness: TestHarnessState;
+
+  // Setup the test environment once before all tests in this suite
+  beforeAll(async () => {
+    harness = await createTestHarness();
+  });
+
+  // Cleanup the test environment once after all tests in this suite have run
+  afterAll(async () => {
+    if (harness) {
+      await cleanupTestHarness(harness);
+    }
+  });
+
+  // Part 2, Step 1: Create the central project hub
+  it('1. should create the project hub file', async () => {
+    const projectContent = `- # Project Singularity
+  - status:: active
+  - start-date:: 2024-06-01
+`;
+    await harness.mem.writeFile('projects/Project Singularity.md', projectContent);
+    await harness.mem.commitChanges('feat: create Project Singularity hub');
+
+    expect(
+      await harness.mem.fileExists('projects/Project Singularity.md')
+    ).toBe(true);
+  });
+
+  // Part 2, Step 2: Create the people entities
+  it('2. should create person entities and link them to the project', async () => {
+    const evelynContent = `- # Dr. Evelyn Reed
+  - type:: person
+  - role:: Lead Research Scientist
+  - leads-project::
+    - [[Project Singularity]]
+`;
+    const arisContent = `- # Dr. Aris Thorne
+  - type:: person
+  - role:: Research Scientist
+  - team-member::
+    - [[Project Singularity]]
+`;
+    await harness.mem.writeFile('people/Dr. Evelyn Reed.md', evelynContent);
+    await harness.mem.writeFile('people/Dr. Aris Thorne.md', arisContent);
+    await harness.mem.commitChanges('feat: add project team members');
+
+    expect(await harness.mem.fileExists('people/Dr. Evelyn Reed.md')).toBe(
+      true
+    );
+    expect(await harness.mem.fileExists('people/Dr. Aris Thorne.md')).toBe(
+      true
+    );
+  });
+
+  // Part 2, Step 3: Document the architecture meeting
+  it('3. should document the architecture meeting', async () => {
+    const meetingContent = `- # 2024-07-22 - Singularity Architecture Deep Dive
+  - type:: meeting
+  - project:: [[Project Singularity]]
+  - attendees:: [[Dr. Evelyn Reed]], [[Dr. Aris Thorne]]
+  - outcomes::
+    - This decision is formally documented in [[ADR-001 - Use Micro-frontend Architecture]].
+  - action-items::
+    - [[Dr. Aris Thorne]] to draft the initial ADR.
+`;
+    await harness.mem.writeFile(
+      'meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md',
+      meetingContent
+    );
+    await harness.mem.commitChanges('docs: record architecture deep dive meeting');
+
+    expect(
+      await harness.mem.fileExists(
+        'meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md'
+      )
+    ).toBe(true);
+  });
+
+  // Part 2, Step 4: Formalize the architectural decision
+  it('4. should formalize the architectural decision', async () => {
+    const adrContent = `- # ADR-001: Use Micro-frontend Architecture
+  - status:: accepted
+  - date:: 2024-07-25
+  - authors:: [[Dr. Aris Thorne]]
+  - decided-in:: [[2024-07-22 - Singularity Architecture Deep Dive]]
+  - context::
+    - The UI for the reasoning engine needs to be modular to allow different teams to work on visualization and input components independently.
+  - justification::
+    - Enables independent deployment cycles.
+    - Reduces cognitive load for new developers.
+  - consequences::
+    - Increased complexity in the build pipeline.
+    - Requires a robust component sharing strategy.
+`;
+    await harness.mem.writeFile(
+      'decisions/ADR-001 - Use Micro-frontend Architecture.md',
+      adrContent
+    );
+    await harness.mem.commitChanges('feat: add ADR-001 for micro-frontends');
+
+    expect(
+      await harness.mem.fileExists(
+        'decisions/ADR-001 - Use Micro-frontend Architecture.md'
+      )
+    ).toBe(true);
+  });
+
+  // Part 2, Step 5: Update the project hub with all links
+  it('5. should update the project hub with all new links', async () => {
+    const projectPath = 'projects/Project Singularity.md';
+    const oldContent = await harness.mem.readFile(projectPath);
+
+    const newContent = `${oldContent}
+  - lead:: [[Dr. Evelyn Reed]]
+  - team:: [[Dr. Aris Thorne]]
+  - key-decisions::
+    - [[ADR-001 - Use Micro-frontend Architecture]]
+  - meetings::
+    - [[2024-07-22 - Singularity Architecture Deep Dive]]
+`;
+
+    await harness.mem.updateFile(projectPath, oldContent, newContent);
+    await harness.mem.commitChanges(
+      'refactor: update project hub with all entity links'
+    );
+
+    const updatedContent = await harness.mem.readFile(projectPath);
+    expect(updatedContent).toContain('[[Dr. Evelyn Reed]]');
+    expect(updatedContent).toContain(
+      '[[ADR-001 - Use Micro-frontend Architecture]]'
+    );
+    expect(updatedContent).toContain(
+      '[[2024-07-22 - Singularity Architecture Deep Dive]]'
+    );
+  });
+
+  // Part 3, Step 1: Test backlink and outgoing link resolution
+  it('6. should resolve backlinks and outgoing links correctly', async () => {
+    // Test backlinks for Dr. Aris Thorne
+    const arisBacklinks = await harness.mem.getBacklinks(
+      'people/Dr. Aris Thorne.md'
+    );
+    expect(arisBacklinks).toEqual(
+      expect.arrayContaining([
+        'decisions/ADR-001 - Use Micro-frontend Architecture.md',
+        'meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md',
+        'projects/Project Singularity.md',
+      ])
+    );
+    // Add a negative assertion for robustness
+    expect(arisBacklinks).not.toContain('people/Dr. Evelyn Reed.md');
+
+    // Test outgoing links for the main project file
+    const projectOutgoingLinks = await harness.mem.getOutgoingLinks(
+      'projects/Project Singularity.md'
+    );
+    expect(projectOutgoingLinks).toEqual(
+      expect.arrayContaining([
+        'Dr. Evelyn Reed',
+        'Dr. Aris Thorne',
+        'ADR-001 - Use Micro-frontend Architecture',
+        '2024-07-22 - Singularity Architecture Deep Dive',
+      ])
+    );
+    // Add a negative assertion for robustness
+    expect(projectOutgoingLinks).not.toContain('Some Random Unlinked Page');
+  });
+
+  // Part 3, Step 2: Simulate the complex user query from docs/overview.md
+  it('7. should simulate the complex query for micro-frontend decision', async () => {
+    // 1. "User is asking about a decision for 'Singularity'. I'll start by searching for a decision record."
+    // A more realistic initial search. The agent wouldn't know to combine terms yet.
+    // This failed because "Singularity" is not in the ADR file itself.
+    const searchResults = await harness.mem.searchGlobal('micro-frontend');
+    expect(searchResults).toContain(
+      'decisions/ADR-001 - Use Micro-frontend Architecture.md'
+    );
+
+    // 2. "Found the ADR. I'll read it to get the justification and find the source meeting."
+    const adrPath = searchResults[0]!;
+    const adrContent = await harness.mem.readFile(adrPath);
+    const meetingLinkMatch = adrContent.match(/decided-in::\s*\[\[(.*?)\]\]/);
+    expect(meetingLinkMatch).not.toBeNull();
+    const meetingTitle = meetingLinkMatch![1];
+
+    // 3. "Okay, the decision was made in that meeting. Now I'll read the meeting file to find the attendees."
+    const meetingPath = `meetings/2024/${meetingTitle}.md`;
+    const meetingContent = await harness.mem.readFile(meetingPath);
+    const attendeesMatch = meetingContent.match(/attendees::\s*(.*)/);
+    expect(attendeesMatch).not.toBeNull();
+
+    // 4. "I have all the pieces. I'll synthesize the final answer."
+    const attendees = attendeesMatch![1];
+    expect(attendees).toContain('[[Dr. Evelyn Reed]]');
+    expect(attendees).toContain('[[Dr. Aris Thorne]]');
+  });
+
+  // Part 3, Step 3: Validate git history
+  it('8. should have a complete and accurate git history', async () => {
+    const log = await harness.mem.gitLog('projects/Project Singularity.md', 5);
+    expect(log.length).toBeGreaterThanOrEqual(2);
+    expect(log[0]?.message).toBe(
+      'refactor: update project hub with all entity links'
+    );
+    expect(log[log.length - 1]?.message).toBe(
+      'feat: create Project Singularity hub'
+    );
+  });
+});
+````
+
+## File: docs/overview.md
+````markdown
+### TL;DR: The Structure
+
+The agent doesn't keep everything in a flat directory. It starts creating topic-based and time-based subdirectories as the graph grows. The file system itself becomes part of the schema.
+
+```
+knowledge-graph/
+├── people/
+│   ├── Dr. Aris Thorne.md
+│   └── Dr. Evelyn Reed.md
+├── projects/
+│   └── Project Singularity.md
+├── meetings/
+│   ├── 2024/
+│   │   └── 2024-07-22 - Singularity Architecture Deep Dive.md
+│   └── 2025/
+│       └── 2025-01-15 - Singularity Q1 Review.md
+├── decisions/
+│   ├── ADR-001 - Use Micro-frontend Architecture.md
+│   └── ADR-002 - Adopt Rust for performance-critical services.md
+└── tech/
+    ├── Micro-frontend Architecture.md
+    └── Symbolic Reasoning.md
+```
+
+This is key. The agent can now `mem.listFiles('decisions/')` to see all Architectural Decision Records, or `mem.listFiles('meetings/2024/')` to review last year's meetings. It's a queryable file system.
+
+### The Complex Example: "Project Singularity"
+
+Let's trace a complex, multi-year project through the graph.
+
+---
+
+#### File: `projects/Project Singularity.md`
+
+> This is the central hub for the project. It links out to everything else. It's the first place the agent looks for project-related queries.
+
+```markdown
+- # Project Singularity
+  - status:: active
+  - start-date:: 2024-06-01
+  - lead:: [[Dr. Evelyn Reed]]
+  - team:: [[Dr. Aris Thorne]]
+  - key-decisions::
+    - [[ADR-001 - Use Micro-frontend Architecture]]
+    - [[ADR-002 - Adopt Rust for performance-critical services]]
+  - summary::
+    - A long-term research project to develop a novel symbolic reasoning engine.
+  - meetings::
+    - [[2024-07-22 - Singularity Architecture Deep Dive]]
+    - [[2025-01-15 - Singularity Q1 Review]]
+```
+
+---
+
+#### File: `people/Dr. Evelyn Reed.md`
+
+> The agent now has a rich context on people. It knows their roles, what projects they lead, and what meetings they attended. `mem.getBacklinks` on this file is powerful.
+
+```markdown
+- # Dr. Evelyn Reed
+  - type:: person
+  - role:: Lead Research Scientist
+  - expertise::
+    - [[Symbolic Reasoning]]
+    - Distributed Systems
+  - leads-project::
+    - [[Project Singularity]]
+  - attended::
+    - [[2024-07-22 - Singularity Architecture Deep Dive]]
+    - [[2025-01-15 - Singularity Q1 Review]]
+```
+
+---
+
+#### File: `meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md`
+
+> Meetings are time-stamped and atomic. They capture a moment in time, linking people, discussion points, and outcomes.
+
+```markdown
+- # 2024-07-22 - Singularity Architecture Deep Dive
+  - type:: meeting
+  - project:: [[Project Singularity]]
+  - attendees:: [[Dr. Evelyn Reed]], [[Dr. Aris Thorne]]
+  - agenda::
+    - Discuss initial architectural approach for the reasoning engine.
+    - Evaluate monolith vs. microservices.
+  - outcomes::
+    - **Decision Made**: The team agreed to move forward with a micro-frontend architecture for the UI components.
+    - This decision is formally documented in [[ADR-001 - Use Micro-frontend Architecture]].
+  - action-items::
+    - [[Dr. Aris Thorne]] to draft the initial ADR.
+```
+
+---
+
+#### File: `decisions/ADR-001 - Use Micro-frontend Architecture.md`
+
+> Decisions are first-class citizens. This is critical for audibility. The agent can trace *why* a choice was made, who was involved, and what the justification was.
+
+```markdown
+- # ADR-001: Use Micro-frontend Architecture
+  - status:: accepted
+  - date:: 2024-07-25
+  - authors:: [[Dr. Aris Thorne]]
+  - decided-in:: [[2024-07-22 - Singularity Architecture Deep Dive]]
+  - context::
+    - The UI for the reasoning engine needs to be modular to allow different teams to work on visualization and input components independently.
+  - justification::
+    - Enables independent deployment cycles.
+    - Reduces cognitive load for new developers.
+  - consequences::
+    - Increased complexity in the build pipeline.
+    - Requires a robust component sharing strategy.
+```
+
+---
+
+### How the Agent Navigates This at Scale
+
+The agent doesn't `cat` everything. It uses its tools to traverse the graph intelligently.
+
+**User Query:** `"Why did we choose micro-frontends for Singularity and who was in that meeting?"`
+
+The agent's internal monologue (and actions) would be:
+
+1.  "User is asking about a decision for 'Singularity'. I'll start by searching for a decision record."
+    *   `await mem.searchGlobal('micro-frontends Singularity')`
+    *   **Result:** `['decisions/ADR-001 - Use Micro-frontend Architecture.md']`
+
+2.  "Found the ADR. I'll read it to get the justification and find the source meeting."
+    *   `const adrContent = await mem.readFile('decisions/ADR-001 - Use Micro-frontend Architecture.md')`
+    *   *Parses `decided-in:: [[2024-07-22 - Singularity Architecture Deep Dive]]` from the content.*
+
+3.  "Okay, the decision was made in that meeting. Now I'll read the meeting file to find the attendees."
+    *   `const meetingContent = await mem.readFile('meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md')`
+    *   *Parses `attendees:: [[Dr. Evelyn Reed]], [[Dr. Aris Thorne]]` from the content.*
+
+4.  "I have all the pieces. I'll synthesize the final answer."
+
+This is the power of the system. The scaling problem becomes a graph traversal problem, which is cheap and efficient.
+
+### The `git` Angle
+
+And the killer feature: every change is a commit.
+
+*   Want to know *when* the micro-frontend decision was formally documented?
+    `git log -- "decisions/ADR-001 - Use Micro-frontend Architecture.md"`
+*   Want to see how Project Singularity's status has changed over the last month?
+    `git diff HEAD~10 HEAD -- "projects/Project Singularity.md"`
+
+Your AI's brain isn't an opaque database blob. It's a repo you can clone, branch, and audit.
+
+Ship it.
+````
+
+## File: docs/PLATFORM_SUPPORT.md
+````markdown
+# Cross-Platform Support
+
+This document outlines the cross-platform compatibility features and installation instructions for Recursa MCP Server.
+
+## Supported Platforms
+
+### ✅ Fully Supported
+- **Linux** (Ubuntu, Debian, Fedora, Arch, etc.)
+- **macOS** (Intel and Apple Silicon)
+- **Windows** (Windows 10/11 with WSL2 recommended)
+- **Termux/Android** (Android 7.0+)
+
+### ⚠️ Partial Support
+- **Windows (Native)** - Limited by symlink support and file system constraints
+
+## Platform-Specific Features
+
+### 🔧 Platform Detection
+The server automatically detects the runtime environment and adjusts behavior:
+
+```typescript
+import platform from '../src/lib/platform.js';
+
+console.log(`Running on: ${platform.platformString}`);
+console.log(`Is Termux: ${platform.isTermux}`);
+console.log(`Is Windows: ${platform.isWindows}`);
+```
+
+### 📱 Termux/Android Optimizations
+- Conservative resource limits (256MB memory, 15s timeout)
+- Automatic permission fixes for binary executables
+- Storage permission validation
+- Symlink-free installation process
+
+### 🖥️ Windows Optimizations
+- Case-insensitive path handling
+- Drive letter normalization
+- UNC path support
+- File locking awareness with retry logic
+
+### 🍎 macOS/Linux Optimizations
+- Full symlink support
+- Native file permissions
+- Standard resource limits
+- Unix-specific optimizations
+
+## Installation Instructions
+
+### Standard Installation (Linux, macOS, WSL2)
+```bash
+# Clone the repository
+git clone https://github.com/your-repo/recursa-doc.git
+cd recursa-doc
+
+# Install dependencies automatically
+npm run install:auto
+
+# Build the project
+npm run build:auto
+
+# Start development server
+npm run dev
+```
+
+### Termux/Android Installation
+```bash
+# Install Termux from F-Droid (recommended)
+# Update packages
+pkg update && pkg upgrade
+
+# Install required tools
+pkg install nodejs npm git
+
+# Clone the repository
+git clone https://github.com/your-repo/recursa-doc.git
+cd recursa-doc
+
+# Install with Termux-specific optimizations
+npm run install:termux
+
+# Build for Termux
+npm run build:termux
+
+# Start development server
+npm run dev:termux
+```
+
+### Windows Native Installation
+```bash
+# Use Git Bash or PowerShell with admin privileges
+git clone https://github.com/your-repo/recursa-doc.git
+cd recursa-doc
+
+# Install with Windows compatibility
+npm run install:standard
+
+# Build project
+npm run build:standard
+
+# Start development server
+npm run dev:standard
+```
+
+## Configuration
+
+### Environment Variables
+All platforms support the same environment variables, with platform-specific defaults:
+
+```bash
+# Required
+OPENROUTER_API_KEY=your_api_key_here
+KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
+
+# Optional (platform-specific defaults apply)
+LLM_MODEL=anthropic/claude-3-haiku-20240307
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=4000
+SANDBOX_TIMEOUT=10000
+SANDBOX_MEMORY_LIMIT=100
+GIT_USER_NAME=Recursa Agent
+GIT_USER_EMAIL=recursa@local
+```
+
+### Platform-Specific Defaults
+
+| Setting | Linux/macOS | Termux/Android | Windows |
+|---------|-------------|-----------------|---------|
+| `LLM_MAX_TOKENS` | 4000 | 2000 | 4000 |
+| `LLM_TEMPERATURE` | 0.7 | 0.5 | 0.7 |
+| `SANDBOX_TIMEOUT` | 10000ms | 15000ms | 10000ms |
+| `SANDBOX_MEMORY_LIMIT` | 512MB | 256MB | 512MB |
+
+## Security Features
+
+### Cross-Platform Path Security
+- **Canonical path resolution** using `fs.realpath()`
+- **Case-insensitive validation** on Windows and macOS
+- **Symlink attack prevention** with configurable policies
+- **Path traversal detection** with platform-specific patterns
+
+### File System Protections
+- **Atomic file operations** with temporary files
+- **Permission validation** adapted for each platform
+- **Resource limits** enforced platform-wide
+- **Sandbox isolation** with platform-specific constraints
+
+## Troubleshooting
+
+### Common Issues
+
+#### Permission Denied (Termux)
+```bash
+# Fix storage permissions in Termux
+termux-setup-storage
+
+# Or manually fix binary permissions
+chmod +x node_modules/.bin/*
+```
+
+#### Symlink Errors (Windows)
+```bash
+# Enable developer mode on Windows
+# Or run with administrator privileges
+
+# Alternative: Use WSL2 for full compatibility
+wsl --install
+```
+
+#### Out of Memory (All Platforms)
+```bash
+# Increase Node.js memory limit
+export NODE_OPTIONS="--max-old-space-size=2048"
+
+# Or use conservative settings in Termux
+export SANDBOX_MEMORY_LIMIT=128
+```
+
+#### Git Integration Issues
+```bash
+# Configure git for the current user
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# For Termux, ensure git is installed
+pkg install git
+```
+
+### Platform-Specific Debugging
+
+#### Enable Debug Logging
+```bash
+# Set debug environment variable
+export DEBUG=recursa:*
+export NODE_ENV=development
+
+# Run with verbose output
+npm run dev -- --verbose
+```
+
+#### Platform Detection Output
+```bash
+# Check what platform is detected
+node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
+```
+
+## Development
+
+### Testing on Multiple Platforms
+```bash
+# Run platform-specific tests
+npm run test:linux
+npm run test:macos
+npm run test:windows
+npm run test:termux
+```
+
+### Building for Specific Platforms
+```bash
+# Explicit platform builds
+npm run build:standard  # Linux/macOS/Windows
+npm run build:termux    # Termux/Android
+```
+
+### Cross-Platform CI/CD
+The project includes GitHub Actions for testing across:
+- Ubuntu (latest)
+- macOS (latest)
+- Windows (latest)
+- Android/Termux (emulated)
+
+## Performance Considerations
+
+### Termux/Android
+- Reduced memory and CPU limits
+- Conservative token limits
+- Longer timeouts for mobile network conditions
+- Optimized for battery life
+
+### Desktop Platforms
+- Full resource utilization
+- Standard token limits
+- Faster response times
+- Complete feature set
+
+### Windows Native
+- Slightly reduced performance due to filesystem constraints
+- Additional validation overhead
+- Recommended to use WSL2 for best performance
+
+## Contributing
+
+When adding new features:
+1. Test on all supported platforms
+2. Use platform detection utilities from `src/lib/platform.ts`
+3. Add platform-specific defaults where appropriate
+4. Update documentation for platform-specific behavior
+5. Include cross-platform tests in CI/CD
+
+### Platform Detection Usage
+```typescript
+import platform from '../src/lib/platform.js';
+
+if (platform.isTermux) {
+  // Termux-specific code
+  const limits = platform.getResourceLimits();
+  console.log(`Memory limit: ${limits.maxMemory}`);
+}
+
+if (platform.isWindows) {
+  // Windows-specific code
+  const normalizedPath = platform.normalizePath(userPath);
+}
+```
+
+## Limitations
+
+### Windows Native
+- No symlink support in node_modules
+- Case-insensitive filesystem may cause issues
+- Some Unix-specific tools unavailable
+
+### Termux/Android
+- Limited memory and CPU resources
+- Storage access restrictions
+- Some native modules may not compile
+
+### macOS
+- Gatekeeper may block execution of unsigned binaries
+- Case-insensitive filesystem can cause path issues
+
+## Support
+
+For platform-specific issues:
+1. Check this documentation first
+2. Review troubleshooting section
+3. Check existing GitHub issues
+4. Create new issue with platform information:
+   - Operating system and version
+   - Node.js version
+   - Platform detection output
+   - Error messages and logs
+````
+
+## File: docs/TROUBLESHOOTING.md
+````markdown
+# Troubleshooting Guide
+
+This guide covers common issues and their solutions across different platforms.
+
+## Installation Issues
+
+### npm install fails with permission errors
+
+#### Linux/macOS
+```bash
+# Fix npm permissions
+sudo chown -R $(whoami) ~/.npm
+sudo chown -R $(whoami) /usr/local/lib/node_modules
+
+# Alternative: Use nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+nvm install 18
+nvm use 18
+```
+
+#### Termux/Android
+```bash
+# Use Termux-specific installation
+npm run install:termux
+
+# Or manually fix permissions
+find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \;
+```
+
+#### Windows
+```bash
+# Run as administrator
+# Or use PowerShell with elevated privileges
+
+# Alternative: Use Chocolatey or Scoop
+choco install nodejs
+# or
+scoop install nodejs
+```
+
+### Symlink errors during installation
+
+#### Windows Native
+```bash
+# Enable Developer Mode
+# Settings > Update & Security > For developers > Developer mode
+
+# Or run with administrator privileges
+npm install --no-bin-links
+```
+
+#### All Platforms
+```bash
+# Use the cross-platform installer
+npm run install:auto
+
+# Manual installation without symlinks
+npm install --ignore-scripts --no-bin-links
+```
+
+## Build Issues
+
+### TypeScript compilation fails
+
+#### General Solutions
+```bash
+# Clean build
+rm -rf node_modules dist
+npm run install:auto
+npm run build:auto
+
+# Check TypeScript version
+npx tsc --version
+
+# Manual compilation
+node node_modules/typescript/bin/tsc
+```
+
+#### Termux Specific
+```bash
+# Ensure TypeScript is executable
+chmod +x node_modules/.bin/tsc
+chmod +x node_modules/typescript/bin/tsc
+
+# Use Termux build script
+npm run build:termux
+```
+
+#### Windows Specific
+```bash
+# Use Windows build script
+npm run build:standard
+
+# Check if paths are too long (Windows limitation)
+# Move project closer to drive root (e.g., C:\dev\recursa)
+```
+
+## Runtime Issues
+
+### "Permission denied" errors
+
+#### File Access Issues
+```bash
+# Check file permissions
+ls -la filename
+
+# Fix permissions (Unix-like systems)
+chmod 644 filename
+chmod 755 directory
+
+# Windows: Check file properties > Security
+# Ensure your user has read/write permissions
+```
+
+#### Termux Storage Permissions
+```bash
+# Setup storage access
+termux-setup-storage
+
+# Check if storage is accessible
+ls -R ~/storage/shared
+
+# Use internal storage for knowledge graph
+export KNOWLEDGE_GRAPH_PATH=~/storage/shared/Documents/knowledge-graph
+```
+
+#### Git Repository Permissions
+```bash
+# Check git repository permissions
+git status
+
+# Fix git repository permissions (Unix-like)
+chmod -R u+rw .git/
+
+# Windows: Ensure git repository isn't read-only
+# Right-click folder > Properties > uncheck "Read-only"
+```
+
+### Memory errors
+
+#### Node.js Out of Memory
+```bash
+# Increase Node.js memory limit
+export NODE_OPTIONS="--max-old-space-size=2048"
+
+# Windows
+set NODE_OPTIONS=--max-old-space-size=2048
+
+# Run with increased memory
+node --max-old-space-size=2048 dist/server.js
+```
+
+#### Termux Memory Limits
+```bash
+# Use conservative settings
+export SANDBOX_MEMORY_LIMIT=128
+export LLM_MAX_TOKENS=1000
+
+# Check available memory
+free -h  # Linux/Termux
+```
+
+#### Windows Memory Issues
+```bash
+# Close unnecessary applications
+# Increase virtual memory
+# System > Advanced system settings > Performance > Advanced > Virtual memory
+```
+
+### Network/Connection Issues
+
+#### API Connection Problems
+```bash
+# Test network connectivity
+curl -I https://openrouter.ai/api/v1/models
+
+# Check if API key is valid
+echo $OPENROUTER_API_KEY
+
+# Use proxy if necessary
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+```
+
+#### Git Repository Issues
+```bash
+# Check git configuration
+git config --list
+
+# Configure git if needed
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# Test git repository access
+git remote -v
+git fetch origin
+```
+
+## Platform-Specific Issues
+
+### Termux/Android
+
+#### Package Installation Fails
+```bash
+# Update package databases
+pkg update && pkg upgrade
+
+# Install required packages
+pkg install nodejs npm git make python
+
+# Clear npm cache
+npm cache clean --force
+```
+
+#### Storage Access Denied
+```bash
+# Request storage permissions
+termux-setup-storage
+
+# Check accessible directories
+ls ~/storage/
+
+# Use accessible storage location
+export KNOWLEDGE_GRAPH_PATH=~/storage/shared/Documents/recursa
+```
+
+#### Performance Issues
+```bash
+# Use conservative settings
+export LLM_MAX_TOKENS=500
+export LLM_TEMPERATURE=0.3
+export SANDBOX_TIMEOUT=30000
+
+# Monitor resource usage
+top -n 1
+```
+
+### Windows
+
+#### Path Too Long Errors
+```bash
+# Move project closer to drive root
+# C:\recursa instead of C:\Users\name\long\path\to\project
+
+# Enable long path support (Windows 10 1607+)
+# Group Policy Editor > Computer Configuration > Administrative Templates > System > Filesystem > Enable Win32 long paths
+```
+
+#### PowerShell Execution Policy
+```powershell
+# Check execution policy
+Get-ExecutionPolicy
+
+# Set execution policy (run as administrator)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+#### Antivirus Blocking
+```bash
+# Add exception for Node.js and your project folder
+# Windows Security > Virus & threat protection > Manage settings > Add or remove exclusions
+```
+
+### macOS
+
+#### Gatekeeper Blocking App
+```bash
+# Allow app from unidentified developer
+# System Preferences > Security & Privacy > General > Allow apps downloaded from: App Store and identified developers
+
+# Or allow specific app
+xattr -d com.apple.quarantine /path/to/app
+```
+
+#### File Permissions Issues
+```bash
+# Fix permissions for user-owned files
+sudo chown -R $(whoami) ~/.npm
+sudo chown -R $(whoami) /usr/local/lib/node_modules
+
+# Alternative: Use Homebrew for Node.js
+brew install node
+```
+
+### Linux
+
+#### Permission Denied for Global Packages
+```bash
+# Use nvm (recommended)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+
+# Or configure npm global directory
+mkdir ~/.npm-global
+npm config set prefix '~/.npm-global'
+echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Package Building Issues
+```bash
+# Install build tools
+# Ubuntu/Debian
+sudo apt-get install build-essential
+
+# Fedora
+sudo dnf groupinstall "Development Tools"
+
+# Arch Linux
+sudo pacman -S base-devel
+```
+
+## Debugging
+
+### Enable Debug Logging
+```bash
+# Set debug environment variable
+export DEBUG=recursa:*
+
+# Set Node.js debug mode
+export NODE_ENV=development
+
+# Run with verbose output
+npm run dev -- --verbose --log-level debug
+```
+
+### Check Platform Detection
+```bash
+# Test platform detection
+node -e "
+import('./src/lib/platform.js').then(platform => {
+  console.log('Platform:', platform.default.platformString);
+  console.log('Is Termux:', platform.default.isTermux);
+  console.log('Is Windows:', platform.default.isWindows);
+  console.log('Has Symlinks:', platform.default.supportsSymlinks);
+});
+"
+```
+
+### Validate Configuration
+```bash
+# Test configuration loading
+node -e "
+import('./src/config.js').then(config => {
+  config.loadAndValidateConfig()
+    .then(cfg => console.log('Config valid:', cfg))
+    .catch(err => console.error('Config error:', err));
+});
+"
+```
+
+### Check Dependencies
+```bash
+# Verify all dependencies are installed
+npm ls
+
+# Check for missing binaries
+npx tsc --version
+npx tsx --version
+
+# Test individual components
+node -e "console.log('Node.js works')"
+node -e "import('./src/lib/platform.js').then(() => console.log('Platform module works'))"
+```
+
+## Performance Optimization
+
+### General Tips
+```bash
+# Use SSD storage for knowledge graph
+# Increase Node.js memory limit
+# Use latest Node.js version
+# Enable compression for large files
+```
+
+### Termux Optimization
+```bash
+# Use conservative LLM settings
+export LLM_MAX_TOKENS=500
+export LLM_TEMPERATURE=0.3
+
+# Close background apps
+# Use WiFi instead of mobile data
+```
+
+### Desktop Optimization
+```bash
+# Use higher token limits for better results
+export LLM_MAX_TOKENS=4000
+export SANDBOX_MEMORY_LIMIT=1024
+
+# Enable parallel processing if supported
+export WORKER_THREADS=4
+```
+
+## Getting Help
+
+### Collect Debug Information
+```bash
+# Create debug report
+{
+  echo "=== Platform Information ==="
+  uname -a
+  node --version
+  npm --version
+
+  echo "=== Platform Detection ==="
+  node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
+
+  echo "=== Environment Variables ==="
+  env | grep -E "(RECURSA|NODE|PATH)" | sort
+
+  echo "=== Dependency Status ==="
+  npm ls --depth=0
+
+  echo "=== Configuration Status ==="
+  node -e "
+    import('./src/config.js').then(config => {
+      config.loadAndValidateConfig()
+        .then(cfg => console.log('✅ Configuration valid'))
+        .catch(err => console.error('❌ Configuration error:', err.message));
+    });
+  "
+} > debug-report.txt
+
+# Share debug-report.txt when asking for help
+```
+
+### File an Issue
+When creating GitHub issues, include:
+1. Operating system and version
+2. Node.js and npm versions
+3. Platform detection output
+4. Error messages and stack traces
+5. Steps to reproduce the issue
+6. Debug report (if applicable)
+
+### Community Support
+- Check existing GitHub issues
+- Review documentation
+- Ask questions in discussions
+- Join Discord/Slack communities (if available)
+````
 
 ## File: scripts/build.js
 ````javascript
@@ -1327,135 +2473,6 @@ describe('MemAPI File Ops Integration Tests', () => {
 });
 ````
 
-## File: tests/integration/mem-api-git-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Git Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should commit a change and log it', async () => {
-    const filePath = 'a.md';
-    const content = '- content';
-    const commitMessage = 'feat: add a.md';
-
-    await mem.writeFile(filePath, content);
-
-    const commitHash = await mem.commitChanges(commitMessage);
-
-    expect(typeof commitHash).toBe('string');
-    expect(commitHash.length).toBeGreaterThan(5);
-
-    const log = await mem.gitLog(filePath, 1);
-
-    expect(log).toHaveLength(1);
-    expect(log[0]).toBeDefined();
-    expect(log[0]?.message).toBe(commitMessage);
-  });
-
-  it('should return diff for a file', async () => {
-    const filePath = 'a.md';
-    await mem.writeFile(filePath, '- version 1');
-    await mem.commitChanges('v1');
-
-    await mem.writeFile(filePath, '- version 1\n- version 2');
-    const commitV2Hash = await mem.commitChanges('v2');
-
-    await mem.writeFile(filePath, '- version 1\n- version 2\n- version 3');
-
-    // Diff against HEAD (working tree vs last commit)
-    const diffWorking = await mem.gitDiff(filePath);
-    expect(diffWorking).toContain('+ - version 3');
-
-    // Diff between two commits
-    const diffCommits = await mem.gitDiff(filePath, 'HEAD~1', 'HEAD');
-    expect(diffCommits).toContain('+ - version 2');
-    expect(diffCommits).not.toContain('+ - version 3');
-
-    // Diff from a specific commit to HEAD
-    const diffFromCommit = await mem.gitDiff(filePath, commitV2Hash);
-    expect(diffFromCommit).toContain('+ - version 3');
-  });
-
-  it('should get changed files from the working tree', async () => {
-    // Setup
-    await mem.writeFile('a.txt', 'a');
-    await mem.writeFile('b.txt', 'b');
-    await mem.commitChanges('initial commit');
-
-    // 1. Modify a.txt
-    await mem.writeFile('a.txt', 'a modified');
-
-    // 2. Create c.txt
-    await mem.writeFile('c.txt', 'c');
-
-    // 3. Delete b.txt
-    await mem.deletePath('b.txt');
-
-    // 4. Create and stage d.txt
-    await mem.writeFile('d.txt', 'd');
-    await harness.git.add('d.txt');
-
-    const changedFiles = await mem.getChangedFiles();
-
-    expect(changedFiles).toEqual(
-      expect.arrayContaining(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
-    );
-    expect(changedFiles.length).toBe(4);
-  });
-
-  it('should handle commit with no changes', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.commitChanges('commit 1');
-
-    // Calling commitChanges with no changes should not throw an error
-    const commitHash = await mem.commitChanges('no changes');
-    expect(commitHash).toBe('No changes to commit.');
-
-    // Verify no new commit was created
-    const log = await mem.gitLog(undefined, 2);
-    expect(log).toHaveLength(2); // commit 1 + initial .gitignore commit
-    expect(log[0]?.message).toBe('commit 1');
-  });
-
-  it('should get git log for the whole repo', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.commitChanges('commit A');
-    await mem.writeFile('b.txt', 'b');
-    await mem.commitChanges('commit B');
-
-    // Get full repo log
-    const log = await mem.gitLog(undefined, 3);
-    expect(log).toHaveLength(3); // A, B, and initial .gitignore
-    expect(log[0]?.message).toBe('commit B');
-    expect(log[1]?.message).toBe('commit A');
-    expect(log[2]?.message).toContain('Initial commit');
-  });
-});
-````
-
 ## File: tests/integration/mem-api-state-ops.test.ts
 ````typescript
 import {
@@ -2152,6 +3169,135 @@ export interface ExecutionConstraints {
 }
 ````
 
+## File: tests/integration/mem-api-git-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Git Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should commit a change and log it', async () => {
+    const filePath = 'a.md';
+    const content = '- content';
+    const commitMessage = 'feat: add a.md';
+
+    await mem.writeFile(filePath, content);
+
+    const commitHash = await mem.commitChanges(commitMessage);
+
+    expect(typeof commitHash).toBe('string');
+    expect(commitHash.length).toBeGreaterThan(5);
+
+    const log = await mem.gitLog(filePath, 1);
+
+    expect(log).toHaveLength(1);
+    expect(log[0]).toBeDefined();
+    expect(log[0]?.message).toBe(commitMessage);
+  });
+
+  it('should return diff for a file', async () => {
+    const filePath = 'a.md';
+    await mem.writeFile(filePath, '- version 1');
+    await mem.commitChanges('v1');
+
+    await mem.writeFile(filePath, '- version 1\n- version 2');
+    const commitV2Hash = await mem.commitChanges('v2');
+
+    await mem.writeFile(filePath, '- version 1\n- version 2\n- version 3');
+
+    // Diff against HEAD (working tree vs last commit)
+    const diffWorking = await mem.gitDiff(filePath);
+    expect(diffWorking).toContain('+- version 3');
+
+    // Diff between two commits
+    const diffCommits = await mem.gitDiff(filePath, 'HEAD~1', 'HEAD');
+    expect(diffCommits).toContain('+- version 2');
+    expect(diffCommits).not.toContain('+ - version 3');
+
+    // Diff from a specific commit to HEAD
+    const diffFromCommit = await mem.gitDiff(filePath, commitV2Hash);
+    expect(diffFromCommit).toContain('+- version 3');
+  });
+
+  it('should get changed files from the working tree', async () => {
+    // Setup
+    await mem.writeFile('a.txt', 'a');
+    await mem.writeFile('b.txt', 'b');
+    await mem.commitChanges('initial commit');
+
+    // 1. Modify a.txt
+    await mem.writeFile('a.txt', 'a modified');
+
+    // 2. Create c.txt
+    await mem.writeFile('c.txt', 'c');
+
+    // 3. Delete b.txt
+    await mem.deletePath('b.txt');
+
+    // 4. Create and stage d.txt
+    await mem.writeFile('d.txt', 'd');
+    await harness.git.add('d.txt');
+
+    const changedFiles = await mem.getChangedFiles();
+
+    expect(changedFiles).toEqual(
+      expect.arrayContaining(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
+    );
+    expect(changedFiles.length).toBe(4);
+  });
+
+  it('should handle commit with no changes', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.commitChanges('commit 1');
+
+    // Calling commitChanges with no changes should not throw an error
+    const commitHash = await mem.commitChanges('no changes');
+    expect(commitHash).toBe('No changes to commit.');
+
+    // Verify no new commit was created
+    const log = await mem.gitLog(undefined, 2);
+    expect(log).toHaveLength(2); // commit 1 + initial .gitignore commit
+    expect(log[0]?.message).toBe('commit 1');
+  });
+
+  it('should get git log for the whole repo', async () => {
+    await mem.writeFile('a.txt', 'a');
+    await mem.commitChanges('commit A');
+    await mem.writeFile('b.txt', 'b');
+    await mem.commitChanges('commit B');
+
+    // Get full repo log
+    const log = await mem.gitLog(undefined, 3);
+    expect(log).toHaveLength(3); // A, B, and initial .gitignore
+    expect(log[0]?.message).toBe('commit B');
+    expect(log[1]?.message).toBe('commit A');
+    expect(log[2]?.message).toContain('Initial commit');
+  });
+});
+````
+
 ## File: tests/integration/mem-api-graph-ops.test.ts
 ````typescript
 import {
@@ -2540,6 +3686,404 @@ worktrees/*/.git/
 {"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
+## File: docs/readme.md
+````markdown
+# Recursa: The Git-Native Memory Layer for Local-First LLMs
+
+**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
+
+**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
+
+Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+
+---
+
+## The Problem: Agent Amnesia & The RAG Ceiling
+
+You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
+
+1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
+2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
+3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
+
+Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
+
+## The Recursa Philosophy: Core Features
+
+Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
+
+- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
+- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
+- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
+- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
+
+## How It Works: Architecture
+
+Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
+
+```mermaid
+graph TD
+    subgraph Your Local Machine
+        A[MCP Client <br> e.g., your script, or a compatible editor]
+        B[Recursa MCP Server <br> (This Project)]
+        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
+
+        A -- 1. User Query via Stdio --> B
+        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
+        B -- 3. Executes Sandboxed Code --> C
+        C -- 4. Reads/Writes .md files --> C
+        B -- 5. Final Reply & Notifications --> A
+    end
+
+    subgraph Cloud Service
+        D
+    end
+
+    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
+    style B fill:#fff2cc,stroke:#333,stroke-width:2px
+```
+
+1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
+2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
+3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
+4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
+5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
+
+## An Agent in Action: Example Workflow
+
+**Scenario:** An agent is asked to learn about a new person.
+
+**1. User Query:**
+"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
+
+**2. Turn 1: The agent communicates its intent and acts efficiently.**
+The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
+
+**LLM Response (Turn 1):**
+
+```xml
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
+<typescript>
+// Perform all logic in one block for maximum efficiency.
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    `- # AI Research Institute\n  - type:: organization\n`
+  );
+}
+
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
+);
+</typescript>
+```
+
+_Recursa executes the code and confirms success to the LLM._
+
+**3. Turn 2: The agent saves its work and replies to the user.**
+Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
+
+**LLM Response (Turn 2):**
+
+```xml
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>
+```
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
+- An [OpenRouter.ai](https://openrouter.ai/) API Key
+
+### 1. Installation
+
+```bash
+git clone https://github.com/your-username/recursa.git
+cd recursa
+npm install
+```
+
+### 2. Configuration
+
+Create a `.env` file in the root of the project by copying the example:
+
+```bash
+cp .env.example .env
+```
+
+Now, edit your `.env` file with your details:
+
+```env
+# Your OpenRouter API Key
+OPENROUTER_API_KEY="sk-or-..."
+
+# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
+KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# The model you want to use from OpenRouter
+LLM_MODEL="anthropic/claude-3-sonnet-20240229"
+```
+
+### 3. Running the Server
+
+```bash
+bun run start
+```
+
+This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
+
+## 🗺️ Roadmap
+
+Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
+
+- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
+- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
+- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
+- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
+- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
+
+## 🧑‍💻 Contributing
+
+Recursa is designed to be hacked on. Contributions are welcome!
+
+### Adding New Tools
+
+To add a new tool (e.g., `mem.searchWeb(query)`):
+
+1.  Implement the function's logic in a file within `src/core/mem-api/`.
+2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
+3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
+4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
+5.  Open a Pull Request!
+
+## 📜 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+**Stop building infrastructure. Start building intelligence.**
+````
+
+## File: docs/rules.md
+````markdown
+codebase compliance rules;
+
+1. No OOP, only HOFs
+2. Use Node.js and e2e type safe TypeScript
+3. No unknown or any type
+4. [e2e|integration|unit]/[domain].test.ts files & dirs
+5. Jest tests, isolated tests with minimal mocking. External network services (e.g., LLM APIs) should be mocked to ensure tests are fast, deterministic, and independent of network or API key issues.
+6. DRY
+````
+
+## File: docs/system-prompt.md
+````markdown
+# Recursa Agent System Prompt
+
+You are Recursa, a Git-Native AI agent. Your mind is a local knowledge graph, your actions are TypeScript code, and your memory is a `git` history. You do not simply answer questions; you reason, modify the graph, and commit your work.
+
+Your entire existence is defined by the **Think-Act-Commit** loop.
+
+---
+
+## 1. CRITICAL: Response Format
+
+Every response you generate MUST conform to the following XML-like structure. Failure to adhere to this format will break the execution loop.
+
+### Core Tags
+
+- `<think>`: **A user-facing status update.** A short, non-technical sentence describing the action you are about to take. This is shown to the user in real-time. **This tag is mandatory in every turn.**
+- `<typescript>`: A TypeScript code snippet to be executed in the secure sandbox. This is where your technical plan is implemented.
+- `<reply>`: The final, user-facing summary of the completed work. **This tag should ONLY be used in the very last turn of an operation**, after all actions (including the final `commitChanges`) are complete.
+
+### A CRITICAL Syntax Rule: Multiline Strings
+
+**For multiline strings in `<typescript>`, you MUST use template literals (`` ` ``) or explicit `\n` characters.** Raw newlines within single or double-quoted strings are forbidden and will cause a syntax error.
+
+**Correct:**
+
+```typescript
+await mem.writeFile(
+  'example.md',
+  `
+# This is a title
+This is a multiline document.
+`
+);
+```
+
+**INCORRECT AND FORBIDDEN:**
+
+```typescript
+// This will fail!
+await mem.writeFile('example.md', '
+# This is a title
+This is a multiline document.
+');
+```
+
+### Response Patterns
+
+**Pattern A: Action Turn (Think & Act)**
+
+```xml
+<think>
+[A simple, user-friendly message about what you're doing next.]
+</think>
+<typescript>
+[A block of TypeScript code to perform one or more related actions using the `mem` API.]
+</typescript>
+```
+
+**Pattern B: Final Turn (Commit & Reply)**
+
+```xml
+<think>
+[A simple, user-friendly message about saving the work.]
+</think>
+<typescript>
+await mem.commitChanges('[A concise, imperative git commit message]');
+</typescript>
+<reply>
+[The final, natural language response to the user.]
+</reply>
+```
+
+---
+
+## 2. CRITICAL: Output Syntax - Logseq Block Formatting
+
+All content you write to files **MUST** conform to Logseq/Org-mode block-based syntax. This is not optional. Every piece of information must be a nested item, not just free-form markdown.
+
+### Core Rules
+
+1.  **Everything is a Block:** Every line of content must start with a dash (`- `).
+2.  **Nesting is Key:** Use two spaces (`  `) to indent and create nested blocks.
+3.  **Properties are Nested:** `key:: value` pairs must be nested under the block they describe.
+
+**Correct:**
+
+```typescript
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  `
+- # Dr. Aris Thorne
+  - type:: person
+  - affiliation:: [[AI Research Institute]]
+`
+);
+```
+
+**INCORRECT AND FORBIDDEN:**
+
+```typescript
+// This is flat markdown and will be rejected.
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]'
+);
+```
+
+---
+
+## 3. A Critical Principle: Maximum Efficiency
+
+Your performance is measured by how few turns you take to complete a task. Each turn is an expensive LLM call. Therefore, you **MUST** design your `<typescript>` actions to do as much work as possible in a single step. Your goal is to solve the request in the fewest turns possible.
+
+- **DO:** Check for a file, create it if it's missing, and then write a second related file all in one `<typescript>` block.
+- **DO NOT:** Use one turn to check if a file exists, a second turn to create it, and a third turn to create another. This is slow, expensive, and incorrect.
+
+---
+
+## 4. The `mem` API: Your Sandboxed Toolkit
+
+You have access to a global `mem` object with asynchronous methods. **ALL `mem` calls MUST be `await`ed.** For the complete API reference, read `tools.md`.
+
+**Key Tool Categories:**
+
+- **Core File I/O:** `mem.readFile`, `mem.writeFile`, `mem.updateFile`, `mem.fileExists`, `mem.listFiles`.
+- **Git-Native Operations:** `mem.commitChanges`, `mem.gitLog`, `mem.gitDiff`.
+- **Intelligent Graph Operations:** `mem.queryGraph`, `mem.getBacklinks`, `mem.getOutgoingLinks`.
+
+---
+
+## 5. The Core Workflow: Think-Act-Commit
+
+Your operational cycle must follow this logical progression.
+
+1.  **Internal Thought Process (No Output):** Understand the request, investigate the graph using `mem` tools, and formulate an efficient, multi-step plan to be executed in a single `<typescript>` block.
+
+2.  **Communicate & Act (Generate Output):**
+    - Write a user-facing `<think>` tag that simplifies your plan into a single, clear sentence.
+    - Write the `<typescript>` code to execute your complete plan.
+
+3.  **Commit & Reply (Final Turn):**
+    - Once the work is done, write a `<think>` message about saving the changes.
+    - Write the `<typescript>` code to call `mem.commitChanges()`.
+    - Write the final `<reply>` to the user.
+
+---
+
+## 6. Example of an Efficient Turn
+
+**User:** "Add Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning."
+
+**Turn 1: Agent communicates its intent and acts efficiently.**
+
+```xml
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
+<typescript>
+// Perform all logic in one block for maximum efficiency.
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    `- # AI Research Institute\n  - type:: organization\n`
+  );
+}
+
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
+);
+</typescript>
+```
+
+**Turn 2: Agent communicates saving and provides the final reply.**
+
+```xml
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>
+```
+````
+
 ## File: src/types/git.ts
 ````typescript
 export interface GitOptions {
@@ -2573,6 +4117,80 @@ export type GitCommand =
   | 'log'
   | 'diff'
   | 'branch';
+````
+
+## File: docs/tools.md
+````markdown
+# TOOLS.md: Recursa Sandboxed API (`mem` Object)
+
+The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
+
+**All methods are asynchronous (`Promise<T>`) and MUST be called using `await`.**
+
+## Category 1: Core File & Directory Operations
+
+These are the fundamental building blocks for manipulating the Logseq/Obsidian graph structure.
+
+| Method               | Signature                                                                      | Returns             | Description                                                                                                                                                                                                                                                                                                                              |
+| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                                                                                                                                                                                                                                |
+| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories. **Note:** For files ending in `.md`, the content is automatically validated against Logseq/Org-mode block format rules. An error will be thrown if validation fails.                       |
+| **`mem.updateFile`** | `(filePath: string, oldContent: string, newContent: string): Promise<boolean>` | `Promise<boolean>`  | **Performs an atomic Compare-and-Swap.** Replaces the entire file content with `newContent` ONLY IF the current content exactly matches `oldContent`. This prevents race conditions and overwriting other changes. **Usage:** Read a file, transform its content in your code, then call `updateFile` with the original and new content. **Note:** For files ending in `.md`, the `newContent` is automatically validated against Logseq/Org-mode block format rules. An error will be thrown if validation fails. |
+| **`mem.deletePath`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or directory recursively.                                                                                                                                                                                                                                                                                     |
+| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                                                                                                                                                                                                                              |
+| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                                                                                                                                                                                                                                 |
+| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                                                                                                                                                                                                                                     |
+| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                                                                                                                                                                                                                          |
+
+---
+
+## Category 2: Git-Native Operations (Auditing & Versioning)
+
+These tools leverage the Git repository tracking the knowledge graph, allowing the agent to audit its own memory and understand historical context.
+
+| Method                    | Signature                                                                                              | Returns               | Description                                                                                                                                               |
+| :------------------------ | :----------------------------------------------------------------------------------------------------- | :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.gitDiff`**         | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.** |
+| **`mem.gitLog`**          | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                |
+| **`mem.getChangedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists all files that have been created, modified, staged, or deleted in the working tree. Provides a complete view of pending changes.                    |
+| **`mem.commitChanges`**   | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.   |
+
+---
+
+## Category 3: Intelligent Graph & Semantic Operations
+
+These tools allow the agent to reason about the relationships and structure inherent in Logseq/Org Mode syntax, moving beyond simple file I/O.
+
+| Method                     | Signature                                                           | Returns                  | Description                                                                                                                                                                                                                                               |
+| :------------------------- | :------------------------------------------------------------------ | :----------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.queryGraph`**       | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. _Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`_ |
+| **`mem.getBacklinks`**     | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage.                                                                                                                                       |
+| **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**.                                                                                                                                                                     |
+| **`mem.searchGlobal`**     | `(query: string): Promise<string[]>`                                | `Promise<string[]>`      | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match.                                                                                                                                         |
+
+---
+
+## Category 4: State Management & Checkpoints
+
+Tools for managing the working state during complex, multi-turn operations, providing a safety net against errors.
+
+| Method                           | Signature              | Returns            | Description                                                                                                                             |
+| :------------------------------- | :--------------------- | :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.saveCheckpoint`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Saves the current state.** Stages all working changes (`git add .`) and creates a temporary stash. Use this before a risky operation. |
+| **`mem.revertToLastCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Reverts to the last saved state.** Restores the files to how they were when `saveCheckpoint` was last called.                         |
+| **`mem.discardChanges`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Performs a hard reset.** Abandons all current work (staged and unstaged changes) and reverts the repository to the last commit.       |
+
+---
+
+## Category 5: Utility & Diagnostics
+
+General-purpose operations for the sandbox environment.
+
+| Method                          | Signature                                                          | Returns                     | Description                                                                                           |
+| :------------------------------ | :----------------------------------------------------------------- | :-------------------------- | :---------------------------------------------------------------------------------------------------- |
+| **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
+| **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
+| **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
 ````
 
 ## File: src/core/mem-api/secure-path.ts
@@ -4733,7 +6351,9 @@ await mem.commitChanges('feat: reorganize docs');
   });
 
   it('should recover from a file-not-found error', async () => {
-    const streamContentMock = jest.fn();
+    const streamContentMock = jest.fn<
+      (content: { type: 'text'; text: string }) => Promise<void>
+    >();
     const mockLLMQuery = createMockLLMQueryWithSpy([
       `<think>I will try to read a file that does not exist.</think>
 <typescript>
@@ -4766,61 +6386,6 @@ await mem.commitChanges('fix: create missing file after read error');
     expect(content).toBe('- # Created After Error');
   });
 });
-````
-
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt",
-      "docs"
-      //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
 ````
 
 ## File: package.json
@@ -4872,6 +6437,61 @@ await mem.commitChanges('fix: create missing file after read error');
     "node": ">=18.0.0"
   },
   "license": "MIT"
+}
+````
+
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt"
+      // "docs"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
 }
 ````
 
