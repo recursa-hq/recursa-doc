@@ -60,7 +60,7 @@ describe('MemAPI Util Ops Integration Tests', () => {
 
   it('should throw an error when counting tokens for a non-existent file', async () => {
     await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
-      /Failed to read file/
+      /Failed to count tokens for not-real.txt/
     );
   });
 });

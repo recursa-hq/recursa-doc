@@ -57,6 +57,7 @@ export const getChangedFiles =
         ...status.modified,
         ...status.created,
         ...status.deleted,
+        ...status.not_added, // Add untracked files
         ...status.renamed.map((r) => r.to),
       ]);
       return Array.from(allFiles);
