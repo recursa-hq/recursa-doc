@@ -1,6 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import type { TestHarnessState } from './test-harness';
-import type { MCPRequest, MCPResponse } from '../../src/types';
+import type {
+  MCPRequest,
+  MCPResponse,
+  MCPNotification,
+} from '../../src/types';
 
 export const spawnServer = (
   harness: TestHarnessState
@@ -29,9 +33,11 @@ export const writeMCPRequest = (
   serverProcess.stdin.write(message);
 };
 
+export type MCPMessage = MCPResponse | MCPNotification;
+
 export async function* readMCPMessages(
   serverProcess: ChildProcessWithoutNullStreams
-): AsyncGenerator<MCPResponse> {
+): AsyncGenerator<MCPMessage> {
   let buffer = '';
   for await (const chunk of serverProcess.stdout) {
     buffer += chunk.toString();
@@ -42,11 +48,7 @@ export async function* readMCPMessages(
       if (line.trim()) {
         try {
           const parsed = JSON.parse(line);
-          // FastMCP can send notifications which don't have an ID.
-          // This reader is for responses, so we'll filter them.
-          if ('id' in parsed) {
-            yield parsed as MCPResponse;
-          }
+          yield parsed as MCPMessage;
         } catch (error) {
           console.error('Failed to parse MCP message:', line);
         }

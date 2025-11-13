@@ -243,8 +243,9 @@ export const fileExists =
       await fs.access(fullPath);
       return true;
     } catch (error: unknown) {
-      // Check for ENOENT error more robustly
-      if (hasErrorCode(error) && error.code === 'ENOENT') {
+      // fs.access throws an error if path doesn't exist. We expect ENOENT and should return false.
+      // For other errors (e.g., permission issues), let the error propagate through our handler.
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
         return false;
       }
       throw handleFileError(error, 'check file existence', filePath);

@@ -42,7 +42,7 @@ src/
 tests/
   e2e/
     agent-workflow.test.ts
-    mcp-protocol.test.ts
+    mcp-workflow.test.ts
   integration/
     mem-api.test.ts
     workflow.test.ts
@@ -75,64 +75,296 @@ tsconfig.tsbuildinfo
 
 # Files
 
-## File: tests/lib/test-util.ts
+## File: tests/e2e/mcp-workflow.test.ts
 ````typescript
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
-import type { TestHarnessState } from './test-harness';
-import type { MCPRequest, MCPResponse } from '../../src/types';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import {
+  spawnServer,
+  writeMCPRequest,
+  readMCPMessages,
+  type MCPMessage,
+} from '../lib/test-util';
+import type { MCPError, MCPNotification, MCPResponse } from '../../src/types';
+import { queryLLMWithRetries } from '../../src/core/llm';
 
-export const spawnServer = (
-  harness: TestHarnessState
-): ChildProcessWithoutNullStreams => {
-  const serverProcess = spawn('node', ['dist/server.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
-      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
-    },
+// Mock the entire LLM module to control agent behavior
+jest.mock('../../src/core/llm', () => ({
+  queryLLMWithRetries: jest.fn<() => Promise<string>>(),
+}));
+
+// Cast the mock for type safety in tests
+const mockedQueryLLM = queryLLMWithRetries as jest.Mock;
+
+describe('MCP Workflow E2E Tests', () => {
+  let harness: TestHarnessState;
+  let serverProcess: ChildProcessWithoutNullStreams;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mockedQueryLLM.mockClear();
   });
 
-  serverProcess.stderr.on('data', (data) => {
-    console.error(`SERVER STDERR: ${data}`);
+  afterEach(async () => {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill();
+    }
+    await cleanupTestHarness(harness);
   });
 
-  return serverProcess;
-};
+  it('should initialize, list tools, and execute a simple query', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>Okay, creating the file.</think>
+         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Committing the file.</think>
+         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
+         <reply>File created and committed.</reply>`
+      );
 
-export const writeMCPRequest = (
-  serverProcess: ChildProcessWithoutNullStreams,
-  request: MCPRequest
-): void => {
-  const message = JSON.stringify(request) + '\n';
-  serverProcess.stdin.write(message);
-};
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
 
-export async function* readMCPMessages(
-  serverProcess: ChildProcessWithoutNullStreams
-): AsyncGenerator<MCPResponse> {
-  let buffer = '';
-  for await (const chunk of serverProcess.stdout) {
-    buffer += chunk.toString();
-    let newlineIndex;
-    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, newlineIndex);
-      buffer = buffer.slice(newlineIndex + 1);
-      if (line.trim()) {
-        try {
-          const parsed = JSON.parse(line);
-          // FastMCP can send notifications which don't have an ID.
-          // This reader is for responses, so we'll filter them.
-          if ('id' in parsed) {
-            yield parsed as MCPResponse;
-          }
-        } catch (error) {
-          console.error('Failed to parse MCP message:', line);
-        }
+    // Handshake
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { clientInfo: { name: 'test-client' } },
+    });
+    const initResponse = (await messages.next()).value as MCPResponse;
+    expect(initResponse.id).toBe(1);
+    expect(initResponse.result).toBeDefined();
+
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'list_tools',
+    });
+    const listToolsResponse = (await messages.next()).value as MCPResponse;
+    expect(listToolsResponse.id).toBe(2);
+    expect((listToolsResponse.result as any).tools).toHaveLength(1);
+
+    // Execute
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'execute_tool',
+      params: { name: 'process_query', args: { query: 'create file' } },
+    });
+
+    const notifications: MCPNotification[] = [];
+    let finalResponse: MCPResponse | undefined;
+
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message as MCPResponse;
+        break;
+      } else {
+        notifications.push(message as MCPNotification);
       }
     }
-  }
+
+    // 3. Assert
+    expect(notifications.length).toBeGreaterThanOrEqual(2);
+    expect(
+      notifications.some((n) => n.method === 'mcp/log/info')
+    ).toBeTruthy();
+
+    expect(finalResponse).toBeDefined();
+    expect(finalResponse?.id).toBe(3);
+    const result = JSON.parse((finalResponse?.result as any).result);
+    expect(result.reply).toBe('File created and committed.');
+
+    // Verify side-effects
+    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: create hello.txt');
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example', async () => {
+    // 1. Arrange
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(orgPath, \`- # AI Research Institute
+  - type:: organization\`);
 }
+await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
+  - type:: person
+  - affiliation:: [[AI Research Institute]]
+  - field:: [[Symbolic Reasoning]]\`);
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
+
+    mockedQueryLLM
+      .mockResolvedValueOnce(turn1Response)
+      .mockResolvedValueOnce(turn2Response);
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: {
+        name: 'process_query',
+        args: { query: 'Create Dr. Aris Thorne' },
+      },
+    });
+
+    let finalResponse: MCPResponse | undefined;
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+    }
+
+    // 3. Assert
+    const result = JSON.parse((finalResponse?.result as any).result);
+    expect(result.reply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+
+    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+
+  it('should save a checkpoint and successfully revert to it', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>Writing file 1.</think>
+         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Saving checkpoint.</think>
+         <typescript>await mem.saveCheckpoint();</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Writing file 2.</think>
+         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Reverting to checkpoint.</think>
+         <typescript>await mem.revertToLastCheckpoint();</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Committing.</think>
+         <typescript>await mem.commitChanges('feat: add file1 only');</typescript>
+         <reply>Reverted and committed.</reply>`
+      );
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: { name: 'process_query', args: { query: 'test checkpoints' } },
+    });
+
+    let finalResponse: MCPResponse | undefined;
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+    }
+
+    // 3. Assert
+    expect(JSON.parse((finalResponse?.result as any).result).reply).toBe(
+      'Reverted and committed.'
+    );
+    expect(await harness.mem.fileExists('file1.md')).toBe(true);
+    expect(await harness.mem.fileExists('file2.md')).toBe(false);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: add file1 only');
+  });
+
+  it('should block and gracefully handle path traversal attempts', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>I will try to read a sensitive file.</think>
+         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>The previous action failed as expected due to security. I will inform the user.</think>
+         <reply>I was unable to access that file due to security restrictions.</reply>`
+      );
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: {
+        name: 'process_query',
+        args: { query: 'read sensitive file' },
+      },
+    });
+
+    const notifications: MCPNotification[] = [];
+    let finalResponse: MCPResponse | undefined;
+
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+      notifications.push(message as MCPNotification);
+    }
+
+    // 3. Assert
+    const errorNotification = notifications.find(
+      (n) => n.method === 'mcp/log/error'
+    );
+    expect(errorNotification).toBeDefined();
+    expect((errorNotification?.params as any).message).toContain(
+      'Path traversal attempt detected'
+    );
+
+    const result = JSON.parse((finalResponse?.result as any).result);
+    expect(result.reply).toBe(
+      'I was unable to access that file due to security restrictions.'
+    );
+  });
+});
 ````
 
 ## File: docs/PLATFORM_SUPPORT.md
@@ -1507,6 +1739,68 @@ export const platform = {
 export default platform;
 ````
 
+## File: tests/lib/test-util.ts
+````typescript
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import type { TestHarnessState } from './test-harness';
+import type {
+  MCPRequest,
+  MCPResponse,
+  MCPNotification,
+} from '../../src/types';
+
+export const spawnServer = (
+  harness: TestHarnessState
+): ChildProcessWithoutNullStreams => {
+  const serverProcess = spawn('node', ['dist/server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
+      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
+    },
+  });
+
+  serverProcess.stderr.on('data', (data) => {
+    console.error(`SERVER STDERR: ${data}`);
+  });
+
+  return serverProcess;
+};
+
+export const writeMCPRequest = (
+  serverProcess: ChildProcessWithoutNullStreams,
+  request: MCPRequest
+): void => {
+  const message = JSON.stringify(request) + '\n';
+  serverProcess.stdin.write(message);
+};
+
+export type MCPMessage = MCPResponse | MCPNotification;
+
+export async function* readMCPMessages(
+  serverProcess: ChildProcessWithoutNullStreams
+): AsyncGenerator<MCPMessage> {
+  let buffer = '';
+  for await (const chunk of serverProcess.stdout) {
+    buffer += chunk.toString();
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.trim()) {
+        try {
+          const parsed = JSON.parse(line);
+          yield parsed as MCPMessage;
+        } catch (error) {
+          console.error('Failed to parse MCP message:', line);
+        }
+      }
+    }
+  }
+}
+````
+
 ## File: tests/setup.ts
 ````typescript
 // Jest setup file to handle Node.js v25+ compatibility issues
@@ -1540,7 +1834,7 @@ import typescriptParser from '@typescript-eslint/parser';
 export default [
   js.configs.recommended,
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js'],
+    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js', 'tests/**/*.ts'],
     languageOptions: {
       parser: typescriptParser,
       parserOptions: {
@@ -2239,282 +2533,6 @@ export default {
 };
 ````
 
-## File: src/core/mem-api/secure-path.ts
-````typescript
-import path from 'path';
-import fs from 'fs';
-import platform from '../../lib/platform.js';
-
-/**
- * Cross-platform path traversal protection utilities
- * The LLM should never be able to access files outside the knowledge graph.
- */
-
-/**
- * Enhanced path resolution with canonicalization for cross-platform security
- * @param graphRoot The absolute path to the root of the knowledge graph.
- * @param userPath The user-provided sub-path.
- * @returns The resolved, secure absolute path.
- * @throws If a path traversal attempt is detected.
- */
-export const resolveSecurePath = (
-  graphRoot: string,
-  userPath: string
-): string => {
-  // Normalize and resolve paths using platform-aware normalization
-  const normalizedRoot = platform.normalizePath(path.resolve(graphRoot));
-  const normalizedUserPath = platform.normalizePath(path.resolve(normalizedRoot, userPath));
-
-  // Get canonical paths to handle symlinks and case-insensitive filesystems
-  const canonicalRoot = getCanonicalPath(normalizedRoot);
-  const canonicalTarget = getCanonicalPath(normalizedUserPath);
-
-  // Security check with case-insensitive comparison when needed
-  const isSecure = platform.hasCaseInsensitiveFS
-    ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
-    : canonicalTarget.startsWith(canonicalRoot);
-
-  if (!isSecure) {
-    throw new SecurityError(`Path traversal attempt detected. User path: ${userPath}, resolved to: ${canonicalTarget}`);
-  }
-
-  return canonicalTarget;
-};
-
-/**
- * Get canonical path by resolving symlinks and normalizing
- * @param filePath The path to canonicalize
- * @returns The canonical absolute path
- */
-export const getCanonicalPath = (filePath: string): string => {
-  try {
-    // Use realpath to resolve all symlinks and normalize
-    const canonical = fs.realpathSync(filePath);
-    return platform.normalizePath(canonical);
-  } catch {
-    // If path doesn't exist, return normalized path
-    return platform.normalizePath(path.resolve(filePath));
-  }
-};
-
-/**
- * Validate that a path is within allowed bounds
- * @param allowedRoot The root directory that's allowed
- * @param testPath The path to test
- * @param options Additional validation options
- * @returns True if path is valid and within bounds
- */
-export const validatePathBounds = (
-  allowedRoot: string,
-  testPath: string,
-  options: {
-    allowSymlinks?: boolean;
-    requireExistence?: boolean;
-    followSymlinks?: boolean;
-  } = {}
-): boolean => {
-  const {
-    allowSymlinks = false,
-    requireExistence = false,
-    followSymlinks = true
-  } = options;
-
-  try {
-    const canonicalRoot = getCanonicalPath(allowedRoot);
-    let canonicalTarget: string;
-    
-    // Handle non-existent paths specially
-    try {
-      canonicalTarget = getCanonicalPath(testPath);
-    } catch (error) {
-      // Path doesn't exist, use normalized path instead
-      canonicalTarget = platform.normalizePath(path.resolve(testPath));
-    }
-
-    // If we shouldn't follow symlinks, check if the target itself is a symlink
-    if (!followSymlinks) {
-      try {
-        if (fs.lstatSync(testPath).isSymbolicLink()) {
-          if (!allowSymlinks) {
-            return false;
-          }
-          // Use lstat to get the symlink itself, not its target
-          canonicalTarget = platform.normalizePath(path.resolve(testPath));
-        }
-      } catch (error) {
-        // File doesn't exist, which is fine for write operations
-        // The canonicalTarget from resolveSecurePath is still valid
-      }
-    }
-
-    // Check if the target path exists (if required)
-    if (requireExistence && !fs.existsSync(canonicalTarget)) {
-      return false;
-    }
-
-    // Final security check
-    const isSecure = platform.hasCaseInsensitiveFS
-      ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
-      : canonicalTarget.startsWith(canonicalRoot);
-
-    return isSecure;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Sanitize a user-provided path to remove dangerous components
- * @param userPath The user-provided path
- * @returns A sanitized path string
- */
-export const sanitizePath = (userPath: string): string => {
-  // Remove null bytes and other dangerous characters
-  let sanitized = userPath.replace(/\0/g, '');
-
-  // Handle Windows-specific path patterns
-  if (platform.isWindows) {
-    // Remove drive letter switching attempts
-    sanitized = sanitized.replace(/^[a-zA-Z]:[\\/]/, '');
-    // Remove UNC path attempts
-    sanitized = sanitized.replace(/^\\\\[\\?]/, '');
-    // Remove device namespace access attempts
-    sanitized = sanitized.replace(/^\\\\\.\\[a-zA-Z]/, '');
-  }
-
-  // Remove excessive path separators
-  const separator = platform.pathSeparator;
-  const doubleSeparator = separator + separator;
-  while (sanitized.includes(doubleSeparator)) {
-    sanitized = sanitized.replace(doubleSeparator, separator);
-  }
-
-  // Normalize relative path components
-  const parts = sanitized.split(separator);
-  const filteredParts: string[] = [];
-
-  for (const part of parts) {
-    if (part === '..') {
-      // Don't allow going above the current directory in user input
-      continue;
-    }
-    if (part === '.' || part === '') {
-      continue;
-    }
-    filteredParts.push(part);
-  }
-
-  return filteredParts.join(separator);
-};
-
-/**
- * Security error class for path traversal attempts
- */
-export class SecurityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SecurityError';
-
-    // Maintain proper stack trace for where our error was thrown (only available on V8)
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, SecurityError);
-    }
-  }
-}
-
-/**
- * Cross-platform path validation utilities
- */
-export const pathValidation = {
-  /**
-   * Check if a path contains potentially dangerous patterns
-   */
-  isDangerousPath(userPath: string): boolean {
-    // Check for common traversal patterns
-    const dangerousPatterns = [
-      /\.\.[/\\]/,    // ../ or ..\
-      /[/\\]\.\./,    // /.. or \..
-      /\0/,          // null byte injection
-      /[/\\]\0/,      // null byte with separator
-    ];
-
-    // Windows-specific dangerous patterns
-    if (platform.isWindows) {
-      dangerousPatterns.push(
-        /^[a-zA-Z]:[/\\].*[/\\][a-zA-Z]:[/\\]/, // drive letter switching
-        /^\\\\/,                                 // UNC paths
-        /\\\\\.\\[a-zA-Z]/,                      // device namespace
-        /[/\\]CON$|[/\\]PRN$|[/\\]AUX$|[/\\]COM\d$|[/\\]LPT\d$/i // reserved names
-      );
-    }
-
-    return dangerousPatterns.some(pattern => pattern.test(userPath));
-  },
-
-  /**
-   * Validate and sanitize a user path in one step
-   */
-  validateAndSanitizePath(graphRoot: string, userPath: string): string {
-    if (this.isDangerousPath(userPath)) {
-      throw new SecurityError(`Dangerous path pattern detected: ${userPath}`);
-    }
-
-    const sanitizedPath = sanitizePath(userPath);
-    return resolveSecurePath(graphRoot, sanitizedPath);
-  }
-};
-
-export default {
-  resolveSecurePath,
-  getCanonicalPath,
-  validatePathBounds,
-  sanitizePath,
-  SecurityError,
-  pathValidation
-};
-````
-
-## File: src/types/index.ts
-````typescript
-export * from './mem.js';
-export * from './git.js';
-export * from './sandbox.js';
-export * from './llm.js';
-export * from './loop.js';
-export * from './mcp.js';
-
-export interface RecursaConfig {
-  knowledgeGraphPath: string;
-  llm: {
-    apiKey: string;
-    baseUrl?: string;
-    model: string;
-    maxTokens?: number;
-    temperature?: number;
-  };
-  sandbox: {
-    timeout: number;
-    memoryLimit: number;
-  };
-  git: {
-    userName: string;
-    userEmail: string;
-  };
-}
-
-export interface EnvironmentVariables {
-  KNOWLEDGE_GRAPH_PATH: string;
-  OPENROUTER_API_KEY: string;
-  OPENROUTER_MODEL?: string;
-  LLM_TEMPERATURE?: string;
-  LLM_MAX_TOKENS?: string;
-  SANDBOX_TIMEOUT?: string;
-  SANDBOX_MEMORY_LIMIT?: string;
-  GIT_USER_NAME?: string;
-  GIT_USER_EMAIL?: string;
-}
-````
-
 ## File: src/types/llm.ts
 ````typescript
 export type ParsedLLMResponse = {
@@ -3197,6 +3215,241 @@ General-purpose operations for the sandbox environment.
 | **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
 ````
 
+## File: src/core/mem-api/secure-path.ts
+````typescript
+import path from 'path';
+import fs from 'fs';
+import platform from '../../lib/platform.js';
+
+/**
+ * Cross-platform path traversal protection utilities
+ * The LLM should never be able to access files outside the knowledge graph.
+ */
+
+/**
+ * Enhanced path resolution with canonicalization for cross-platform security
+ * @param graphRoot The absolute path to the root of the knowledge graph.
+ * @param userPath The user-provided sub-path.
+ * @returns The resolved, secure absolute path.
+ * @throws If a path traversal attempt is detected.
+ */
+export const resolveSecurePath = (
+  graphRoot: string,
+  userPath: string
+): string => {
+  // Normalize and resolve paths using platform-aware normalization
+  const normalizedRoot = platform.normalizePath(path.resolve(graphRoot));
+  const normalizedUserPath = platform.normalizePath(path.resolve(normalizedRoot, userPath));
+
+  // Get canonical paths to handle symlinks and case-insensitive filesystems
+  const canonicalRoot = getCanonicalPath(normalizedRoot);
+  const canonicalTarget = getCanonicalPath(normalizedUserPath);
+
+  // Security check with case-insensitive comparison when needed
+  const isSecure = platform.hasCaseInsensitiveFS
+    ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
+    : canonicalTarget.startsWith(canonicalRoot);
+
+  if (!isSecure) {
+    throw new SecurityError(`Path traversal attempt detected. User path: ${userPath}, resolved to: ${canonicalTarget}`);
+  }
+
+  return canonicalTarget;
+};
+
+/**
+ * Get canonical path by resolving symlinks and normalizing
+ * @param filePath The path to canonicalize
+ * @returns The canonical absolute path
+ */
+export const getCanonicalPath = (filePath: string): string => {
+  try {
+    // Use realpath to resolve all symlinks and normalize
+    const canonical = fs.realpathSync(filePath);
+    return platform.normalizePath(canonical);
+  } catch {
+    // If path doesn't exist, return normalized path
+    return platform.normalizePath(path.resolve(filePath));
+  }
+};
+
+/**
+ * Validate that a path is within allowed bounds
+ * @param allowedRoot The root directory that's allowed
+ * @param testPath The path to test
+ * @param options Additional validation options
+ * @returns True if path is valid and within bounds
+ */
+export const validatePathBounds = (
+  allowedRoot: string,
+  testPath: string,
+  options: {
+    allowSymlinks?: boolean;
+    requireExistence?: boolean;
+    followSymlinks?: boolean;
+  } = {}
+): boolean => {
+  const {
+    allowSymlinks = false,
+    requireExistence = false,
+    followSymlinks = true
+  } = options;
+
+  try {
+    const canonicalRoot = getCanonicalPath(allowedRoot);
+    let canonicalTarget: string;
+    
+    // Handle non-existent paths specially
+    try {
+      canonicalTarget = getCanonicalPath(testPath);
+    } catch {
+      // Path doesn't exist, use normalized path instead
+      canonicalTarget = platform.normalizePath(path.resolve(testPath));
+    }
+
+    // If we shouldn't follow symlinks, check if the target itself is a symlink
+    if (!followSymlinks) {
+      try {
+        if (fs.lstatSync(testPath).isSymbolicLink()) {
+          if (!allowSymlinks) {
+            return false;
+          }
+          // Use lstat to get the symlink itself, not its target
+          canonicalTarget = platform.normalizePath(path.resolve(testPath));
+        }
+      } catch {
+        // File doesn't exist, which is fine for write operations
+        // The canonicalTarget from resolveSecurePath is still valid
+      }
+    }
+
+    // Check if the target path exists (if required)
+    if (requireExistence && !fs.existsSync(canonicalTarget)) {
+      return false;
+    }
+
+    // Final security check
+    const isSecure = platform.hasCaseInsensitiveFS
+      ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
+      : canonicalTarget.startsWith(canonicalRoot);
+
+    return isSecure;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Sanitize a user-provided path to remove dangerous components
+ * @param userPath The user-provided path
+ * @returns A sanitized path string
+ */
+export const sanitizePath = (userPath: string): string => {
+  // Remove null bytes and other dangerous characters
+  let sanitized = userPath.replace(/\0/g, '');
+
+  // Handle Windows-specific path patterns
+  if (platform.isWindows) {
+    // Remove drive letter switching attempts
+    sanitized = sanitized.replace(/^[a-zA-Z]:[\\/]/, '');
+    // Remove UNC path attempts
+    sanitized = sanitized.replace(/^\\\\[\\?]/, '');
+    // Remove device namespace access attempts
+    sanitized = sanitized.replace(/^\\\\\.\\[a-zA-Z]/, '');
+  }
+
+  // Remove excessive path separators
+  const separator = platform.pathSeparator;
+  const doubleSeparator = separator + separator;
+  while (sanitized.includes(doubleSeparator)) {
+    sanitized = sanitized.replace(doubleSeparator, separator);
+  }
+
+  // Normalize relative path components
+  const parts = sanitized.split(separator);
+  const filteredParts: string[] = [];
+
+  for (const part of parts) {
+    if (part === '..') {
+      // Don't allow going above the current directory in user input
+      continue;
+    }
+    if (part === '.' || part === '') {
+      continue;
+    }
+    filteredParts.push(part);
+  }
+
+  return filteredParts.join(separator);
+};
+
+/**
+ * Security error class for path traversal attempts
+ */
+export class SecurityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SecurityError';
+
+    // Maintain proper stack trace for where our error was thrown (only available on V8)
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, SecurityError);
+    }
+  }
+}
+
+/**
+ * Cross-platform path validation utilities
+ */
+export const pathValidation = {
+  /**
+   * Check if a path contains potentially dangerous patterns
+   */
+  isDangerousPath(userPath: string): boolean {
+    // Check for common traversal patterns
+    const dangerousPatterns = [
+      /\.\.[/\\]/,    // ../ or ..\
+      /[/\\]\.\./,    // /.. or \..
+      /\0/,          // null byte injection
+      /[/\\]\0/,      // null byte with separator
+    ];
+
+    // Windows-specific dangerous patterns
+    if (platform.isWindows) {
+      dangerousPatterns.push(
+        /^[a-zA-Z]:[/\\].*[/\\][a-zA-Z]:[/\\]/, // drive letter switching
+        /^\\\\/,                                 // UNC paths
+        /\\\\\.\\[a-zA-Z]/,                      // device namespace
+        /[/\\]CON$|[/\\]PRN$|[/\\]AUX$|[/\\]COM\d$|[/\\]LPT\d$/i // reserved names
+      );
+    }
+
+    return dangerousPatterns.some(pattern => pattern.test(userPath));
+  },
+
+  /**
+   * Validate and sanitize a user path in one step
+   */
+  validateAndSanitizePath(graphRoot: string, userPath: string): string {
+    if (this.isDangerousPath(userPath)) {
+      throw new SecurityError(`Dangerous path pattern detected: ${userPath}`);
+    }
+
+    const sanitizedPath = sanitizePath(userPath);
+    return resolveSecurePath(graphRoot, sanitizedPath);
+  }
+};
+
+export default {
+  resolveSecurePath,
+  getCanonicalPath,
+  validatePathBounds,
+  sanitizePath,
+  SecurityError,
+  pathValidation
+};
+````
+
 ## File: src/types/git.ts
 ````typescript
 export interface GitOptions {
@@ -3232,59 +3485,44 @@ export type GitCommand =
   | 'branch';
 ````
 
-## File: src/types/mcp.ts
+## File: src/types/index.ts
 ````typescript
-// Based on MCP Specification
+export * from './mem.js';
+export * from './git.js';
+export * from './sandbox.js';
+export * from './llm.js';
+export * from './loop.js';
+export * from './mcp.js';
 
-// --- Requests ---
-export interface MCPRequest {
-  jsonrpc: '2.0';
-  id: number | string;
-  method: string;
-  params?: unknown;
-}
-
-export interface InitializeParams {
-  processId?: number;
-  clientInfo: {
-    name: string;
-    version: string;
-    [key: string]: unknown;
+export interface RecursaConfig {
+  knowledgeGraphPath: string;
+  llm: {
+    apiKey: string;
+    baseUrl?: string;
+    model: string;
+    maxTokens?: number;
+    temperature?: number;
   };
-  capabilities: Record<string, unknown>;
+  sandbox: {
+    timeout: number;
+    memoryLimit: number;
+  };
+  git: {
+    userName: string;
+    userEmail: string;
+  };
 }
 
-// --- Responses ---
-export interface MCPResponse {
-  jsonrpc: '2.0';
-  id: number | string;
-  result?: unknown;
-  error?: MCPError;
-}
-
-export interface MCPError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-
-// --- Tooling ---
-export interface MCPTool {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>; // JSON Schema
-  [key: string]: unknown;
-}
-
-export interface ListToolsResult {
-  tools: MCPTool[];
-}
-
-// --- Notifications ---
-export interface MCPNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: unknown;
+export interface EnvironmentVariables {
+  KNOWLEDGE_GRAPH_PATH: string;
+  OPENROUTER_API_KEY: string;
+  OPENROUTER_MODEL?: string;
+  LLM_TEMPERATURE?: string;
+  LLM_MAX_TOKENS?: string;
+  SANDBOX_TIMEOUT?: string;
+  SANDBOX_MEMORY_LIMIT?: string;
+  GIT_USER_NAME?: string;
+  GIT_USER_EMAIL?: string;
 }
 ````
 
@@ -3561,145 +3799,60 @@ export const createLogger = (): Logger => createLoggerInternal();
 export const logger = createLogger();
 ````
 
-## File: tests/e2e/mcp-protocol.test.ts
+## File: src/types/mcp.ts
 ````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterEach,
-  beforeEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import {
-  spawnServer,
-  writeMCPRequest,
-  readMCPMessages,
-} from '../lib/test-util';
-import type { ChildProcessWithoutNullStreams } from 'child_process';
-import type { ListToolsResult } from '../../src/types';
-import { execSync } from 'child_process';
+// Based on MCP Specification
 
-describe('MCP Protocol E2E Test', () => {
-  let harness: TestHarnessState;
-  let serverProcess: ChildProcessWithoutNullStreams;
+// --- Requests ---
+export interface MCPRequest {
+  jsonrpc: '2.0';
+  id: number | string;
+  method: string;
+  params?: unknown;
+}
 
-  // Build the project once before running tests
-  beforeAll(() => {
-    console.log('Building server for E2E tests...');
-    try {
-      execSync('npm run build', { stdio: 'inherit' });
-    } catch (error) {
-      console.error('Build failed. Aborting tests.');
-      process.exit(1);
-    }
-  });
+export interface InitializeParams {
+  processId?: number;
+  clientInfo: {
+    name: string;
+    version: string;
+    [key: string]: unknown;
+  };
+  capabilities: Record<string, unknown>;
+}
 
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
+// --- Responses ---
+export interface MCPResponse {
+  jsonrpc: '2.0';
+  id: number | string;
+  result?: unknown;
+  error?: MCPError;
+}
 
-  afterEach(async () => {
-    if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill('SIGTERM');
-    }
-    await cleanupTestHarness(harness);
-  });
+export interface MCPError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
 
-  it('should initialize, list tools correctly, and shutdown', async () => {
-    // 1. Spawn server
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
+// --- Tooling ---
+export interface MCPTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>; // JSON Schema
+  [key: string]: unknown;
+}
 
-    // 2. Send initialize request
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        processId: 1234,
-        clientInfo: { name: 'test-client', version: '0.1.0' },
-        capabilities: {},
-      },
-    });
+export interface ListToolsResult {
+  tools: MCPTool[];
+}
 
-    // 3. Await and verify initialize response
-    const initResponse = await messages.next();
-    expect(initResponse.done).toBe(false);
-    expect(initResponse.value.id).toBe(1);
-    expect(initResponse.value.result).toBeDefined();
-    expect((initResponse.value.result as any).serverInfo.name).toBe(
-      'recursa-server'
-    );
-
-    // 4. Send list_tools request
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'list_tools',
-      params: {},
-    });
-
-    // 5. Await and verify list_tools response
-    const listToolsResponse = await messages.next();
-    expect(listToolsResponse.done).toBe(false);
-    expect(listToolsResponse.value.id).toBe(2);
-    expect(listToolsResponse.value.result).toBeDefined();
-
-    const { tools } = listToolsResponse.value.result as ListToolsResult;
-    const processQueryTool = tools.find((t) => t.name === 'process_query');
-
-    expect(processQueryTool).toBeDefined();
-    expect(processQueryTool?.description).toContain('agent loop');
-    expect(processQueryTool?.parameters).toEqual({
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'The user query to process.' },
-        sessionId: {
-          type: 'string',
-          description: 'An optional session ID to maintain context.',
-        },
-        runId: {
-          type: 'string',
-          description:
-            'A unique ID for this execution run, used for notifications.',
-        },
-      },
-      required: ['query', 'runId'],
-    });
-
-    // 6. Send shutdown request
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'shutdown',
-      params: {},
-    });
-
-    const shutdownResponse = await messages.next();
-    expect(shutdownResponse.done).toBe(false);
-    expect(shutdownResponse.value.id).toBe(3);
-
-    // 7. Send exit notification
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      method: 'exit',
-    });
-
-    // Wait for the process to exit gracefully
-    await new Promise<void>((resolve) => {
-      serverProcess.on('exit', (code) => {
-        expect(code).toBe(0);
-        resolve();
-      });
-    });
-  }, 20000); // Increase timeout for this test
-});
+// --- Notifications ---
+export interface MCPNotification {
+  jsonrpc: '2.0';
+  method: string;
+  params?: unknown;
+}
 ````
 
 ## File: src/core/mem-api/state-ops.ts
@@ -4004,388 +4157,6 @@ export type MemAPI = {
   getTokenCount: (filePath: string) => Promise<number>;
   getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
 };
-````
-
-## File: tests/integration/workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import simpleGit from 'simple-git';
-import type { StatusUpdate } from '../../src/types';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  createMockLLMQueryWithSpy,
-  type TestHarnessState,
-} from '../lib/test-harness';
-describe('Agent Workflow Integration Tests', () => {
-  let harness: TestHarnessState;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  describe('Complete Workflow Integration', () => {
-    it('should execute a complete project lifecycle', async () => {
-      const sessionId = 'project-lifecycle';
-
-      // Phase 1: Initialize project
-      const initMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll initialize a new project with basic structure.</think>
-<typescript>
-// Create project structure
-await mem.writeFile('package.json', JSON.stringify({
-  name: 'test-project',
-  version: '1.0.0',
-  description: 'A test project',
-  scripts: { start: 'node index.js', test: 'jest' }
-}, null, 2));
-
-await mem.writeFile('README.md', '# Test Project\\n\\nThis is a comprehensive test project.');
-await mem.writeFile('index.js', 'console.log(\\"Hello, World!\\");');
-await mem.createDir('src');
-await mem.writeFile('src/app.js', '// Application logic');
-</typescript>`,
-        `<think>Project initialized. Now commit the initial setup.</think>
-<typescript>
-await mem.commitChanges('feat: initialize project with basic structure');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
-      ]);
-
-      const initResult = await handleUserQuery(
-        'Initialize a new Node.js project',
-        harness.mockConfig,
-        sessionId,
-        initMockLLMQuery
-      );
-
-      expect(initResult).toContain('Project initialized successfully');
-
-      // Phase 2: Add features
-      const featureMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll add features to the existing project.</think>
-<typescript>
-// Add feature files
-await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
-await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
-await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', '// Test utilities\\nconst { formatDate } = require(\\\'../src/utils.js\\\');');
-</typescript>`,
-        `<think>Features added. Commit the new functionality.</think>
-<typescript>
-await mem.commitChanges('feat: add utilities, config, and test structure');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
-      ]);
-
-      const featureResult = await handleUserQuery(
-        'Add utilities and configuration to the project',
-        harness.mockConfig,
-        sessionId,
-        featureMockLLMQuery
-      );
-
-      expect(featureResult).toContain('Added utility functions');
-
-      // Phase 3: Update existing files
-      const updateMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll update the main application to use the new utilities.</think>
-<typescript>
-// Update main file
-const indexContent = await mem.readFile('index.js');
-const updatedIndex = indexContent.replace(
-  'console.log(\\"Hello, World!\\");',
-  'const { formatDate } = require(\\"./src/utils.js\\");\\nconsole.log(\\"Current time:\\", formatDate(new Date()));'
-);
-await mem.updateFile('index.js', indexContent, updatedIndex);
-
-// Update README
-const readmeContent = await mem.readFile('README.md');
-const updatedReadme = readmeContent + '\\n\\n## Usage\\n\\nRun with: npm start';
-await mem.updateFile('README.md', readmeContent, updatedReadme);
-</typescript>`,
-        `<think>Main application updated. Commit the improvements.</think>
-<typescript>
-await mem.commitChanges('feat: integrate utilities and update documentation');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>Updated the main application to use utilities and improved documentation.</reply>`,
-      ]);
-
-      const updateResult = await handleUserQuery(
-        'Update the main application to use the new utilities',
-        harness.mockConfig,
-        sessionId,
-        updateMockLLMQuery
-      );
-
-      expect(updateResult).toContain('Updated the main application');
-
-      // Verify complete project state
-      const mem = harness.mem;
-
-      // Check all expected files exist
-      const expectedFiles = [
-        'package.json',
-        'README.md',
-        'index.js',
-        'src/app.js',
-        'src/utils.js',
-        'src/config.js',
-        'tests/utils.test.js',
-      ];
-
-      for (const file of expectedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Verify file contents
-      const indexContent = await mem.readFile('index.js');
-      expect(indexContent).toContain('formatDate');
-      expect(indexContent).toContain('./src/utils.js');
-
-      const readmeContent = await mem.readFile('README.md');
-      expect(readmeContent).toContain('Usage');
-      expect(readmeContent).toContain('npm start');
-
-      // Verify git history shows all three commits (plus initial .gitignore commit)
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(4);
-      expect(log.all[0]?.message).toBe(
-        'feat: integrate utilities and update documentation'
-      );
-      expect(log.all[1]?.message).toBe(
-        'feat: add utilities, config, and test structure'
-      );
-      expect(log.all[2]?.message).toBe(
-        'feat: initialize project with basic structure'
-      );
-    });
-
-    it('should handle complex file operations and git workflow', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      const complexMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
-<typescript>
-// Create multiple related files
-await mem.writeFile('docs/intro.md', '# Introduction\\n\\nProject introduction.');
-await mem.writeFile('docs/guide.md', '# User Guide\\n\\nDetailed user guide.');
-await mem.writeFile('docs/api.md', '# API Reference\\n\\nAPI documentation.');
-
-// Create a temporary file that will be renamed
-await mem.writeFile('docs/temp.md', '# Temporary\\n\\nThis will be renamed.');
-
-// Create a file that will be deleted
-await mem.writeFile('docs/obsolete.md', '# Obsolete\\n\\nThis will be deleted.');
-
-// List files to verify
-const docsFiles = await mem.listFiles('docs');
-console.log('Files created:', docsFiles);
-</typescript>`,
-        `<think>Now I'll perform file operations: rename and delete.</think>
-<typescript>
-// Rename temp.md to overview.md
-await mem.rename('docs/temp.md', 'docs/overview.md');
-
-// Delete the obsolete file
-await mem.deletePath('docs/obsolete.md');
-
-// Update the introduction to reference the overview
-const introContent = await mem.readFile('docs/intro.md');
-const updatedIntro = introContent + '\\n\\nSee also: [[Overview]] for a project overview.';
-await mem.updateFile('docs/intro.md', introContent, updatedIntro);
-
-// Verify git staged files
-const stagedFiles = await mem.getChangedFiles();
-console.log('Staged files:', stagedFiles);
-</typescript>`,
-        `<think>File operations complete. Now commit and verify git operations.</think>
-<typescript>
-await mem.commitChanges('feat: reorganize documentation structure');
-
-// Test git operations
-const gitDiff = await mem.gitDiff('docs/intro.md');
-const gitLog = await mem.gitLog('docs/', 5);
-
-console.log('Git diff for intro.md:', gitDiff);
-console.log('Git log for docs/:', gitLog);
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>
-Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Perform complex file operations with git workflow',
-        harness.mockConfig,
-        'complex-ops-session',
-        complexMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(result).toContain(
-        'Successfully performed complex file operations'
-      );
-
-      // Verify status updates were captured throughout the process
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
-
-      // Verify final file state
-      const mem = harness.mem;
-
-      // Files that should exist
-      const existingFiles = [
-        'docs/intro.md',
-        'docs/guide.md',
-        'docs/api.md',
-        'docs/overview.md',
-      ];
-      for (const file of existingFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(true);
-      }
-
-      // Files that should not exist
-      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
-      for (const file of deletedFiles) {
-        const exists = await mem.fileExists(file);
-        expect(exists).toBe(false);
-      }
-
-      // Verify content was updated
-      const introContent = await mem.readFile('docs/intro.md');
-      expect(introContent).toContain('[[Overview]]');
-
-      // Verify git operations worked (plus initial .gitignore commit)
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0]?.message).toBe(
-        'feat: reorganize documentation structure'
-      );
-    });
-
-    it('should handle error scenarios and recovery gracefully', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
-
-      const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
-        `<think>I'll attempt various operations to test error handling and recovery.</think>
-<typescript>
-// This should fail - file doesn't exist
-try {
-  await mem.readFile('non-existent-config.json');
-} catch (error) {
-  console.log('Expected error caught:', error.message);
-}
-
-// This should also fail - invalid path traversal attempt
-try {
-  await mem.writeFile('../../../etc/malicious.txt', 'hack');
-} catch (error) {
-  console.log('Security error caught:', error.message);
-}
-
-// This should work - create the missing file
-await mem.writeFile('non-existent-config.json', '{"app": "test", "version": "1.0.0"}');
-</typescript>`,
-        `<think>Now I'll test additional error scenarios.</think>
-<typescript>
-// Try to update a file that doesn't exist
-try {
-  await mem.updateFile('missing.md', 'old content', 'new content');
-} catch (error) {
-  console.log('Update error caught:', error.message);
-  // Create the file instead
-  await mem.writeFile('missing.md', '# Created after error\\n\\nContent here.');
-}
-
-// Try to delete a file that doesn't exist
-try {
-  await mem.deletePath('already-deleted.md');
-} catch (error) {
-  console.log('Delete error caught:', error.message);
-}
-</typescript>`,
-        `<think>Error recovery completed. Now commit all successful operations.</think>
-<typescript>
-await mem.commitChanges('feat: demonstrate error handling and recovery');
-</typescript>`,
-        `<think>Replying to user.</think>
-<reply>
-Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
-</reply>`,
-      ]);
-
-      const result = await handleUserQuery(
-        'Test error handling and recovery scenarios',
-        harness.mockConfig,
-        'error-test-session',
-        errorRecoveryMockLLMQuery,
-        captureStatusUpdate
-      );
-
-      expect(result).toContain(
-        'Successfully demonstrated comprehensive error handling'
-      );
-
-      // Verify status updates were captured (should include think and act updates)
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
-
-      // Verify files that should exist after recovery
-      const mem = harness.mem;
-      const configExists = await mem.fileExists('non-existent-config.json');
-      expect(configExists).toBe(true);
-
-      const missingExists = await mem.fileExists('missing.md');
-      expect(missingExists).toBe(true);
-
-      // Verify content
-      const configContent = await mem.readFile('non-existent-config.json');
-      expect(configContent).toContain('test');
-      expect(configContent).toContain('1.0.0');
-
-      const missingContent = await mem.readFile('missing.md');
-      expect(missingContent).toContain('Created after error');
-
-      // Verify git commit was successful despite errors (plus initial .gitignore commit)
-      const log = await harness.git.log();
-      expect(log.all.length).toBe(2);
-      expect(log.all[0]?.message).toBe(
-        'feat: demonstrate error handling and recovery'
-      );
-    });
-  });
-});
 ````
 
 ## File: tests/lib/test-harness.ts
@@ -5147,6 +4918,388 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
 };
 ````
 
+## File: tests/integration/workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import { handleUserQuery } from '../../src/core/loop';
+import { createMemAPI } from '../../src/core/mem-api';
+import simpleGit from 'simple-git';
+import type { StatusUpdate } from '../../src/types';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockLLMQueryWithSpy,
+  type TestHarnessState,
+} from '../lib/test-harness';
+describe('Agent Workflow Integration Tests', () => {
+  let harness: TestHarnessState;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  describe('Complete Workflow Integration', () => {
+    it('should execute a complete project lifecycle', async () => {
+      const sessionId = 'project-lifecycle';
+
+      // Phase 1: Initialize project
+      const initMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll initialize a new project with basic structure.</think>
+<typescript>
+// Create project structure
+await mem.writeFile('package.json', JSON.stringify({
+  name: 'test-project',
+  version: '1.0.0',
+  description: 'A test project',
+  scripts: { start: 'node index.js', test: 'jest' }
+}, null, 2));
+
+await mem.writeFile('README.md', '# Test Project\\n\\nThis is a comprehensive test project.');
+await mem.writeFile('index.js', 'console.log(\\"Hello, World!\\");');
+await mem.createDir('src');
+await mem.writeFile('src/app.js', '// Application logic');
+</typescript>`,
+        `<think>Project initialized. Now commit the initial setup.</think>
+<typescript>
+await mem.commitChanges('feat: initialize project with basic structure');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Project initialized successfully with package.json, README, main entry point, and source directory.</reply>`,
+      ]);
+
+      const initResult = await handleUserQuery(
+        'Initialize a new Node.js project',
+        harness.mockConfig,
+        sessionId,
+        initMockLLMQuery
+      );
+
+      expect(initResult).toContain('Project initialized successfully');
+
+      // Phase 2: Add features
+      const featureMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll add features to the existing project.</think>
+<typescript>
+// Add feature files
+await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
+await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
+await mem.createDir('tests');
+await mem.writeFile('tests/utils.test.js', '// Test utilities\\nconst { formatDate } = require(\\\'../src/utils.js\\\');');
+</typescript>`,
+        `<think>Features added. Commit the new functionality.</think>
+<typescript>
+await mem.commitChanges('feat: add utilities, config, and test structure');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Added utility functions, configuration, and test structure to the project.</reply>`,
+      ]);
+
+      const featureResult = await handleUserQuery(
+        'Add utilities and configuration to the project',
+        harness.mockConfig,
+        sessionId,
+        featureMockLLMQuery
+      );
+
+      expect(featureResult).toContain('Added utility functions');
+
+      // Phase 3: Update existing files
+      const updateMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll update the main application to use the new utilities.</think>
+<typescript>
+// Update main file
+const indexContent = await mem.readFile('index.js');
+const updatedIndex = indexContent.replace(
+  'console.log(\\"Hello, World!\\");',
+  'const { formatDate } = require(\\"./src/utils.js\\");\\nconsole.log(\\"Current time:\\", formatDate(new Date()));'
+);
+await mem.updateFile('index.js', indexContent, updatedIndex);
+
+// Update README
+const readmeContent = await mem.readFile('README.md');
+const updatedReadme = readmeContent + '\\n\\n## Usage\\n\\nRun with: npm start';
+await mem.updateFile('README.md', readmeContent, updatedReadme);
+</typescript>`,
+        `<think>Main application updated. Commit the improvements.</think>
+<typescript>
+await mem.commitChanges('feat: integrate utilities and update documentation');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>Updated the main application to use utilities and improved documentation.</reply>`,
+      ]);
+
+      const updateResult = await handleUserQuery(
+        'Update the main application to use the new utilities',
+        harness.mockConfig,
+        sessionId,
+        updateMockLLMQuery
+      );
+
+      expect(updateResult).toContain('Updated the main application');
+
+      // Verify complete project state
+      const mem = harness.mem;
+
+      // Check all expected files exist
+      const expectedFiles = [
+        'package.json',
+        'README.md',
+        'index.js',
+        'src/app.js',
+        'src/utils.js',
+        'src/config.js',
+        'tests/utils.test.js',
+      ];
+
+      for (const file of expectedFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(true);
+      }
+
+      // Verify file contents
+      const indexContent = await mem.readFile('index.js');
+      expect(indexContent).toContain('formatDate');
+      expect(indexContent).toContain('./src/utils.js');
+
+      const readmeContent = await mem.readFile('README.md');
+      expect(readmeContent).toContain('Usage');
+      expect(readmeContent).toContain('npm start');
+
+      // Verify git history shows all three commits (plus initial .gitignore commit)
+      const log = await harness.git.log();
+      expect(log.all.length).toBe(4);
+      expect(log.all[0]?.message).toBe(
+        'feat: integrate utilities and update documentation'
+      );
+      expect(log.all[1]?.message).toBe(
+        'feat: add utilities, config, and test structure'
+      );
+      expect(log.all[2]?.message).toBe(
+        'feat: initialize project with basic structure'
+      );
+    });
+
+    it('should handle complex file operations and git workflow', async () => {
+      const statusUpdates: StatusUpdate[] = [];
+
+      const captureStatusUpdate = (update: StatusUpdate) => {
+        statusUpdates.push(update);
+      };
+
+      const complexMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
+<typescript>
+// Create multiple related files
+await mem.writeFile('docs/intro.md', '# Introduction\\n\\nProject introduction.');
+await mem.writeFile('docs/guide.md', '# User Guide\\n\\nDetailed user guide.');
+await mem.writeFile('docs/api.md', '# API Reference\\n\\nAPI documentation.');
+
+// Create a temporary file that will be renamed
+await mem.writeFile('docs/temp.md', '# Temporary\\n\\nThis will be renamed.');
+
+// Create a file that will be deleted
+await mem.writeFile('docs/obsolete.md', '# Obsolete\\n\\nThis will be deleted.');
+
+// List files to verify
+const docsFiles = await mem.listFiles('docs');
+console.log('Files created:', docsFiles);
+</typescript>`,
+        `<think>Now I'll perform file operations: rename and delete.</think>
+<typescript>
+// Rename temp.md to overview.md
+await mem.rename('docs/temp.md', 'docs/overview.md');
+
+// Delete the obsolete file
+await mem.deletePath('docs/obsolete.md');
+
+// Update the introduction to reference the overview
+const introContent = await mem.readFile('docs/intro.md');
+const updatedIntro = introContent + '\\n\\nSee also: [[Overview]] for a project overview.';
+await mem.updateFile('docs/intro.md', introContent, updatedIntro);
+
+// Verify git staged files
+const stagedFiles = await mem.getChangedFiles();
+console.log('Staged files:', stagedFiles);
+</typescript>`,
+        `<think>File operations complete. Now commit and verify git operations.</think>
+<typescript>
+await mem.commitChanges('feat: reorganize documentation structure');
+
+// Test git operations
+const gitDiff = await mem.gitDiff('docs/intro.md');
+const gitLog = await mem.gitLog('docs/', 5);
+
+console.log('Git diff for intro.md:', gitDiff);
+console.log('Git log for docs/:', gitLog);
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>
+Successfully performed complex file operations including creating multiple documentation files, renaming temp.md to overview.md, deleting obsolete.md, updating the introduction, and committing all changes with proper git history tracking.
+</reply>`,
+      ]);
+
+      const result = await handleUserQuery(
+        'Perform complex file operations with git workflow',
+        harness.mockConfig,
+        'complex-ops-session',
+        complexMockLLMQuery,
+        captureStatusUpdate
+      );
+
+      expect(result).toContain(
+        'Successfully performed complex file operations'
+      );
+
+      // Verify status updates were captured throughout the process
+      expect(statusUpdates.length).toBeGreaterThan(0);
+      const types = new Set(statusUpdates.map((u) => u.type));
+      expect(types.has('think')).toBe(true);
+      expect(types.has('act')).toBe(true);
+
+      // Verify final file state
+      const mem = harness.mem;
+
+      // Files that should exist
+      const existingFiles = [
+        'docs/intro.md',
+        'docs/guide.md',
+        'docs/api.md',
+        'docs/overview.md',
+      ];
+      for (const file of existingFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(true);
+      }
+
+      // Files that should not exist
+      const deletedFiles = ['docs/temp.md', 'docs/obsolete.md'];
+      for (const file of deletedFiles) {
+        const exists = await mem.fileExists(file);
+        expect(exists).toBe(false);
+      }
+
+      // Verify content was updated
+      const introContent = await mem.readFile('docs/intro.md');
+      expect(introContent).toContain('[[Overview]]');
+
+      // Verify git operations worked (plus initial .gitignore commit)
+      const log = await harness.git.log();
+      expect(log.all.length).toBe(2);
+      expect(log.all[0]?.message).toBe(
+        'feat: reorganize documentation structure'
+      );
+    });
+
+    it('should handle error scenarios and recovery gracefully', async () => {
+      const statusUpdates: StatusUpdate[] = [];
+
+      const captureStatusUpdate = (update: StatusUpdate) => {
+        statusUpdates.push(update);
+      };
+
+      const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
+        `<think>I'll attempt various operations to test error handling and recovery.</think>
+<typescript>
+// This should fail - file doesn't exist
+try {
+  await mem.readFile('non-existent-config.json');
+} catch (error) {
+  console.log('Expected error caught:', error.message);
+}
+
+// This should also fail - invalid path traversal attempt
+try {
+  await mem.writeFile('../../../etc/malicious.txt', 'hack');
+} catch (error) {
+  console.log('Security error caught:', error.message);
+}
+
+// This should work - create the missing file
+await mem.writeFile('non-existent-config.json', '{"app": "test", "version": "1.0.0"}');
+</typescript>`,
+        `<think>Now I'll test additional error scenarios.</think>
+<typescript>
+// Try to update a file that doesn't exist
+try {
+  await mem.updateFile('missing.md', 'old content', 'new content');
+} catch (error) {
+  console.log('Update error caught:', error.message);
+  // Create the file instead
+  await mem.writeFile('missing.md', '# Created after error\\n\\nContent here.');
+}
+
+// Try to delete a file that doesn't exist
+try {
+  await mem.deletePath('already-deleted.md');
+} catch (error) {
+  console.log('Delete error caught:', error.message);
+}
+</typescript>`,
+        `<think>Error recovery completed. Now commit all successful operations.</think>
+<typescript>
+await mem.commitChanges('feat: demonstrate error handling and recovery');
+</typescript>`,
+        `<think>Replying to user.</think>
+<reply>
+Successfully demonstrated comprehensive error handling and recovery. Caught and handled file not found errors, security errors for path traversal attempts, and successfully recovered by creating missing files when appropriate.
+</reply>`,
+      ]);
+
+      const result = await handleUserQuery(
+        'Test error handling and recovery scenarios',
+        harness.mockConfig,
+        'error-test-session',
+        errorRecoveryMockLLMQuery,
+        captureStatusUpdate
+      );
+
+      expect(result).toContain(
+        'Successfully demonstrated comprehensive error handling'
+      );
+
+      // Verify status updates were captured (should include think and act updates)
+      expect(statusUpdates.length).toBeGreaterThan(0);
+      const types = new Set(statusUpdates.map((u) => u.type));
+      expect(types.has('think')).toBe(true);
+      expect(types.has('act')).toBe(true);
+
+      // Verify files that should exist after recovery
+      const mem = harness.mem;
+      const configExists = await mem.fileExists('non-existent-config.json');
+      expect(configExists).toBe(true);
+
+      const missingExists = await mem.fileExists('missing.md');
+      expect(missingExists).toBe(true);
+
+      // Verify content
+      const configContent = await mem.readFile('non-existent-config.json');
+      expect(configContent).toContain('test');
+      expect(configContent).toContain('1.0.0');
+
+      const missingContent = await mem.readFile('missing.md');
+      expect(missingContent).toContain('Created after error');
+
+      // Verify git commit was successful despite errors (plus initial .gitignore commit)
+      const log = await harness.git.log();
+      expect(log.all.length).toBe(2);
+      expect(log.all[0]?.message).toBe(
+        'feat: demonstrate error handling and recovery'
+      );
+    });
+  });
+});
+````
+
 ## File: src/core/mem-api/file-ops.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -5394,9 +5547,9 @@ export const fileExists =
       await fs.access(fullPath);
       return true;
     } catch (error: unknown) {
-      // Check for ENOENT error more robustly
-      const errorCode = (error as any).code;
-      if (errorCode === 'ENOENT') {
+      // fs.access throws an error if path doesn't exist. We expect ENOENT and should return false.
+      // For other errors (e.g., permission issues), let the error propagate through our handler.
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
         return false;
       }
       throw handleFileError(error, 'check file existence', filePath);
@@ -5516,112 +5669,6 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 - **job-id**:
 - **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
 - **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
-````
-
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/server.js",
-    "start:termux": "npm run start",
-    "start:standard": "npm run start",
-    "build": "tsc",
-    "build:auto": "node scripts/build.js",
-    "build:termux": "node scripts/build.js termux",
-    "build:standard": "node scripts/build.js standard",
-    "dev": "tsx watch src/server.ts",
-    "dev:termux": "npm run dev",
-    "dev:standard": "npm run dev",
-    "test": "jest",
-    "lint": "eslint 'src/**/*.ts'",
-    "install:auto": "node scripts/install.js",
-    "install:termux": "node scripts/install.js termux",
-    "install:standard": "node scripts/install.js standard",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "fastmcp": "^1.21.0",
-    "dotenv": "^16.4.5",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^4.0.2",
-    "ts-jest": "^29.1.2",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "license": "MIT"
-}
-````
-
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt"
-      //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
 ````
 
 ## File: src/core/mem-api/graph-ops.ts
@@ -5797,6 +5844,112 @@ export const searchGlobal =
     }
     return matchingFiles;
   };
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastmcp": "^1.21.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
+````
+
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
 ````
 
 ## File: src/core/loop.ts
