@@ -3,7 +3,12 @@
 
 discrepancy analysis
 
+
 ===
+
+we need many test cases to cover all llm tools so it can function as expected readme and user specs
+
+=== DOING
 
 create mcp test cases to guardrails project expectations from readme.md and specs
 

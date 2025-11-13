@@ -83,7 +83,7 @@ export const validatePathBounds = (
     // Handle non-existent paths specially
     try {
       canonicalTarget = getCanonicalPath(testPath);
-    } catch (_error) {
+    } catch {
       // Path doesn't exist, use normalized path instead
       canonicalTarget = platform.normalizePath(path.resolve(testPath));
     }
@@ -98,7 +98,7 @@ export const validatePathBounds = (
           // Use lstat to get the symlink itself, not its target
           canonicalTarget = platform.normalizePath(path.resolve(testPath));
         }
-      } catch (_error) {
+      } catch {
         // File doesn't exist, which is fine for write operations
         // The canonicalTarget from resolveSecurePath is still valid
       }
