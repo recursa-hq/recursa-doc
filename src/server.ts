@@ -59,13 +59,13 @@ const main = async () => {
               log.info(content || 'Thinking...');
               break;
             case 'act':
-              log.info(message, data as any);
+              log.info(message, data);
               break;
             case 'error':
-              log.error(message, data as any);
+              log.error(message, undefined, data);
               break;
             default:
-              log.debug(message, data as any);
+              log.debug(message, data);
           }
         };
 
@@ -82,9 +82,7 @@ const main = async () => {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          log.error(`Error in process_query: ${errorMessage}`, {
-            stack: error instanceof Error ? error.stack : undefined,
-          });
+          log.error(`Error in process_query: ${errorMessage}`, error instanceof Error ? error : new Error(errorMessage));
           return JSON.stringify({
             error: errorMessage,
             runId: args.runId,

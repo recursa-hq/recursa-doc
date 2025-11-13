@@ -21,7 +21,7 @@ const mockFetch = jest.fn().mockImplementation(() =>
     statusText: 'OK',
   })
 );
-(global as any).fetch = mockFetch;
+global.fetch = mockFetch as jest.Mock;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',

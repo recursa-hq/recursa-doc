@@ -17,7 +17,8 @@ describe('MemAPI Graph Ops Integration Tests', () => {
   let mem: MemAPI;
 
   beforeEach(async () => {
-    harness = await createTestHarness();
+    // Disable .gitignore for these tests so we can correctly search .log files
+    harness = await createTestHarness({ withGitignore: false });
     mem = harness.mem;
   });
 
@@ -65,8 +66,8 @@ describe('MemAPI Graph Ops Integration Tests', () => {
     await mem.writeFile('PageB.md', 'Links to [[Page C]].');
     // PageC has no outgoing links
     await mem.writeFile('PageC.md', 'No links.');
-    // PageD links to PageA
-    await mem.writeFile('PageD.md', 'Links to [[Page A]].');
+    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
+    await mem.writeFile('PageD.md', 'Links to [[PageA]].');
 
     // Test outgoing links
     const outgoingA = await mem.getOutgoingLinks('PageA.md');

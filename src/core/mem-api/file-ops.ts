@@ -232,23 +232,16 @@ export const rename =
 export const fileExists =
   (graphRoot: string) =>
   async (filePath: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
     try {
-      // Additional validation - don't throw for non-existent files in fileExists
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true, requireExistence: false })) {
-        return false; // Treat security violations as non-existent
-      }
-
+      // resolveSecurePath will throw a SecurityError on traversal attempts.
+      // fs.access will throw an error if the file doesn't exist.
+      // Both should result in `false`.
+      const fullPath = resolveSecurePath(graphRoot, filePath);
       await fs.access(fullPath);
       return true;
-    } catch (error: unknown) {
-      // fs.access throws an error if path doesn't exist. We expect ENOENT and should return false.
-      // For other errors (e.g., permission issues), let the error propagate through our handler.
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-        return false;
-      }
-      throw handleFileError(error, 'check file existence', filePath);
+    } catch {
+      // Any error (security, not found, permissions) results in false.
+      return false;
     }
   };
 

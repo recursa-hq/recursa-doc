@@ -46,7 +46,9 @@ const checkCondition = (content: string, condition: Condition): string[] => {
   if (condition.type === 'property') {
     const lines = content.split('\n');
     for (const line of lines) {
-      if (line.trim() === `${condition.key}:: ${condition.value}`) {
+      // Handle indented properties by removing the leading list marker
+      const trimmedLine = line.trim().replace(/^- /, '');
+      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
         matches.push(line);
       }
     }
@@ -109,20 +111,23 @@ export const getBacklinks =
   (graphRoot: string) =>
   async (filePath: string): Promise<string[]> => {
     const targetBaseName = path.basename(filePath, path.extname(filePath));
-    const linkPattern = `[[${targetBaseName}]]`;
+    // Escape special regex characters in the base name and allow for whitespace
+    const escapedTarget = targetBaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const linkPatternRegex = new RegExp(`\\[\\[\\s*${escapedTarget}\\s*\\]\\]`);
+
     const backlinks: string[] = [];
     const isIgnored = await createIgnoreFilter(graphRoot);
 
     for await (const currentFilePath of walk(graphRoot, isIgnored)) {
       // Don't link to self
-      if (path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)) {
+      if (path.resolve(currentFilePath) === resolveSecurePath(graphRoot, filePath)) {
         continue;
       }
 
       if (currentFilePath.endsWith('.md')) {
         try {
           const content = await fs.readFile(currentFilePath, 'utf-8');
-          if (content.includes(linkPattern)) {
+          if (linkPatternRegex.test(content)) {
             backlinks.push(path.relative(graphRoot, currentFilePath));
           }
         } catch {
