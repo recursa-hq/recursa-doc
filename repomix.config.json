@@ -20,7 +20,7 @@
     "includeFullDirectoryStructure": false,
     "tokenCountTree": false,
     "git": {
-      "sortByChanges": true,execute all parts in single trx
+      "sortByChanges": true,
       "sortByChangesMaxCommits": 100,
       "includeDiffs": false,
       "includeLogs": false,
@@ -37,8 +37,8 @@
       "agent-spawner.droid.md",
       "AGENTS.md",
       "repo",
-      "prompt",
-   //   "tests"
+      "prompt"
+      //   "tests"
     ]
   },
   "security": {

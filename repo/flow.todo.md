@@ -5,10 +5,26 @@ discrepancy analysis
 
 ===
 
+create mcp test cases to guardrails project expectations from readme.md and specs
+
+```
+- no MOCK, no spy
+- real implementation
+- each cases isolated and idempotent, clean tmp files and dirs
+- real command Run
+- test.util.ts to be used by test files
+```
+
+===
+
 fix fail test
 
 
 fix all fail test without bandaids fake fix to comply with readme.md spec and real Implementation verification
+
+=== DOING
+
+lets use fastmcp programmatic api instead, so we can have fewer codebase. do it without causing fail test cases
 
 === DONE
 
