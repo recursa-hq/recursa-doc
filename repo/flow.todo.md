@@ -7,6 +7,18 @@ discrepancy analysis
 
 programmatic API
 
+===
+
+need optional multitenancy
+
+===
+
+bun tsc -b problems
+
+=== DONE
+
+I dont think current openrouter implementation follows the programmatic api and best practices like using OpenRouter Provider for Vercel AI SDK
+
 === DONE
 
 we need logseq-org-mode validator

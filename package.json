@@ -22,8 +22,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "fastmcp": "^1.21.0",
+    "@openrouter/ai-sdk-provider": "^0.7.5",
+    "ai": "^4.3.17",
     "dotenv": "^16.4.5",
+    "fastmcp": "^1.21.0",
     "simple-git": "^3.20.0",
     "zod": "^3.23.8"
   },

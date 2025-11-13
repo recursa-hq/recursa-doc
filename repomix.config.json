@@ -37,8 +37,10 @@
       "agent-spawner.droid.md",
       "AGENTS.md",
       "repo",
-      "prompt"
-      // "docs"
+      "prompt",
+      "scripts",
+      "docs",
+      "coverage"
       //   "tests"
     ]
   },

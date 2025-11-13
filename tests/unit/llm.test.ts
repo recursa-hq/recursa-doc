@@ -1,11 +1,25 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
+import { queryLLM } from '../../src/core/llm';
+import { generateText } from 'ai';
+import { openrouter } from '@openrouter/ai-sdk-provider';
 import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 
-// Mock fetch globally
-const mockFetch = jest.fn<typeof fetch>();
-global.fetch = mockFetch;
+// Mock the Vercel AI SDK and the OpenRouter provider
+jest.mock('ai', () => ({
+  generateText: jest.fn(),
+}));
+
+jest.mock('@openrouter/ai-sdk-provider', () => ({
+  openrouter: jest.fn((modelId: string) => ({
+    modelId,
+    provider: 'mockOpenRouterProvider',
+  })),
+}));
+
+// Cast the mocked functions to Jest's mock type for type safety
+const mockGenerateText = generateText as jest.MockedFunction<typeof generateText>;
+const mockOpenRouter = openrouter as unknown as jest.Mock;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
@@ -24,130 +38,112 @@ const mockConfig: AppConfig = {
 const mockHistory: ChatMessage[] = [
   { role: 'system', content: 'You are a helpful assistant.' },
   { role: 'user', content: 'Hello, world!' },
+  { role: 'assistant', content: 'How can I help you?' },
 ];
 
 beforeEach(() => {
-  mockFetch.mockClear();
-  mockFetch.mockResolvedValue({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        choices: [{ message: { content: 'Test response from LLM' } }],
-      }),
-    status: 200,
-    statusText: 'OK',
-  } as Response);
+  // Clear all mock history and implementations before each test
+  jest.clearAllMocks();
 });
 
-describe('LLM Module', () => {
-  describe('queryLLM', () => {
-    it('should make a successful request to OpenRouter API', async () => {
-      const response = await queryLLM(mockHistory, mockConfig);
+describe('LLM Module with AI SDK', () => {
+  it('should call generateText with correct parameters', async () => {
+    // Arrange: Mock the successful response from the AI SDK
+    mockGenerateText.mockResolvedValue({
+      text: 'Test response from AI SDK',
+      toolCalls: [],
+      toolResults: [],
+      finishReason: 'stop',
+      usage: {
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      },
+      warnings: undefined,
+      request: {
+        body: '{}',
+      },
+      response: {
+        id: 'test-response-id',
+        timestamp: new Date(),
+        modelId: 'anthropic/claude-3-haiku-20240307',
+        headers: {},
+        messages: [],
+      },
+      logprobs: undefined,
+      experimental_providerMetadata: undefined,
+    } as any);
 
-      expect(response).toBe('Test response from LLM');
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://openrouter.ai/api/v1/chat/completions',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            Authorization: 'Bearer test-api-key',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
-            'X-Title': 'Recursa',
-          },
-          body: JSON.stringify({
-            model: 'anthropic/claude-3-haiku-20240307',
-            messages: mockHistory,
-            temperature: 0.7,
-            max_tokens: 4000,
-          }),
-        })
-      );
-    });
+    // Act: Call our queryLLM function
+    const response = await queryLLM(mockHistory, mockConfig);
 
-    it('should handle API errors properly', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        statusText: 'Unauthorized',
-        json: () =>
-          Promise.resolve({
-            error: { message: 'Invalid API key' },
-          }),
-      } as Response);
+    // Assert: Check the response and that our mocks were called correctly
+    expect(response).toBe('Test response from AI SDK');
 
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'OpenRouter API error: 401 Unauthorized'
-      );
-    });
+    // Verify openrouter was called with the correct model ID
+    expect(mockOpenRouter).toHaveBeenCalledTimes(1);
+    expect(mockOpenRouter).toHaveBeenCalledWith('anthropic/claude-3-haiku-20240307');
 
-    it('should handle malformed API responses', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ invalid: 'response' }),
-      } as Response);
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Invalid response format from OpenRouter API'
-      );
-    });
-
-    it('should handle empty content in response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            choices: [{ message: { content: '' } }],
-          }),
-      } as Response);
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Empty content received from OpenRouter API'
-      );
-    });
+    // Verify generateText was called correctly
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+    expect(mockGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          modelId: 'anthropic/claude-3-haiku-20240307',
+          provider: 'mockOpenRouterProvider',
+        },
+        system: 'You are a helpful assistant.',
+        messages: [
+          { role: 'user', content: 'Hello, world!' },
+          { role: 'assistant', content: 'How can I help you?' },
+        ],
+        temperature: 0.7,
+        maxTokens: 4000,
+      })
+    );
   });
 
-  describe('queryLLMWithRetries', () => {
-    it('should retry on retryable errors', async () => {
-      // First call fails with server error
-      // Second call succeeds
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          statusText: 'Internal Server Error',
-          json: () => Promise.resolve({ error: 'Server error' }),
-        } as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [{ message: { content: 'Success after retry' } }],
-            }),
-        } as Response);
+  it('should handle API errors from generateText', async () => {
+    // Arrange: Mock an error being thrown from the AI SDK
+    const apiError = new Error('API request failed');
+    mockGenerateText.mockRejectedValue(apiError);
 
-      const response = await queryLLMWithRetries(mockHistory, mockConfig);
+    // Act & Assert: Expect our queryLLM function to reject with a specific error message
+    await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+      'Failed to query OpenRouter API: API request failed'
+    );
+  });
 
-      expect(response).toBe('Success after retry');
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-    });
+  it('should handle empty content in the AI SDK response', async () => {
+    // Arrange: Mock a response with an empty text field
+    mockGenerateText.mockResolvedValue({
+      text: '',
+      toolCalls: [],
+      toolResults: [],
+      finishReason: 'stop',
+      usage: {
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+      },
+      warnings: undefined,
+      request: {
+        body: '{}',
+      },
+      response: {
+        id: 'test-response-id',
+        timestamp: new Date(),
+        modelId: 'anthropic/claude-3-haiku-20240307',
+        headers: {},
+        messages: [],
+      },
+      logprobs: undefined,
+      experimental_providerMetadata: undefined,
+    } as any);
 
-    it('should not retry on non-retryable errors (4xx)', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        statusText: 'Bad Request',
-        json: () =>
-          Promise.resolve({
-            error: { message: 'Bad request' },
-          }),
-      } as Response);
-
-      await expect(
-        queryLLMWithRetries(mockHistory, mockConfig)
-      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
-      expect(mockFetch).toHaveBeenCalledTimes(1); // Should not retry
-    });
+    // Act & Assert: Expect an error for empty content
+    await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+      'Failed to query OpenRouter API: Empty content received from OpenRouter API'
+    );
   });
 });

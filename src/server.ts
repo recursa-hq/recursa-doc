@@ -1,8 +1,18 @@
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
 import { loadAndValidateConfig } from './config.js';
-import { FastMCP, UserError } from 'fastmcp';
+import { FastMCP, UserError, type Context } from 'fastmcp';
 import { z } from 'zod';
+import { queryLLMWithRetries } from './core/llm.js';
+import { IncomingMessage } from 'http';
+
+interface SessionContext extends Record<string, unknown> {
+  sessionId: string;
+  requestId: string;
+  stream: {
+    write: (content: { type: 'text'; text: string }) => Promise<void>;
+  };
+}
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
@@ -12,20 +22,18 @@ const main = async () => {
     const config = await loadAndValidateConfig();
 
     // 2. Create FastMCP server
-    const server = new FastMCP({
+    const server = new FastMCP<SessionContext>({
       name: 'recursa-server',
       version: '0.1.0',
-      authenticate: async (request) => {
-        const authHeader = request.headers.get('authorization');
-        const token = authHeader?.startsWith('Bearer ')
+      authenticate: async (request: IncomingMessage) => {
+        const authHeader = request.headers['authorization'];
+        const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
           ? authHeader.slice(7)
           : null;
 
         if (!token || token !== config.recursaApiKey) {
           logger.warn('Authentication failed', {
-            remoteAddress: (
-              request as { socket?: { remoteAddress?: string } }
-            ).socket?.remoteAddress, // Best effort IP logging
+            remoteAddress: request.socket?.remoteAddress, // Best effort IP logging
           });
           throw new Response(null, {
             status: 401,
@@ -33,8 +41,15 @@ const main = async () => {
           });
         }
 
-        // Return an empty object for success, as we don't need to store user data in the session context itself
-        return {};
+        // For simplicity, we'll create minimal session context
+        // In a real implementation, you might extract more session info from the request
+        return {
+          sessionId: 'default-session', // You'd typically generate or extract this
+          requestId: 'default-request', // You'd typically generate or extract this
+          stream: {
+            write: async () => {}, // Placeholder - actual stream will be provided by FastMCP
+          },
+        } as SessionContext;
       },
     });
 
@@ -59,10 +74,9 @@ const main = async () => {
       parameters: z.object({
         query: z.string().describe('The user query to process.'),
       }),
-      annotations: {
-        streamingHint: true,
-      },
-      execute: async (args, { log, sessionId, requestId, streamContent }) => {
+      execute: async (args, context: Context<SessionContext>) => {
+        const { log, session } = context;
+        const { sessionId, requestId, stream } = session!;
         if (!sessionId) {
           throw new UserError(
             'Session ID is missing. This tool requires a session.'
@@ -73,13 +87,21 @@ const main = async () => {
             'Request ID is missing. This tool requires a request ID.'
           );
         }
+        if (!stream) {
+          throw new UserError('This tool requires a streaming connection.');
+        }
 
         try {
+          const streamContent = (content: { type: 'text'; text: string }) => {
+            return stream.write(content);
+          };
+
           const finalReply = await handleUserQuery(
             args.query,
             config,
             sessionId,
             requestId,
+            queryLLMWithRetries,
             streamContent
           );
 
@@ -87,7 +109,11 @@ const main = async () => {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          log.error(`Error in process_query: ${errorMessage}`, error instanceof Error ? error : new Error(errorMessage));
+          const errorContext =
+            error instanceof Error
+              ? { message: error.message, stack: error.stack }
+              : { message: errorMessage };
+          log.error(`Error in process_query: ${errorMessage}`, errorContext);
           throw new UserError(errorMessage);
         }
       },
@@ -96,7 +122,7 @@ const main = async () => {
     // 5. Start the server
     await server.start({
       transportType: 'httpStream',
-      httpStream: { port: config.httpPort },
+      httpStream: { port: config.httpPort, endpoint: '/mcp' },
     });
 
     logger.info(
