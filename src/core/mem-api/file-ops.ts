@@ -30,9 +30,9 @@ const atomicWriteFile = async (filePath: string, content: string): Promise<void>
         try {
           await fs.rename(tempPath, filePath);
           return; // Success
-        } catch (error: Error & { code?: string }) {
-          lastError = error;
-          if (error.code === 'EBUSY' || error.code === 'EPERM') {
+        } catch (error: unknown) {
+          lastError = error as Error;
+          if (hasErrorCode(error) && (error.code === 'EBUSY' || error.code === 'EPERM')) {
             retries--;
             await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
             continue;
@@ -57,9 +57,16 @@ const atomicWriteFile = async (filePath: string, content: string): Promise<void>
 };
 
 /**
+ * Type guard to check if error has a code property
+ */
+const hasErrorCode = (error: unknown): error is Error & { code?: string } => {
+  return error instanceof Error && 'code' in error;
+};
+
+/**
  * Enhanced error handler for file operations
  */
-const handleFileError = (error: Error & { code?: string }, operation: string, filePath: string): Error => {
+const handleFileError = (error: unknown, operation: string, filePath: string): Error => {
   const nodeError = error as NodeJS.ErrnoException;
 
   // Handle platform-specific errors
@@ -100,8 +107,8 @@ const ensureParentDirectories = async (filePath: string): Promise<void> => {
 
   try {
     await fs.mkdir(dir, { recursive: true });
-  } catch (error: Error & { code?: string }) {
-    if (error.code !== 'EEXIST') {
+  } catch (error: unknown) {
+    if (hasErrorCode(error) && error.code !== 'EEXIST') {
       throw handleFileError(error, 'create parent directories', dir);
     }
   }
@@ -235,8 +242,8 @@ export const fileExists =
 
       await fs.access(fullPath);
       return true;
-    } catch (error: Error & { code?: string }) {
-      if (error.code === 'ENOENT') {
+    } catch (error: unknown) {
+      if (hasErrorCode(error) && error.code === 'ENOENT') {
         return false;
       }
       throw handleFileError(error, 'check file existence', filePath);

@@ -53,7 +53,10 @@ export const handleUserQuery = async (
   config: AppConfig,
   sessionId?: string,
   // Allow overriding the LLM query function (with its retry logic) for testing purposes
-  queryLLM: typeof defaultQueryLLM = defaultQueryLLM,
+  queryLLM: ((
+    history: ChatMessage[],
+    config: AppConfig,
+  ) => Promise<string | unknown>) = defaultQueryLLM,
   // Optional callback for real-time status updates
   onStatusUpdate?: (update: StatusUpdate) => void
 ): Promise<string> => {

@@ -173,13 +173,13 @@ describe('MCP Protocol E2E Test', () => {
     const listToolsResponseValue =
       listToolsResponse.value as MCPListToolsResponse;
     expect(listToolsResponseValue.id).toBe(listToolsRequestId);
-    expect(listToolsResponseValue.result.tools).toBeArray();
+    expect(listToolsResponseValue.result.tools).toBeInstanceOf(Array);
     expect(listToolsResponseValue.result.tools.length).toBeGreaterThan(0);
     const processQueryTool = listToolsResponseValue.result.tools.find(
       (t: MCPTool) => t.name === 'process_query'
     );
     expect(processQueryTool).toBeDefined();
-    expect(processQueryTool.description).toBeString();
+    expect(typeof processQueryTool.description).toBe('string');
 
     // NOTE: Testing the 'call-tool' for 'process_query' is intentionally omitted here.
     // A true process-level E2E test for the agent loop would require either:

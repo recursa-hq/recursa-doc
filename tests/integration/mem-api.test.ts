@@ -76,7 +76,8 @@ describe('MemAPI Integration Tests', () => {
 
     const log = await mem.gitLog(filePath, 1);
 
-    expect(log.length).toBe(1);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toBeDefined();
     expect(log[0].message).toBe(commitMessage);
   });
 
@@ -120,7 +121,8 @@ No links here.
     const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
     const results = await mem.queryGraph(query);
 
-    expect(results.length).toBe(1);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
     expect(results[0].filePath).toBe('PageA.md');
   });
 
