@@ -9,6 +9,10 @@ make codebase radically DRY for less code, without causing fail tests or feature
 
 ===
 
+does the llm gets useful feedback on failure on succesfull sandbox code run?
+
+=== DONE
+
 make this recursa-server mcp publish ready as per fastmcp best practices
 
 === DONE
@@ -27,7 +31,7 @@ create mcp test cases to guardrails project expectations from readme.md and spec
 - test.util.ts to be used by test files
 ```
 
-=== DOING
+=== DONE
 
 fix fail test
 

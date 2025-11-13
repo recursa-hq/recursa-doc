@@ -4,9 +4,9 @@ import {
   expect,
   beforeEach,
   afterEach,
+  jest,
 } from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
-import type { StatusUpdate } from '../../src/types';
 import {
   createTestHarness,
   cleanupTestHarness,
@@ -57,7 +57,9 @@ await mem.commitChanges('feat: initialize project with basic structure');
         'Initialize a new Node.js project',
         harness.mockConfig,
         sessionId,
-        initMockLLMQuery
+        'run-1',
+        initMockLLMQuery,
+        async () => {}
       );
 
       expect(initResult).toContain('Project initialized successfully');
@@ -84,7 +86,9 @@ await mem.commitChanges('feat: add utilities, config, and test structure');
         'Add utilities and configuration to the project',
         harness.mockConfig,
         sessionId,
-        featureMockLLMQuery
+        'run-2',
+        featureMockLLMQuery,
+        async () => {}
       );
 
       expect(featureResult).toContain('Added utility functions');
@@ -118,7 +122,9 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
         'Update the main application to use the new utilities',
         harness.mockConfig,
         sessionId,
-        updateMockLLMQuery
+        'run-3',
+        updateMockLLMQuery,
+        async () => {}
       );
 
       expect(updateResult).toContain('Updated the main application');
@@ -166,11 +172,9 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
     });
 
     it('should handle complex file operations and git workflow', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
+      const streamContentMock = jest.fn<
+        (content: { type: 'text'; text: string }) => Promise<void>
+      >();
 
       const complexMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
@@ -228,8 +232,9 @@ Successfully performed complex file operations including creating multiple docum
         'Perform complex file operations with git workflow',
         harness.mockConfig,
         'complex-ops-session',
+        'run-complex',
         complexMockLLMQuery,
-        captureStatusUpdate
+        streamContentMock
       );
 
       expect(result).toContain(
@@ -237,10 +242,12 @@ Successfully performed complex file operations including creating multiple docum
       );
 
       // Verify status updates were captured throughout the process
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
+      expect(streamContentMock).toHaveBeenCalled();
+      if (streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0].length > 0) {
+        const firstCallArg = streamContentMock.mock.calls[0][0];
+        expect(firstCallArg).toHaveProperty('type', 'text');
+        expect(firstCallArg.text).toContain('demonstrate complex file operations');
+      }
 
       // Verify final file state
       const mem = harness.mem;
@@ -277,11 +284,9 @@ Successfully performed complex file operations including creating multiple docum
     });
 
     it('should handle error scenarios and recovery gracefully', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
+      const streamContentMock = jest.fn<
+        (content: { type: 'text'; text: string }) => Promise<void>
+      >();
 
       const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll attempt various operations to test error handling and recovery.</think>
@@ -335,8 +340,9 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
         'Test error handling and recovery scenarios',
         harness.mockConfig,
         'error-test-session',
+        'run-error',
         errorRecoveryMockLLMQuery,
-        captureStatusUpdate
+        streamContentMock
       );
 
       expect(result).toContain(
@@ -344,10 +350,12 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
       );
 
       // Verify status updates were captured (should include think and act updates)
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
+      expect(streamContentMock).toHaveBeenCalled();
+      if (streamContentMock.mock.calls.length > 0 && streamContentMock.mock.calls[0].length > 0) {
+        const firstCallArg = streamContentMock.mock.calls[0][0];
+        expect(firstCallArg).toHaveProperty('type', 'text');
+        expect(firstCallArg.text).toContain('attempt various operations');
+      }
 
       // Verify files that should exist after recovery
       const mem = harness.mem;

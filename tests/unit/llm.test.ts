@@ -4,28 +4,14 @@ import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 
 // Mock fetch globally
-const mockFetch = jest.fn().mockImplementation(() =>
-  Promise.resolve({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        choices: [
-          {
-            message: {
-              content: 'Test response from LLM',
-            },
-          },
-        ],
-      }),
-    status: 200,
-    statusText: 'OK',
-  })
-);
-global.fetch = mockFetch as jest.Mock;
+const mockFetch = jest.fn<typeof fetch>();
+global.fetch = mockFetch;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
+  recursaApiKey: 'test-api-key',
+  httpPort: 8080,
   llmModel: 'anthropic/claude-3-haiku-20240307',
   llmTemperature: 0.7,
   llmMaxTokens: 4000,
@@ -41,7 +27,16 @@ const mockHistory: ChatMessage[] = [
 ];
 
 beforeEach(() => {
-  (fetch as jest.Mock).mockClear();
+  mockFetch.mockClear();
+  mockFetch.mockResolvedValue({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        choices: [{ message: { content: 'Test response from LLM' } }],
+      }),
+    status: 200,
+    statusText: 'OK',
+  } as Response);
 });
 
 describe('LLM Module', () => {
@@ -50,8 +45,8 @@ describe('LLM Module', () => {
       const response = await queryLLM(mockHistory, mockConfig);
 
       expect(response).toBe('Test response from LLM');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith(
         'https://openrouter.ai/api/v1/chat/completions',
         expect.objectContaining({
           method: 'POST',
@@ -72,17 +67,15 @@ describe('LLM Module', () => {
     });
 
     it('should handle API errors properly', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Invalid API key' },
-            }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: () =>
+          Promise.resolve({
+            error: { message: 'Invalid API key' },
+          }),
+      } as Response);
 
       await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
         'OpenRouter API error: 401 Unauthorized'
@@ -90,12 +83,10 @@ describe('LLM Module', () => {
     });
 
     it('should handle malformed API responses', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ invalid: 'response' }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ invalid: 'response' }),
+      } as Response);
 
       await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
         'Invalid response format from OpenRouter API'
@@ -103,19 +94,13 @@ describe('LLM Module', () => {
     });
 
     it('should handle empty content in response', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: { content: '' },
-                },
-              ],
-            }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: '' } }],
+          }),
+      } as Response);
 
       await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
         'Empty content received from OpenRouter API'
@@ -127,52 +112,42 @@ describe('LLM Module', () => {
     it('should retry on retryable errors', async () => {
       // First call fails with server error
       // Second call succeeds
-      (global.fetch as jest.Mock)
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: false,
-            status: 500,
-            statusText: 'Internal Server Error',
-            json: () => Promise.resolve({ error: 'Server error' }),
-          })
-        )
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                choices: [
-                  {
-                    message: { content: 'Success after retry' },
-                  },
-                ],
-              }),
-          })
-        );
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          json: () => Promise.resolve({ error: 'Server error' }),
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              choices: [{ message: { content: 'Success after retry' } }],
+            }),
+        } as Response);
 
       const response = await queryLLMWithRetries(mockHistory, mockConfig);
 
       expect(response).toBe('Success after retry');
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it('should not retry on non-retryable errors (4xx)', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          statusText: 'Bad Request',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Bad request' },
-            }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: () =>
+          Promise.resolve({
+            error: { message: 'Bad request' },
+          }),
+      } as Response);
 
       await expect(
         queryLLMWithRetries(mockHistory, mockConfig)
       ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
-      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
+      expect(mockFetch).toHaveBeenCalledTimes(1); // Should not retry
     });
   });
 });

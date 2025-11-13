@@ -1803,279 +1803,6 @@ npm run dev:termux
 - ESLint and Prettier dependencies removed for compatibility
 ````
 
-## File: README.md
-````markdown
-# Recursa MCP Server
-
-A Git-Native AI agent with MCP (Model Context Protocol) support that works across multiple platforms.
-
-## 🌟 Cross-Platform Support
-
-✅ **Linux, macOS, Windows (WSL2), Termux/Android**
-📱 **Mobile-optimized** with conservative resource limits
-🔒 **Enhanced security** with cross-platform path protection
-⚡ **Auto-detecting** platform detection and optimization
-
-## 🚀 Quick Start
-
-### Automatic Installation (Recommended)
-```bash
-# Clone and install with automatic platform detection
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-npm run install:auto
-npm run build:auto
-npm run dev
-```
-
-### Platform-Specific Installation
-
-#### Linux, macOS, Windows (WSL2)
-```bash
-npm run install:standard
-npm run build:standard
-npm run dev:standard
-```
-
-#### Termux/Android
-```bash
-# Install Termux from F-Droid, then:
-pkg update && pkg install nodejs npm git
-npm run install:termux
-npm run build:termux
-npm run dev:termux
-```
-
-## 📋 Prerequisites
-
-### Minimum Requirements
-- **Node.js 18+**
-- **Git** for version control
-- **512MB RAM** (1GB+ recommended)
-
-### Platform-Specific
-
-#### Termux/Android
-- Android 7.0+ with Termux app
-- Storage permissions (`termux-setup-storage`)
-
-#### Windows
-- Windows 10/11 (WSL2 recommended)
-- PowerShell or Git Bash
-- Developer mode enabled (for symlink support)
-
-#### Linux
-- Build tools for native modules:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install build-essential
-
-  # Fedora
-  sudo dnf groupinstall "Development Tools"
-  ```
-
-## ⚙️ Configuration
-
-Create a `.env` file with your configuration:
-
-```bash
-# Required
-OPENROUTER_API_KEY=your_api_key_here
-KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
-
-# Optional (platform-specific defaults apply)
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4000
-SANDBOX_TIMEOUT=10000
-SANDBOX_MEMORY_LIMIT=100
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-```
-
-### Platform-Specific Defaults
-
-| Platform | Memory Limit | Max Tokens | Timeout |
-|----------|--------------|------------|---------|
-| Desktop (Linux/macOS/Windows) | 512MB | 4000 | 10s |
-| Termux/Android | 256MB | 2000 | 15s |
-
-## 🏗️ Build & Development
-
-### Available Scripts
-```bash
-# Installation
-npm run install:auto     # Auto-detect platform and install
-npm run install:termux   # Termux/Android specific
-npm run install:standard # Standard platforms
-
-# Building
-npm run build:auto       # Auto-detect platform and build
-npm run build:termux     # Termux/Android specific
-npm run build:standard   # Standard platforms
-
-# Development
-npm run dev              # Standard development
-npm run dev:termux       # Termux development
-npm run dev:standard     # Standard development
-
-# Production
-npm run start            # Start production server
-npm run start:termux     # Termux production
-npm run start:standard   # Standard production
-
-# Utilities
-npm run typecheck        # TypeScript type checking
-npm run test             # Run tests
-```
-
-## 📁 Project Structure
-
-```
-recursa-doc/
-├── src/
-│   ├── lib/
-│   │   └── platform.ts          # Cross-platform utilities
-│   ├── core/
-│   │   ├── mem-api/
-│   │   │   ├── secure-path.ts   # Enhanced path security
-│   │   │   └── file-ops.ts      # Cross-platform file operations
-│   │   └── sandbox.ts           # Platform-aware sandbox
-│   ├── config.ts                # Platform-aware configuration
-│   └── server.ts                # Main server
-├── scripts/
-│   ├── install.js               # Cross-platform installer
-│   └── build.js                 # Cross-platform builder
-├── docs/
-│   ├── PLATFORM_SUPPORT.md      # Detailed platform info
-│   └── TROUBLESHOOTING.md       # Troubleshooting guide
-└── tests/                       # Cross-platform tests
-```
-
-## 🔧 Features
-
-### Cross-Platform Capabilities
-- **Automatic platform detection** (Linux, macOS, Windows, Termux/Android)
-- **Adaptive resource limits** based on platform capabilities
-- **Cross-platform path security** with symlink protection
-- **Atomic file operations** with platform-specific error handling
-- **Platform-aware build system** with automatic fallbacks
-
-### Core Functionality
-- **MCP Protocol Support** for model context integration
-- **Git-Native Operations** with full repository management
-- **Secure File Operations** with path traversal protection
-- **Sandboxed Execution** with resource limits
-- **TypeScript Support** with full type safety
-
-### Security Features
-- **Path Traversal Protection** with cross-platform validation
-- **Symlink Attack Prevention** with configurable policies
-- **Resource Limiting** (memory, CPU, file size)
-- **Sandbox Isolation** with platform-specific constraints
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Installation Fails
-```bash
-# Try platform-specific installation
-npm run install:termux    # For Termux/Android
-npm run install:standard  # For desktop platforms
-
-# Or manual installation
-npm install --ignore-scripts --no-bin-links
-```
-
-#### Permission Errors
-```bash
-# Termux: Setup storage access
-termux-setup-storage
-
-# Linux/macOS: Fix npm permissions
-sudo chown -R $(whoami) ~/.npm
-
-# Windows: Run as administrator or enable Developer Mode
-```
-
-#### Build Fails
-```bash
-# Clean and rebuild
-rm -rf node_modules dist
-npm run install:auto
-npm run build:auto
-
-# Check platform detection
-node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-```
-
-For detailed troubleshooting, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-
-## 📚 Documentation
-
-- [Platform Support](docs/PLATFORM_SUPPORT.md) - Detailed platform information
-- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [API Documentation](docs/API.md) - API reference (coming soon)
-- [Development Guide](docs/DEVELOPMENT.md) - Contributing guidelines (coming soon)
-
-## 🔍 Platform Detection
-
-The server automatically detects and optimizes for your platform:
-
-```typescript
-import platform from './src/lib/platform.js';
-
-console.log(`Platform: ${platform.platformString}`);
-console.log(`Is Termux: ${platform.isTermux}`);
-console.log(`Resource limits:`, platform.getResourceLimits());
-console.log(`Temp directory: ${platform.getTempDir()}`);
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please ensure:
-1. Test on all supported platforms
-2. Use platform detection utilities
-3. Update documentation
-4. Include cross-platform tests
-
-### Development Setup
-```bash
-# Clone and install for development
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-npm run install:auto
-npm run dev
-
-# Run tests across platforms
-npm run test
-```
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- 📖 Check [documentation](docs/)
-- 🐛 [Report issues](https://github.com/your-repo/recursa-doc/issues)
-- 💬 [Discussions](https://github.com/your-repo/recursa-doc/discussions)
-
-## 🔮 Roadmap
-
-- [ ] Additional platform support (FreeBSD, iOS)
-- [ ] Docker multi-platform builds
-- [ ] Performance optimizations
-- [ ] Enhanced monitoring and logging
-- [ ] Plugin system for extensions
-- [ ] Web UI for configuration
-
----
-
-**Built with ❤️ for cross-platform AI agent development**
-````
-
 ## File: src/lib/gitignore-parser.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -2618,6 +2345,318 @@ export default [
 ];
 ````
 
+## File: README.md
+````markdown
+# Recursa MCP Server
+
+A Git-Native AI agent with MCP (Model Context Protocol) support that works across multiple platforms.
+
+## 🌟 Cross-Platform Support
+
+✅ **Linux, macOS, Windows (WSL2), Termux/Android**
+📱 **Mobile-optimized** with conservative resource limits
+🔒 **Enhanced security** with cross-platform path protection
+⚡ **Auto-detecting** platform detection and optimization
+
+## 🚀 Getting Started
+
+### Automatic Installation (Recommended)
+```bash
+# Clone and install with automatic platform detection
+git clone https://github.com/your-repo/recursa-doc.git
+cd recursa-doc
+npm run install:auto
+npm run build:auto
+npm run dev
+```
+
+Your server is now running on `http://localhost:8080` (or the port specified in your `.env` file).
+
+### Interacting with the Server
+
+Recursa is a `fastmcp` server. You can interact with it using any MCP-compatible client, including the command-line tools that come with `fastmcp`.
+
+#### Authentication
+
+All requests to the server must be authenticated. You need to provide the `RECURSA_API_KEY` from your `.env` file as a bearer token.
+
+When using `fastmcp` tools, you can set the key via an environment variable:
+
+```bash
+export RECURSA_API_KEY="a-very-secret-key"
+```
+
+#### Testing with the Interactive CLI
+
+The `fastmcp dev` command is the quickest way to test your server. It starts your server and connects an interactive client in your terminal.
+
+```bash
+# Make sure your RECURSA_API_KEY is exported
+npx fastmcp dev src/server.ts
+```
+
+#### Inspecting with the Web UI
+
+For a more visual way to explore your server's tools and capabilities, use the `fastmcp inspect` command.
+
+```bash
+# Make sure your RECURSA_API_KEY is exported
+npx fastmcp inspect src/server.ts
+
+### Platform-Specific Installation
+
+#### Linux, macOS, Windows (WSL2)
+```bash
+npm run install:standard
+npm run build:standard
+npm run dev:standard
+```
+
+#### Termux/Android
+```bash
+# Install Termux from F-Droid, then:
+pkg update && pkg install nodejs npm git
+npm run install:termux
+npm run build:termux
+npm run dev:termux
+```
+
+## 📋 Prerequisites
+
+### Minimum Requirements
+- **Node.js 18+**
+- **Git** for version control
+- **512MB RAM** (1GB+ recommended)
+
+### Platform-Specific
+
+#### Termux/Android
+- Android 7.0+ with Termux app
+- Storage permissions (`termux-setup-storage`)
+
+#### Windows
+- Windows 10/11 (WSL2 recommended)
+- PowerShell or Git Bash
+- Developer mode enabled (for symlink support)
+
+#### Linux
+- Build tools for native modules:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt-get install build-essential
+
+  # Fedora
+  sudo dnf groupinstall "Development Tools"
+  ```
+
+## ⚙️ Configuration
+
+Create a `.env` file with your configuration:
+
+```bash
+# Required
+OPENROUTER_API_KEY=your_api_key_here
+KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
+
+# Required: API key for securing the Recursa server endpoint
+RECURSA_API_KEY=a-very-secret-key
+
+# Optional: Port for the HTTP server
+HTTP_PORT=8080
+
+# Optional (platform-specific defaults apply)
+LLM_MODEL=anthropic/claude-3-haiku-20240307
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=4000
+SANDBOX_TIMEOUT=10000
+SANDBOX_MEMORY_LIMIT=100
+GIT_USER_NAME=Recursa Agent
+GIT_USER_EMAIL=recursa@local
+```
+
+### Platform-Specific Defaults
+
+| Platform | Memory Limit | Max Tokens | Timeout |
+|----------|--------------|------------|---------|
+| Desktop (Linux/macOS/Windows) | 512MB | 4000 | 10s |
+| Termux/Android | 256MB | 2000 | 15s |
+
+## 🏗️ Build & Development
+
+### Available Scripts
+```bash
+# Installation
+npm run install:auto     # Auto-detect platform and install
+npm run install:termux   # Termux/Android specific
+npm run install:standard # Standard platforms
+
+# Building
+npm run build:auto       # Auto-detect platform and build
+npm run build:termux     # Termux/Android specific
+npm run build:standard   # Standard platforms
+
+# Development
+npm run dev              # Standard development
+npm run dev:termux       # Termux development
+npm run dev:standard     # Standard development
+
+# Production
+npm run start            # Start production server
+npm run start:termux     # Termux production
+npm run start:standard   # Standard production
+
+# Utilities
+npm run typecheck        # TypeScript type checking
+npm run test             # Run tests
+```
+
+## 📁 Project Structure
+
+```
+recursa-doc/
+├── src/
+│   ├── lib/
+│   │   └── platform.ts          # Cross-platform utilities
+│   ├── core/
+│   │   ├── mem-api/
+│   │   │   ├── secure-path.ts   # Enhanced path security
+│   │   │   └── file-ops.ts      # Cross-platform file operations
+│   │   └── sandbox.ts           # Platform-aware sandbox
+│   ├── config.ts                # Platform-aware configuration
+│   └── server.ts                # Main server
+├── scripts/
+│   ├── install.js               # Cross-platform installer
+│   └── build.js                 # Cross-platform builder
+├── docs/
+│   ├── PLATFORM_SUPPORT.md      # Detailed platform info
+│   └── TROUBLESHOOTING.md       # Troubleshooting guide
+└── tests/                       # Cross-platform tests
+```
+
+## 🔧 Features
+
+### Cross-Platform Capabilities
+- **Automatic platform detection** (Linux, macOS, Windows, Termux/Android)
+- **Adaptive resource limits** based on platform capabilities
+- **Cross-platform path security** with symlink protection
+- **Atomic file operations** with platform-specific error handling
+- **Platform-aware build system** with automatic fallbacks
+
+### Core Functionality
+- **MCP Protocol Support** for model context integration
+- **Git-Native Operations** with full repository management
+- **Secure File Operations** with path traversal protection
+- **Sandboxed Execution** with resource limits
+- **TypeScript Support** with full type safety
+
+### Security Features
+- **Path Traversal Protection** with cross-platform validation
+- **Symlink Attack Prevention** with configurable policies
+- **Resource Limiting** (memory, CPU, file size)
+- **Sandbox Isolation** with platform-specific constraints
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+#### Installation Fails
+```bash
+# Try platform-specific installation
+npm run install:termux    # For Termux/Android
+npm run install:standard  # For desktop platforms
+
+# Or manual installation
+npm install --ignore-scripts --no-bin-links
+```
+
+#### Permission Errors
+```bash
+# Termux: Setup storage access
+termux-setup-storage
+
+# Linux/macOS: Fix npm permissions
+sudo chown -R $(whoami) ~/.npm
+
+# Windows: Run as administrator or enable Developer Mode
+```
+
+#### Build Fails
+```bash
+# Clean and rebuild
+rm -rf node_modules dist
+npm run install:auto
+npm run build:auto
+
+# Check platform detection
+node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
+```
+
+For detailed troubleshooting, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## 📚 Documentation
+
+- [Platform Support](docs/PLATFORM_SUPPORT.md) - Detailed platform information
+- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- [API Documentation](docs/API.md) - API reference (coming soon)
+- [Development Guide](docs/DEVELOPMENT.md) - Contributing guidelines (coming soon)
+
+## 🔍 Platform Detection
+
+The server automatically detects and optimizes for your platform:
+
+```typescript
+import platform from './src/lib/platform.js';
+
+console.log(`Platform: ${platform.platformString}`);
+console.log(`Is Termux: ${platform.isTermux}`);
+console.log(`Resource limits:`, platform.getResourceLimits());
+console.log(`Temp directory: ${platform.getTempDir()}`);
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please ensure:
+1. Test on all supported platforms
+2. Use platform detection utilities
+3. Update documentation
+4. Include cross-platform tests
+
+### Development Setup
+```bash
+# Clone and install for development
+git clone https://github.com/your-repo/recursa-doc.git
+cd recursa-doc
+npm run install:auto
+npm run dev
+
+# Run tests across platforms
+npm run test
+```
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- 📖 Check [documentation](docs/)
+- 🐛 [Report issues](https://github.com/your-repo/recursa-doc/issues)
+- 💬 [Discussions](https://github.com/your-repo/recursa-doc/discussions)
+
+## 🔮 Roadmap
+
+- [ ] Additional platform support (FreeBSD, iOS)
+- [ ] Docker multi-platform builds
+- [ ] Performance optimizations
+- [ ] Enhanced monitoring and logging
+- [ ] Plugin system for extensions
+- [ ] Web UI for configuration
+
+---
+
+**Built with ❤️ for cross-platform AI agent development**
+````
+
 ## File: src/core/mem-api/fs-walker.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -2648,26 +2687,6 @@ export async function* walk(
     }
   }
 }
-````
-
-## File: src/types/loop.ts
-````typescript
-import type { MemAPI } from './mem.js';
-import type { ChatMessage } from './llm.js';
-
-// The execution context passed through the agent loop.
-export type ExecutionContext = {
-  // The complete conversation history for this session.
-  history: ChatMessage[];
-  // The API implementation available to the sandbox.
-  memAPI: MemAPI;
-  // The application configuration.
-  config: import('../config').AppConfig;
-  // A unique ID for this execution run.
-  runId: string;
-  // Function to stream content back to the client.
-  streamContent: (content: { type: 'text'; text: string }) => Promise<void>;
-};
 ````
 
 ## File: src/types/sandbox.ts
@@ -2784,6 +2803,26 @@ export interface LLMProvider {
 export type StreamingCallback = (chunk: string) => void;
 ````
 
+## File: src/types/loop.ts
+````typescript
+import type { MemAPI } from './mem.js';
+import type { ChatMessage } from './llm.js';
+
+// The execution context passed through the agent loop.
+export type ExecutionContext = {
+  // The complete conversation history for this session.
+  history: ChatMessage[];
+  // The API implementation available to the sandbox.
+  memAPI: MemAPI;
+  // The application configuration.
+  config: import('../config').AppConfig;
+  // A unique ID for this execution run.
+  runId: string;
+  // Function to stream content back to the client.
+  streamContent: (content: { type: 'text'; text: string }) => Promise<void>;
+};
+````
+
 ## File: tests/e2e/mcp-workflow.test.ts
 ````typescript
 import {
@@ -2827,7 +2866,9 @@ describe('Agent Workflow E2E Tests (In-Process)', () => {
       'create file',
       harness.mockConfig,
       'simple-query-session',
-      mockQueryLLM
+      'run-1',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -2869,7 +2910,9 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       'Create Dr. Aris Thorne',
       harness.mockConfig,
       'thorne-session',
-      mockQueryLLM
+      'run-2',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -2909,7 +2952,9 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       'test checkpoints',
       harness.mockConfig,
       'checkpoint-session',
-      mockQueryLLM
+      'run-3',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -2950,7 +2995,9 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       'read sensitive file',
       harness.mockConfig,
       'security-session',
-      mockQueryLLM
+      'run-4',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -4359,6 +4406,8 @@ export const createTestHarness = async (
   const mockConfig: AppConfig = {
     knowledgeGraphPath: tempDir,
     openRouterApiKey: apiKey,
+    recursaApiKey: 'test-api-key',
+    httpPort: 8080,
     llmModel: model,
     llmTemperature: 0.7,
     llmMaxTokens: 4000,
@@ -4581,6 +4630,8 @@ export const createMockConfig = (
 ): AppConfig => ({
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
+  recursaApiKey: 'test-api-key',
+  httpPort: 8080,
   llmModel: 'anthropic/claude-3-haiku-20240307',
   llmTemperature: 0.7,
   llmMaxTokens: 4000,
@@ -4607,42 +4658,6 @@ export const createMockHistory = (
       }) as ChatMessage
   ),
 ];
-````
-
-## File: .env.example
-````
-# Recursa MCP Server Configuration
-# Copy this file to .env and update the values
-
-# Required: Path to your knowledge graph directory
-KNOWLEDGE_GRAPH_PATH=./knowledge-graph
-
-# Required: OpenRouter API key for LLM access
-# Get your API key from: https://openrouter.ai/keys
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
-# See https://openrouter.ai/models for a list of available models
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-
-# Optional: LLM Configuration
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4096
-
-# Optional: Sandbox Configuration (in milliseconds and megabytes)
-SANDBOX_TIMEOUT=30000
-SANDBOX_MEMORY_LIMIT=100
-
-# Optional: Git Configuration
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-
-# Usage:
-# 1. Copy this file: cp .env.example .env
-# 2. Update OPENROUTER_API_KEY with your actual API key
-# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
-# 4. Source the file: source .env
-# 5. Run the server: npm start
 ````
 
 ## File: tsconfig.json
@@ -4935,6 +4950,47 @@ export type MemAPI = {
 };
 ````
 
+## File: .env.example
+````
+# Recursa MCP Server Configuration
+# Copy this file to .env and update the values
+
+# Required: Path to your knowledge graph directory
+KNOWLEDGE_GRAPH_PATH=./knowledge-graph
+
+# Required: OpenRouter API key for LLM access
+# Get your API key from: https://openrouter.ai/keys
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# Required: API key for securing the Recursa server endpoint
+RECURSA_API_KEY=a-very-secret-key
+
+# Optional: Port for the HTTP server
+HTTP_PORT=8080
+
+# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
+# See https://openrouter.ai/models for a list of available models
+LLM_MODEL=anthropic/claude-3-haiku-20240307
+
+# Optional: LLM Configuration
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=4096
+
+# Optional: Sandbox Configuration (in milliseconds and megabytes)
+SANDBOX_TIMEOUT=30000
+SANDBOX_MEMORY_LIMIT=100
+
+# Optional: Git Configuration
+GIT_USER_NAME=Recursa Agent
+GIT_USER_EMAIL=recursa@local
+
+# Usage:
+# 1. Copy this file: cp .env.example .env
+# 2. Update OPENROUTER_API_KEY and RECURSA_API_KEY with your actual keys
+# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
+# 4. Run the server: npm run dev
+````
+
 ## File: src/config.ts
 ````typescript
 import 'dotenv/config';
@@ -5148,9 +5204,9 @@ import {
   expect,
   beforeEach,
   afterEach,
+  jest,
 } from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
-import type { StatusUpdate } from '../../src/types';
 import {
   createTestHarness,
   cleanupTestHarness,
@@ -5201,7 +5257,9 @@ await mem.commitChanges('feat: initialize project with basic structure');
         'Initialize a new Node.js project',
         harness.mockConfig,
         sessionId,
-        initMockLLMQuery
+        'run-1',
+        initMockLLMQuery,
+        async () => {}
       );
 
       expect(initResult).toContain('Project initialized successfully');
@@ -5228,7 +5286,9 @@ await mem.commitChanges('feat: add utilities, config, and test structure');
         'Add utilities and configuration to the project',
         harness.mockConfig,
         sessionId,
-        featureMockLLMQuery
+        'run-2',
+        featureMockLLMQuery,
+        async () => {}
       );
 
       expect(featureResult).toContain('Added utility functions');
@@ -5262,7 +5322,9 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
         'Update the main application to use the new utilities',
         harness.mockConfig,
         sessionId,
-        updateMockLLMQuery
+        'run-3',
+        updateMockLLMQuery,
+        async () => {}
       );
 
       expect(updateResult).toContain('Updated the main application');
@@ -5310,11 +5372,7 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
     });
 
     it('should handle complex file operations and git workflow', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
+      const streamContentMock = jest.fn();
 
       const complexMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
@@ -5372,8 +5430,9 @@ Successfully performed complex file operations including creating multiple docum
         'Perform complex file operations with git workflow',
         harness.mockConfig,
         'complex-ops-session',
+        'run-complex',
         complexMockLLMQuery,
-        captureStatusUpdate
+        streamContentMock
       );
 
       expect(result).toContain(
@@ -5381,10 +5440,10 @@ Successfully performed complex file operations including creating multiple docum
       );
 
       // Verify status updates were captured throughout the process
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
+      expect(streamContentMock).toHaveBeenCalled();
+      const firstCallArg = streamContentMock.mock.calls[0][0];
+      expect(firstCallArg).toHaveProperty('type', 'text');
+      expect(firstCallArg.text).toContain('demonstrate complex file operations');
 
       // Verify final file state
       const mem = harness.mem;
@@ -5421,11 +5480,7 @@ Successfully performed complex file operations including creating multiple docum
     });
 
     it('should handle error scenarios and recovery gracefully', async () => {
-      const statusUpdates: StatusUpdate[] = [];
-
-      const captureStatusUpdate = (update: StatusUpdate) => {
-        statusUpdates.push(update);
-      };
+      const streamContentMock = jest.fn();
 
       const errorRecoveryMockLLMQuery = createMockLLMQueryWithSpy([
         `<think>I'll attempt various operations to test error handling and recovery.</think>
@@ -5479,8 +5534,9 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
         'Test error handling and recovery scenarios',
         harness.mockConfig,
         'error-test-session',
+        'run-error',
         errorRecoveryMockLLMQuery,
-        captureStatusUpdate
+        streamContentMock
       );
 
       expect(result).toContain(
@@ -5488,10 +5544,10 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
       );
 
       // Verify status updates were captured (should include think and act updates)
-      expect(statusUpdates.length).toBeGreaterThan(0);
-      const types = new Set(statusUpdates.map((u) => u.type));
-      expect(types.has('think')).toBe(true);
-      expect(types.has('act')).toBe(true);
+      expect(streamContentMock).toHaveBeenCalled();
+      const firstCallArg = streamContentMock.mock.calls[0][0];
+      expect(firstCallArg).toHaveProperty('type', 'text');
+      expect(firstCallArg.text).toContain('attempt various operations');
 
       // Verify files that should exist after recovery
       const mem = harness.mem;
@@ -5528,28 +5584,14 @@ import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 
 // Mock fetch globally
-const mockFetch = jest.fn().mockImplementation(() =>
-  Promise.resolve({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        choices: [
-          {
-            message: {
-              content: 'Test response from LLM',
-            },
-          },
-        ],
-      }),
-    status: 200,
-    statusText: 'OK',
-  })
-);
-global.fetch = mockFetch as jest.Mock;
+const mockFetch = jest.fn<typeof fetch>();
+global.fetch = mockFetch;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
+  recursaApiKey: 'test-api-key',
+  httpPort: 8080,
   llmModel: 'anthropic/claude-3-haiku-20240307',
   llmTemperature: 0.7,
   llmMaxTokens: 4000,
@@ -5565,7 +5607,16 @@ const mockHistory: ChatMessage[] = [
 ];
 
 beforeEach(() => {
-  (fetch as jest.Mock).mockClear();
+  mockFetch.mockClear();
+  mockFetch.mockResolvedValue({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        choices: [{ message: { content: 'Test response from LLM' } }],
+      }),
+    status: 200,
+    statusText: 'OK',
+  } as Response);
 });
 
 describe('LLM Module', () => {
@@ -5574,8 +5625,8 @@ describe('LLM Module', () => {
       const response = await queryLLM(mockHistory, mockConfig);
 
       expect(response).toBe('Test response from LLM');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith(
         'https://openrouter.ai/api/v1/chat/completions',
         expect.objectContaining({
           method: 'POST',
@@ -5596,17 +5647,15 @@ describe('LLM Module', () => {
     });
 
     it('should handle API errors properly', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Invalid API key' },
-            }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: () =>
+          Promise.resolve({
+            error: { message: 'Invalid API key' },
+          }),
+      } as Response);
 
       await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
         'OpenRouter API error: 401 Unauthorized'
@@ -5614,12 +5663,10 @@ describe('LLM Module', () => {
     });
 
     it('should handle malformed API responses', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ invalid: 'response' }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ invalid: 'response' }),
+      } as Response);
 
       await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
         'Invalid response format from OpenRouter API'
@@ -5627,19 +5674,13 @@ describe('LLM Module', () => {
     });
 
     it('should handle empty content in response', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: { content: '' },
-                },
-              ],
-            }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: '' } }],
+          }),
+      } as Response);
 
       await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
         'Empty content received from OpenRouter API'
@@ -5651,52 +5692,42 @@ describe('LLM Module', () => {
     it('should retry on retryable errors', async () => {
       // First call fails with server error
       // Second call succeeds
-      (global.fetch as jest.Mock)
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: false,
-            status: 500,
-            statusText: 'Internal Server Error',
-            json: () => Promise.resolve({ error: 'Server error' }),
-          })
-        )
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                choices: [
-                  {
-                    message: { content: 'Success after retry' },
-                  },
-                ],
-              }),
-          })
-        );
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          json: () => Promise.resolve({ error: 'Server error' }),
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              choices: [{ message: { content: 'Success after retry' } }],
+            }),
+        } as Response);
 
       const response = await queryLLMWithRetries(mockHistory, mockConfig);
 
       expect(response).toBe('Success after retry');
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it('should not retry on non-retryable errors (4xx)', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          statusText: 'Bad Request',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Bad request' },
-            }),
-        })
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: () =>
+          Promise.resolve({
+            error: { message: 'Bad request' },
+          }),
+      } as Response);
 
       await expect(
         queryLLMWithRetries(mockHistory, mockConfig)
       ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
-      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
+      expect(mockFetch).toHaveBeenCalledTimes(1); // Should not retry
     });
   });
 });
@@ -6148,6 +6179,8 @@ describe('Agent End-to-End Workflow', () => {
     appConfig = {
       openRouterApiKey: 'test-api-key',
       knowledgeGraphPath: '/tmp/test-knowledge-graph',
+      recursaApiKey: 'test-api-key',
+      httpPort: 8080,
       llmModel: 'test-model',
       llmTemperature: 0.7,
       llmMaxTokens: 4000,
@@ -6202,8 +6235,10 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     const finalReply = await handleUserQuery(
       query,
       harness.mockConfig,
-      undefined,
-      mockQueryLLM
+      'thorne-session',
+      'thorne-run-1',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. ASSERT
@@ -6283,6 +6318,202 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
   },
   "license": "MIT"
 }
+````
+
+## File: src/core/mem-api/graph-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import type { GraphQueryResult } from '../../types';
+import { resolveSecurePath } from './secure-path.js';
+import { walk } from './fs-walker.js';
+import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
+
+type PropertyCondition = {
+  type: 'property';
+  key: string;
+  value: string;
+};
+
+type OutgoingLinkCondition = {
+  type: 'outgoing-link';
+  target: string;
+};
+
+type Condition = PropertyCondition | OutgoingLinkCondition;
+
+const parseCondition = (conditionStr: string): Condition | null => {
+  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+  let match = conditionStr.trim().match(propertyRegex);
+  if (match?.[1] && match[2]) {
+    return {
+      type: 'property',
+      key: match[1].trim(),
+      value: match[2].trim(),
+    };
+  }
+
+  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
+  match = conditionStr.trim().match(linkRegex);
+  if (match?.[1]) {
+    return {
+      type: 'outgoing-link',
+      target: match[1].trim(),
+    };
+  }
+
+  return null;
+};
+
+const checkCondition = (content: string, condition: Condition): string[] => {
+  const matches: string[] = [];
+  if (condition.type === 'property') {
+    const lines = content.split('\n');
+    for (const line of lines) {
+      // Handle indented properties by removing the leading list marker
+      const trimmedLine = line.trim().replace(/^- /, '');
+      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
+        matches.push(line);
+      }
+    }
+  } else if (condition.type === 'outgoing-link') {
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const outgoingLinks = new Set(
+      Array.from(content.matchAll(linkRegex), (m) => m[1])
+    );
+    if (outgoingLinks.has(condition.target)) {
+      // Return a generic match since we don't have a specific line
+      matches.push(`[[${condition.target}]]`);
+    }
+  }
+  return matches;
+};
+
+export const queryGraph =
+  (graphRoot: string) =>
+  async (query: string): Promise<GraphQueryResult[]> => {
+    const conditionStrings = query.split(/ AND /i);
+    const conditions = conditionStrings
+      .map(parseCondition)
+      .filter((c): c is Condition => c !== null);
+
+    if (conditions.length === 0) {
+      return [];
+    }
+
+    const results: GraphQueryResult[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const filePath of walk(graphRoot, isIgnored)) {
+      if (!filePath.endsWith('.md')) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const allMatchingLines: string[] = [];
+      let allConditionsMet = true;
+
+      for (const condition of conditions) {
+        const matchingLines = checkCondition(content, condition);
+        if (matchingLines.length > 0) {
+          allMatchingLines.push(...matchingLines);
+        } else {
+          allConditionsMet = false;
+          break;
+        }
+      }
+
+      if (allConditionsMet) {
+        results.push({
+          filePath: path.relative(graphRoot, filePath),
+          matches: allMatchingLines,
+        });
+      }
+    }
+    return results;
+  };
+
+export const getBacklinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const targetWithoutExt = path.basename(filePath, path.extname(filePath));
+    const targetWithExt = path.basename(filePath);
+
+    const backlinks: string[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
+      // Don't link to self
+      if (path.resolve(currentFilePath) === resolveSecurePath(graphRoot, filePath)) {
+        continue;
+      }
+
+      if (currentFilePath.endsWith('.md')) {
+        try {
+          const content = await fs.readFile(currentFilePath, 'utf-8');
+          // Extract all outgoing links from the current file
+          const linkRegex = /\[\[(.*?)\]\]/g;
+          const matches = content.matchAll(linkRegex);
+
+          for (const match of matches) {
+            if (match[1]) {
+              const linkTarget = match[1].trim();
+              // Check if this link points to our target file
+              // Try matching against various possible formats:
+              // - Exact basename without extension (e.g., "PageC")
+              // - Exact basename with extension (e.g., "PageC.md")
+              // - With spaces (e.g., "Page C" for "PageC")
+              if (linkTarget === targetWithoutExt ||
+                  linkTarget === targetWithExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithoutExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithExt) {
+                backlinks.push(path.relative(graphRoot, currentFilePath));
+                break; // Found a match, no need to check more links in this file
+              }
+            }
+          }
+        } catch {
+          // Ignore files that can't be read
+        }
+      }
+    }
+    return backlinks;
+  };
+
+export const getOutgoingLinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const matches = content.matchAll(linkRegex);
+    const uniqueLinks = new Set<string>();
+
+    for (const match of matches) {
+      if (match[1]) {
+        uniqueLinks.add(match[1]);
+      }
+    }
+    return Array.from(uniqueLinks);
+  };
+
+export const searchGlobal =
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    const matchingFiles: string[] = [];
+    const lowerCaseQuery = query.toLowerCase();
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const filePath of walk(graphRoot, isIgnored)) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.toLowerCase().includes(lowerCaseQuery)) {
+          matchingFiles.push(path.relative(graphRoot, filePath));
+        }
+      } catch {
+        // Ignore binary files or files that can't be read
+      }
+    }
+    return matchingFiles;
+  };
 ````
 
 ## File: src/core/loop.ts
@@ -6490,203 +6721,6 @@ export const handleUserQuery = async (
 };
 ````
 
-## File: src/core/mem-api/graph-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path.js';
-import { walk } from './fs-walker.js';
-import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
-
-type PropertyCondition = {
-  type: 'property';
-  key: string;
-  value: string;
-};
-
-type OutgoingLinkCondition = {
-  type: 'outgoing-link';
-  target: string;
-};
-
-type Condition = PropertyCondition | OutgoingLinkCondition;
-
-const parseCondition = (conditionStr: string): Condition | null => {
-  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-  let match = conditionStr.trim().match(propertyRegex);
-  if (match?.[1] && match[2]) {
-    return {
-      type: 'property',
-      key: match[1].trim(),
-      value: match[2].trim(),
-    };
-  }
-
-  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
-  match = conditionStr.trim().match(linkRegex);
-  if (match?.[1]) {
-    return {
-      type: 'outgoing-link',
-      target: match[1].trim(),
-    };
-  }
-
-  return null;
-};
-
-const checkCondition = (content: string, condition: Condition): string[] => {
-  const matches: string[] = [];
-  if (condition.type === 'property') {
-    const lines = content.split('\n');
-    for (const line of lines) {
-      // Handle indented properties by removing the leading list marker
-      const trimmedLine = line.trim().replace(/^- /, '');
-      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
-        matches.push(line);
-      }
-    }
-  } else if (condition.type === 'outgoing-link') {
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const outgoingLinks = new Set(
-      Array.from(content.matchAll(linkRegex), (m) => m[1])
-    );
-    if (outgoingLinks.has(condition.target)) {
-      // Return a generic match since we don't have a specific line
-      matches.push(`[[${condition.target}]]`);
-    }
-  }
-  return matches;
-};
-
-export const queryGraph =
-  (graphRoot: string) =>
-  async (query: string): Promise<GraphQueryResult[]> => {
-    const conditionStrings = query.split(/ AND /i);
-    const conditions = conditionStrings
-      .map(parseCondition)
-      .filter((c): c is Condition => c !== null);
-
-    if (conditions.length === 0) {
-      return [];
-    }
-
-    const results: GraphQueryResult[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      if (!filePath.endsWith('.md')) continue;
-
-      const content = await fs.readFile(filePath, 'utf-8');
-      const allMatchingLines: string[] = [];
-      let allConditionsMet = true;
-
-      for (const condition of conditions) {
-        const matchingLines = checkCondition(content, condition);
-        if (matchingLines.length > 0) {
-          allMatchingLines.push(...matchingLines);
-        } else {
-          allConditionsMet = false;
-          break;
-        }
-      }
-
-      if (allConditionsMet) {
-        results.push({
-          filePath: path.relative(graphRoot, filePath),
-          matches: allMatchingLines,
-        });
-      }
-    }
-    return results;
-  };
-
-export const getBacklinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const targetBaseName = path.basename(filePath, path.extname(filePath));
-    const targetWithoutExt = path.basename(filePath, path.extname(filePath));
-    const targetWithExt = path.basename(filePath);
-
-    const backlinks: string[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
-      // Don't link to self
-      if (path.resolve(currentFilePath) === resolveSecurePath(graphRoot, filePath)) {
-        continue;
-      }
-
-      if (currentFilePath.endsWith('.md')) {
-        try {
-          const content = await fs.readFile(currentFilePath, 'utf-8');
-          // Extract all outgoing links from the current file
-          const linkRegex = /\[\[(.*?)\]\]/g;
-          const matches = content.matchAll(linkRegex);
-
-          for (const match of matches) {
-            if (match[1]) {
-              const linkTarget = match[1].trim();
-              // Check if this link points to our target file
-              // Try matching against various possible formats:
-              // - Exact basename without extension (e.g., "PageC")
-              // - Exact basename with extension (e.g., "PageC.md")
-              // - With spaces (e.g., "Page C" for "PageC")
-              if (linkTarget === targetWithoutExt ||
-                  linkTarget === targetWithExt ||
-                  linkTarget.replace(/\s+/g, '') === targetWithoutExt ||
-                  linkTarget.replace(/\s+/g, '') === targetWithExt) {
-                backlinks.push(path.relative(graphRoot, currentFilePath));
-                break; // Found a match, no need to check more links in this file
-              }
-            }
-          }
-        } catch {
-          // Ignore files that can't be read
-        }
-      }
-    }
-    return backlinks;
-  };
-
-export const getOutgoingLinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    const content = await fs.readFile(fullPath, 'utf-8');
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const matches = content.matchAll(linkRegex);
-    const uniqueLinks = new Set<string>();
-
-    for (const match of matches) {
-      if (match[1]) {
-        uniqueLinks.add(match[1]);
-      }
-    }
-    return Array.from(uniqueLinks);
-  };
-
-export const searchGlobal =
-  (graphRoot: string) =>
-  async (query: string): Promise<string[]> => {
-    const matchingFiles: string[] = [];
-    const lowerCaseQuery = query.toLowerCase();
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        if (content.toLowerCase().includes(lowerCaseQuery)) {
-          matchingFiles.push(path.relative(graphRoot, filePath));
-        }
-      } catch {
-        // Ignore binary files or files that can't be read
-      }
-    }
-    return matchingFiles;
-  };
-````
-
 ## File: src/core/sandbox.ts
 ````typescript
 import { createContext, runInContext } from 'node:vm';
@@ -6803,7 +6837,9 @@ const main = async () => {
 
         if (!token || token !== config.recursaApiKey) {
           logger.warn('Authentication failed', {
-            remoteAddress: (request as any).socket?.remoteAddress, // Best effort IP logging
+            remoteAddress: (
+              request as { socket?: { remoteAddress?: string } }
+            ).socket?.remoteAddress, // Best effort IP logging
           });
           throw new Response(null, {
             status: 401,

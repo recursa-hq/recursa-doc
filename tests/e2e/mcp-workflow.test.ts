@@ -39,7 +39,9 @@ describe('Agent Workflow E2E Tests (In-Process)', () => {
       'create file',
       harness.mockConfig,
       'simple-query-session',
-      mockQueryLLM
+      'run-1',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -81,7 +83,9 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       'Create Dr. Aris Thorne',
       harness.mockConfig,
       'thorne-session',
-      mockQueryLLM
+      'run-2',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -102,6 +106,10 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 
   it('should save a checkpoint and successfully revert to it', async () => {
     // 1. Arrange
+    // Stash requires an initial commit to work reliably.
+    await harness.mem.writeFile('init.txt', 'initial file');
+    await harness.mem.commitChanges('initial commit for stash test');
+
     const mockQueryLLM = createMockLLMQueryWithSpy([
       `<think>Writing file 1.</think>
          <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`,
@@ -121,7 +129,9 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       'test checkpoints',
       harness.mockConfig,
       'checkpoint-session',
-      mockQueryLLM
+      'run-3',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert
@@ -162,7 +172,9 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
       'read sensitive file',
       harness.mockConfig,
       'security-session',
-      mockQueryLLM
+      'run-4',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. Assert

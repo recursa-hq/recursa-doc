@@ -110,7 +110,6 @@ export const queryGraph =
 export const getBacklinks =
   (graphRoot: string) =>
   async (filePath: string): Promise<string[]> => {
-    const targetBaseName = path.basename(filePath, path.extname(filePath));
     const targetWithoutExt = path.basename(filePath, path.extname(filePath));
     const targetWithExt = path.basename(filePath);
 

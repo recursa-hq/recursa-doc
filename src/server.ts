@@ -23,7 +23,9 @@ const main = async () => {
 
         if (!token || token !== config.recursaApiKey) {
           logger.warn('Authentication failed', {
-            remoteAddress: (request as any).socket?.remoteAddress, // Best effort IP logging
+            remoteAddress: (
+              request as { socket?: { remoteAddress?: string } }
+            ).socket?.remoteAddress, // Best effort IP logging
           });
           throw new Response(null, {
             status: 401,

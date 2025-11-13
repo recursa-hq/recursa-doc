@@ -24,6 +24,8 @@ describe('Agent End-to-End Workflow', () => {
     appConfig = {
       openRouterApiKey: 'test-api-key',
       knowledgeGraphPath: '/tmp/test-knowledge-graph',
+      recursaApiKey: 'test-api-key',
+      httpPort: 8080,
       llmModel: 'test-model',
       llmTemperature: 0.7,
       llmMaxTokens: 4000,
@@ -78,8 +80,10 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
     const finalReply = await handleUserQuery(
       query,
       harness.mockConfig,
-      undefined,
-      mockQueryLLM
+      'thorne-session',
+      'thorne-run-1',
+      mockQueryLLM,
+      async () => {}
     );
 
     // 3. ASSERT

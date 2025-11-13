@@ -60,6 +60,8 @@ export const createTestHarness = async (
   const mockConfig: AppConfig = {
     knowledgeGraphPath: tempDir,
     openRouterApiKey: apiKey,
+    recursaApiKey: 'test-api-key',
+    httpPort: 8080,
     llmModel: model,
     llmTemperature: 0.7,
     llmMaxTokens: 4000,
@@ -282,6 +284,8 @@ export const createMockConfig = (
 ): AppConfig => ({
   openRouterApiKey: 'test-api-key',
   knowledgeGraphPath: '/test/path',
+  recursaApiKey: 'test-api-key',
+  httpPort: 8080,
   llmModel: 'anthropic/claude-3-haiku-20240307',
   llmTemperature: 0.7,
   llmMaxTokens: 4000,
