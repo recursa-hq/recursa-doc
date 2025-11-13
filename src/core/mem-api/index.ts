@@ -2,11 +2,11 @@ import type { MemAPI } from '../../types';
 import type { AppConfig } from '../../config';
 import simpleGit from 'simple-git';
 
-import * as fileOps from './file-ops';
-import * as gitOps from './git-ops';
-import * as graphOps from './graph-ops';
-import * as stateOps from './state-ops';
-import * as utilOps from './util-ops';
+import * as fileOps from './file-ops.js';
+import * as gitOps from './git-ops.js';
+import * as graphOps from './graph-ops.js';
+import * as stateOps from './state-ops.js';
+import * as utilOps from './util-ops.js';
 
 /**
  * Creates a fully-functional MemAPI object.

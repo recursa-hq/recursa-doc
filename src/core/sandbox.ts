@@ -1,6 +1,6 @@
 import { createContext, runInContext } from 'node:vm';
 import type { MemAPI } from '../types/mem';
-import { logger } from '../lib/logger';
+import { logger } from '../lib/logger.js';
 
 /**
  * Executes LLM-generated TypeScript code in a secure, isolated sandbox.

@@ -33,10 +33,7 @@ jest.mock('../../src/core/llm', () => ({
 }));
 
 // Cast the mock for type safety in tests
-const mockedQueryLLM = queryLLMWithRetries as jest.Mock<
-  Promise<string>,
-  [ChatMessage[], AppConfig]
->;
+const mockedQueryLLM = queryLLMWithRetries as jest.MockedFunction<typeof queryLLMWithRetries>;
 
 describe('MCP Workflow E2E Tests', () => {
   let harness: TestHarnessState;

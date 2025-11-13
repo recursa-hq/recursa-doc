@@ -1445,298 +1445,6 @@ export const platform = {
 export default platform;
 ````
 
-## File: tests/e2e/mcp-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  jest,
-} from '@jest/globals';
-import type { ChildProcessWithoutNullStreams } from 'child_process';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import {
-  spawnServer,
-  writeMCPRequest,
-  readMCPMessages,
-  type MCPMessage,
-} from '../lib/test-util';
-import type { MCPError, MCPNotification, MCPResponse } from '../../src/types';
-import { queryLLMWithRetries } from '../../src/core/llm';
-
-// Mock the entire LLM module to control agent behavior
-jest.mock('../../src/core/llm', () => ({
-  queryLLMWithRetries: jest.fn(),
-}));
-
-// Cast the mock for type safety in tests
-const mockedQueryLLM = queryLLMWithRetries as jest.Mock;
-
-describe('MCP Workflow E2E Tests', () => {
-  let harness: TestHarnessState;
-  let serverProcess: ChildProcessWithoutNullStreams;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mockedQueryLLM.mockClear();
-  });
-
-  afterEach(async () => {
-    if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill();
-    }
-    await cleanupTestHarness(harness);
-  });
-
-  it('should initialize, list tools, and execute a simple query', async () => {
-    // 1. Arrange
-    mockedQueryLLM
-      .mockResolvedValueOnce(
-        `<think>Okay, creating the file.</think>
-         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Committing the file.</think>
-         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
-         <reply>File created and committed.</reply>`
-      );
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-
-    // Handshake
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: { clientInfo: { name: 'test-client' } },
-    });
-    const initResponse = (await messages.next()).value as MCPResponse;
-    expect(initResponse.id).toBe(1);
-    expect(initResponse.result).toBeDefined();
-
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'list_tools',
-    });
-    const listToolsResponse = (await messages.next()).value as MCPResponse;
-    expect(listToolsResponse.id).toBe(2);
-    expect((listToolsResponse.result as any).tools).toHaveLength(1);
-
-    // Execute
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'execute_tool',
-      params: { name: 'process_query', args: { query: 'create file' } },
-    });
-
-    const notifications: MCPNotification[] = [];
-    let finalResponse: MCPResponse | undefined;
-
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message as MCPResponse;
-        break;
-      } else {
-        notifications.push(message as MCPNotification);
-      }
-    }
-
-    // 3. Assert
-    expect(notifications.length).toBeGreaterThanOrEqual(2);
-    expect(
-      notifications.some((n) => n.method === 'mcp/log/info')
-    ).toBeTruthy();
-
-    expect(finalResponse).toBeDefined();
-    expect(finalResponse?.id).toBe(3);
-    const result = JSON.parse((finalResponse?.result as any).result);
-    expect(result.reply).toBe('File created and committed.');
-
-    // Verify side-effects
-    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: create hello.txt');
-  });
-
-  it('should correctly handle the Dr. Aris Thorne example', async () => {
-    // 1. Arrange
-    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
-<typescript>
-const orgPath = 'AI Research Institute.md';
-if (!await mem.fileExists(orgPath)) {
-  await mem.writeFile(orgPath, \`- # AI Research Institute
-  - type:: organization\`);
-}
-await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
-  - type:: person
-  - affiliation:: [[AI Research Institute]]
-  - field:: [[Symbolic Reasoning]]\`);
-</typescript>`;
-    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
-
-    mockedQueryLLM
-      .mockResolvedValueOnce(turn1Response)
-      .mockResolvedValueOnce(turn2Response);
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'execute_tool',
-      params: {
-        name: 'process_query',
-        args: { query: 'Create Dr. Aris Thorne' },
-      },
-    });
-
-    let finalResponse: MCPResponse | undefined;
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message;
-        break;
-      }
-    }
-
-    // 3. Assert
-    const result = JSON.parse((finalResponse?.result as any).result);
-    expect(result.reply).toBe(
-      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
-    );
-
-    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
-    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
-
-    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe(
-      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
-    );
-  });
-
-  it('should save a checkpoint and successfully revert to it', async () => {
-    // 1. Arrange
-    mockedQueryLLM
-      .mockResolvedValueOnce(
-        `<think>Writing file 1.</think>
-         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Saving checkpoint.</think>
-         <typescript>await mem.saveCheckpoint();</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Writing file 2.</think>
-         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Reverting to checkpoint.</think>
-         <typescript>await mem.revertToLastCheckpoint();</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>Committing.</think>
-         <typescript>await mem.commitChanges('feat: add file1 only');</typescript>
-         <reply>Reverted and committed.</reply>`
-      );
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'execute_tool',
-      params: { name: 'process_query', args: { query: 'test checkpoints' } },
-    });
-
-    let finalResponse: MCPResponse | undefined;
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message;
-        break;
-      }
-    }
-
-    // 3. Assert
-    expect(JSON.parse((finalResponse?.result as any).result).reply).toBe(
-      'Reverted and committed.'
-    );
-    expect(await harness.mem.fileExists('file1.md')).toBe(true);
-    expect(await harness.mem.fileExists('file2.md')).toBe(false);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: add file1 only');
-  });
-
-  it('should block and gracefully handle path traversal attempts', async () => {
-    // 1. Arrange
-    mockedQueryLLM
-      .mockResolvedValueOnce(
-        `<think>I will try to read a sensitive file.</think>
-         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`
-      )
-      .mockResolvedValueOnce(
-        `<think>The previous action failed as expected due to security. I will inform the user.</think>
-         <reply>I was unable to access that file due to security restrictions.</reply>`
-      );
-
-    // 2. Act
-    serverProcess = spawnServer(harness);
-    const messages = readMCPMessages(serverProcess);
-    writeMCPRequest(serverProcess, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'execute_tool',
-      params: {
-        name: 'process_query',
-        args: { query: 'read sensitive file' },
-      },
-    });
-
-    const notifications: MCPNotification[] = [];
-    let finalResponse: MCPResponse | undefined;
-
-    for await (const message of messages) {
-      if ('id' in message) {
-        finalResponse = message;
-        break;
-      }
-      notifications.push(message as MCPNotification);
-    }
-
-    // 3. Assert
-    const errorNotification = notifications.find(
-      (n) => n.method === 'mcp/log/error'
-    );
-    expect(errorNotification).toBeDefined();
-    expect((errorNotification?.params as any).message).toContain(
-      'Path traversal attempt detected'
-    );
-
-    const result = JSON.parse((finalResponse?.result as any).result);
-    expect(result.reply).toBe(
-      'I was unable to access that file due to security restrictions.'
-    );
-  });
-});
-````
-
 ## File: tests/setup.ts
 ````typescript
 // Jest setup file to handle Node.js v25+ compatibility issues
@@ -2233,66 +1941,309 @@ export type ExecutionContext = {
 };
 ````
 
-## File: tests/lib/test-util.ts
+## File: tests/e2e/mcp-workflow.test.ts
 ````typescript
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
-import type { TestHarnessState } from './test-harness';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import {
+  spawnServer,
+  writeMCPRequest,
+  readMCPMessages,
+  type MCPMessage,
+} from '../lib/test-util';
 import type {
-  MCPRequest,
-  MCPResponse,
   MCPNotification,
+  MCPResponse,
+  AppConfig,
+  ChatMessage,
+  ListToolsResult,
 } from '../../src/types';
+import { queryLLMWithRetries } from '../../src/core/llm';
 
-export const spawnServer = (
-  harness: TestHarnessState
-): ChildProcessWithoutNullStreams => {
-  const serverProcess = spawn('node', ['dist/server.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
-      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
-    },
+// Mock the entire LLM module to control agent behavior
+jest.mock('../../src/core/llm', () => ({
+  queryLLMWithRetries: jest.fn(),
+}));
+
+// Cast the mock for type safety in tests
+const mockedQueryLLM = queryLLMWithRetries as jest.MockedFunction<typeof queryLLMWithRetries>;
+
+describe('MCP Workflow E2E Tests', () => {
+  let harness: TestHarnessState;
+  let serverProcess: ChildProcessWithoutNullStreams;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mockedQueryLLM.mockClear();
   });
 
-  serverProcess.stderr.on('data', (data) => {
-    console.error(`SERVER STDERR: ${data}`);
+  afterEach(async () => {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill();
+    }
+    await cleanupTestHarness(harness);
   });
 
-  return serverProcess;
-};
+  it('should initialize, list tools, and execute a simple query', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>Okay, creating the file.</think>
+         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Committing the file.</think>
+         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
+         <reply>File created and committed.</reply>`
+      );
 
-export const writeMCPRequest = (
-  serverProcess: ChildProcessWithoutNullStreams,
-  request: MCPRequest
-): void => {
-  const message = JSON.stringify(request) + '\n';
-  serverProcess.stdin.write(message);
-};
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
 
-export type MCPMessage = MCPResponse | MCPNotification;
+    // Handshake
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { clientInfo: { name: 'test-client' } },
+    });
+    const initResponse = (await messages.next()).value as MCPResponse;
+    expect(initResponse.id).toBe(1);
+    expect(initResponse.result).toBeDefined();
 
-export async function* readMCPMessages(
-  serverProcess: ChildProcessWithoutNullStreams
-): AsyncGenerator<MCPMessage> {
-  let buffer = '';
-  for await (const chunk of serverProcess.stdout) {
-    buffer += chunk.toString();
-    let newlineIndex;
-    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, newlineIndex);
-      buffer = buffer.slice(newlineIndex + 1);
-      if (line.trim()) {
-        try {
-          const parsed = JSON.parse(line);
-          yield parsed as MCPMessage;
-        } catch (error) {
-          console.error('Failed to parse MCP message:', line);
-        }
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'list_tools',
+    });
+    const listToolsResponse = (await messages.next()).value as MCPResponse;
+    expect(listToolsResponse.id).toBe(2);
+    expect((listToolsResponse.result as ListToolsResult).tools).toHaveLength(1);
+
+    // Execute
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'execute_tool',
+      params: { name: 'process_query', args: { query: 'create file' } },
+    });
+
+    const notifications: MCPNotification[] = [];
+    let finalResponse: MCPResponse | undefined;
+
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message as MCPResponse;
+        break;
+      } else {
+        notifications.push(message as MCPNotification);
       }
     }
-  }
+
+    // 3. Assert
+    expect(notifications.length).toBeGreaterThanOrEqual(2);
+    expect(
+      notifications.some((n) => n.method === 'mcp/log/info')
+    ).toBeTruthy();
+
+    expect(finalResponse).toBeDefined();
+    expect(finalResponse?.id).toBe(3);
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
+    expect(result.reply).toBe('File created and committed.');
+
+    // Verify side-effects
+    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: create hello.txt');
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example', async () => {
+    // 1. Arrange
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(orgPath, \`- # AI Research Institute
+  - type:: organization\`);
 }
+await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
+  - type:: person
+  - affiliation:: [[AI Research Institute]]
+  - field:: [[Symbolic Reasoning]]\`);
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
+
+    mockedQueryLLM
+      .mockResolvedValueOnce(turn1Response)
+      .mockResolvedValueOnce(turn2Response);
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: {
+        name: 'process_query',
+        args: { query: 'Create Dr. Aris Thorne' },
+      },
+    });
+
+    let finalResponse: MCPResponse | undefined;
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message as MCPResponse;
+        break;
+      }
+    }
+
+    // 3. Assert
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
+    expect(result.reply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+
+    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+
+  it('should save a checkpoint and successfully revert to it', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>Writing file 1.</think>
+         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Saving checkpoint.</think>
+         <typescript>await mem.saveCheckpoint();</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Writing file 2.</think>
+         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Reverting to checkpoint.</think>
+         <typescript>await mem.revertToLastCheckpoint();</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>Committing.</think>
+         <typescript>await mem.commitChanges('feat: add file1 only');</typescript>
+         <reply>Reverted and committed.</reply>`
+      );
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: { name: 'process_query', args: { query: 'test checkpoints' } },
+    });
+
+    let finalResponse: MCPResponse | undefined;
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message as MCPResponse;
+        break;
+      }
+    }
+
+    // 3. Assert
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
+    expect(result.reply).toBe('Reverted and committed.');
+    expect(await harness.mem.fileExists('file1.md')).toBe(true);
+    expect(await harness.mem.fileExists('file2.md')).toBe(false);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: add file1 only');
+  });
+
+  it('should block and gracefully handle path traversal attempts', async () => {
+    // 1. Arrange
+    mockedQueryLLM
+      .mockResolvedValueOnce(
+        `<think>I will try to read a sensitive file.</think>
+         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`
+      )
+      .mockResolvedValueOnce(
+        `<think>The previous action failed as expected due to security. I will inform the user.</think>
+         <reply>I was unable to access that file due to security restrictions.</reply>`
+      );
+
+    // 2. Act
+    serverProcess = spawnServer(harness);
+    const messages = readMCPMessages(serverProcess);
+    writeMCPRequest(serverProcess, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'execute_tool',
+      params: {
+        name: 'process_query',
+        args: { query: 'read sensitive file' },
+      },
+    });
+
+    const notifications: MCPNotification[] = [];
+    let finalResponse: MCPResponse | undefined;
+
+    for await (const message of messages) {
+      if ('id' in message) {
+        finalResponse = message;
+        break;
+      }
+      notifications.push(message as MCPNotification);
+    }
+
+    // 3. Assert
+    const errorNotification = notifications.find(
+      (n) => n.method === 'mcp/log/error'
+    );
+    expect(errorNotification).toBeDefined();
+    expect((errorNotification?.params as { message: string }).message).toContain(
+      'Path traversal attempt detected'
+    );
+
+    const result: { reply: string } = JSON.parse(
+      (finalResponse?.result as string) ?? '{}'
+    );
+    expect(result.reply).toBe(
+      'I was unable to access that file due to security restrictions.'
+    );
+  });
+});
 ````
 
 ## File: .dockerignore
@@ -2483,6 +2434,68 @@ export interface ExecutionConstraints {
   maxMemoryBytes: number;
   allowedModules: string[];
   forbiddenAPIs: string[];
+}
+````
+
+## File: tests/lib/test-util.ts
+````typescript
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import type { TestHarnessState } from './test-harness';
+import type {
+  MCPRequest,
+  MCPResponse,
+  MCPNotification,
+} from '../../src/types';
+
+export const spawnServer = (
+  harness: TestHarnessState
+): ChildProcessWithoutNullStreams => {
+  const serverProcess = spawn('node', ['dist/server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      KNOWLEDGE_GRAPH_PATH: harness.mockConfig.knowledgeGraphPath,
+      OPENROUTER_API_KEY: harness.mockConfig.openRouterApiKey,
+    },
+  });
+
+  serverProcess.stderr.on('data', (data) => {
+    console.error(`SERVER STDERR: ${data}`);
+  });
+
+  return serverProcess;
+};
+
+export const writeMCPRequest = (
+  serverProcess: ChildProcessWithoutNullStreams,
+  request: MCPRequest
+): void => {
+  const message = JSON.stringify(request) + '\n';
+  serverProcess.stdin.write(message);
+};
+
+export type MCPMessage = MCPResponse | MCPNotification;
+
+export async function* readMCPMessages(
+  serverProcess: ChildProcessWithoutNullStreams
+): AsyncGenerator<MCPMessage> {
+  let buffer = '';
+  for await (const chunk of serverProcess.stdout) {
+    buffer += chunk.toString();
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.trim()) {
+        try {
+          const parsed = JSON.parse(line);
+          yield parsed as MCPMessage;
+        } catch {
+          console.error('Failed to parse MCP message:', line);
+        }
+      }
+    }
+  }
 }
 ````
 
@@ -3246,6 +3259,9 @@ export * from './sandbox.js';
 export * from './llm.js';
 export * from './loop.js';
 export * from './mcp.js';
+
+// Re-export AppConfig from config module
+export type { AppConfig } from '../config.js';
 
 export interface RecursaConfig {
   knowledgeGraphPath: string;
@@ -4461,188 +4477,6 @@ export const createMockHistory = (
 ];
 ````
 
-## File: tests/unit/llm.test.ts
-````typescript
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
-import type { AppConfig } from '../../src/config';
-import type { ChatMessage } from '../../src/types';
-
-// Mock fetch globally
-const mockFetch = jest.fn().mockImplementation(() =>
-  Promise.resolve({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        choices: [
-          {
-            message: {
-              content: 'Test response from LLM',
-            },
-          },
-        ],
-      }),
-    status: 200,
-    statusText: 'OK',
-  })
-);
-(global as any).fetch = mockFetch;
-
-const mockConfig: AppConfig = {
-  openRouterApiKey: 'test-api-key',
-  knowledgeGraphPath: '/test/path',
-  llmModel: 'anthropic/claude-3-haiku-20240307',
-  llmTemperature: 0.7,
-  llmMaxTokens: 4000,
-  sandboxTimeout: 10000,
-  sandboxMemoryLimit: 100,
-  gitUserName: 'Test User',
-  gitUserEmail: 'test@example.com',
-};
-
-const mockHistory: ChatMessage[] = [
-  { role: 'system', content: 'You are a helpful assistant.' },
-  { role: 'user', content: 'Hello, world!' },
-];
-
-beforeEach(() => {
-  (global.fetch as jest.Mock).mockClear();
-});
-
-describe('LLM Module', () => {
-  describe('queryLLM', () => {
-    it('should make a successful request to OpenRouter API', async () => {
-      const response = await queryLLM(mockHistory, mockConfig);
-
-      expect(response).toBe('Test response from LLM');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://openrouter.ai/api/v1/chat/completions',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            Authorization: 'Bearer test-api-key',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
-            'X-Title': 'Recursa',
-          },
-          body: JSON.stringify({
-            model: 'anthropic/claude-3-haiku-20240307',
-            messages: mockHistory,
-            temperature: 0.7,
-            max_tokens: 4000,
-          }),
-        })
-      );
-    });
-
-    it('should handle API errors properly', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Invalid API key' },
-            }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'OpenRouter API error: 401 Unauthorized'
-      );
-    });
-
-    it('should handle malformed API responses', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ invalid: 'response' }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Invalid response format from OpenRouter API'
-      );
-    });
-
-    it('should handle empty content in response', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: { content: '' },
-                },
-              ],
-            }),
-        })
-      );
-
-      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-        'Empty content received from OpenRouter API'
-      );
-    });
-  });
-
-  describe('queryLLMWithRetries', () => {
-    it('should retry on retryable errors', async () => {
-      // First call fails with server error
-      // Second call succeeds
-      (global.fetch as jest.Mock)
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: false,
-            status: 500,
-            statusText: 'Internal Server Error',
-            json: () => Promise.resolve({ error: 'Server error' }),
-          })
-        )
-        .mockImplementationOnce(() =>
-          Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                choices: [
-                  {
-                    message: { content: 'Success after retry' },
-                  },
-                ],
-              }),
-          })
-        );
-
-      const response = await queryLLMWithRetries(mockHistory, mockConfig);
-
-      expect(response).toBe('Success after retry');
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('should not retry on non-retryable errors (4xx)', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-          statusText: 'Bad Request',
-          json: () =>
-            Promise.resolve({
-              error: { message: 'Bad request' },
-            }),
-        })
-      );
-
-      await expect(
-        queryLLMWithRetries(mockHistory, mockConfig)
-      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
-      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
-    });
-  });
-});
-````
-
 ## File: .env.example
 ````
 # Recursa MCP Server Configuration
@@ -4906,6 +4740,188 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
 };
 ````
 
+## File: tests/unit/llm.test.ts
+````typescript
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { queryLLM, queryLLMWithRetries } from '../../src/core/llm';
+import type { AppConfig } from '../../src/config';
+import type { ChatMessage } from '../../src/types';
+
+// Mock fetch globally
+const mockFetch = jest.fn().mockImplementation(() =>
+  Promise.resolve({
+    ok: true,
+    json: () =>
+      Promise.resolve({
+        choices: [
+          {
+            message: {
+              content: 'Test response from LLM',
+            },
+          },
+        ],
+      }),
+    status: 200,
+    statusText: 'OK',
+  })
+);
+(global as any).fetch = mockFetch;
+
+const mockConfig: AppConfig = {
+  openRouterApiKey: 'test-api-key',
+  knowledgeGraphPath: '/test/path',
+  llmModel: 'anthropic/claude-3-haiku-20240307',
+  llmTemperature: 0.7,
+  llmMaxTokens: 4000,
+  sandboxTimeout: 10000,
+  sandboxMemoryLimit: 100,
+  gitUserName: 'Test User',
+  gitUserEmail: 'test@example.com',
+};
+
+const mockHistory: ChatMessage[] = [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'Hello, world!' },
+];
+
+beforeEach(() => {
+  (fetch as jest.Mock).mockClear();
+});
+
+describe('LLM Module', () => {
+  describe('queryLLM', () => {
+    it('should make a successful request to OpenRouter API', async () => {
+      const response = await queryLLM(mockHistory, mockConfig);
+
+      expect(response).toBe('Test response from LLM');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/rec/ursa', // Referer is required by OpenRouter
+            'X-Title': 'Recursa',
+          },
+          body: JSON.stringify({
+            model: 'anthropic/claude-3-haiku-20240307',
+            messages: mockHistory,
+            temperature: 0.7,
+            max_tokens: 4000,
+          }),
+        })
+      );
+    });
+
+    it('should handle API errors properly', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 401,
+          statusText: 'Unauthorized',
+          json: () =>
+            Promise.resolve({
+              error: { message: 'Invalid API key' },
+            }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'OpenRouter API error: 401 Unauthorized'
+      );
+    });
+
+    it('should handle malformed API responses', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ invalid: 'response' }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'Invalid response format from OpenRouter API'
+      );
+    });
+
+    it('should handle empty content in response', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              choices: [
+                {
+                  message: { content: '' },
+                },
+              ],
+            }),
+        })
+      );
+
+      await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
+        'Empty content received from OpenRouter API'
+      );
+    });
+  });
+
+  describe('queryLLMWithRetries', () => {
+    it('should retry on retryable errors', async () => {
+      // First call fails with server error
+      // Second call succeeds
+      (global.fetch as jest.Mock)
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            json: () => Promise.resolve({ error: 'Server error' }),
+          })
+        )
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                choices: [
+                  {
+                    message: { content: 'Success after retry' },
+                  },
+                ],
+              }),
+          })
+        );
+
+      const response = await queryLLMWithRetries(mockHistory, mockConfig);
+
+      expect(response).toBe('Success after retry');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not retry on non-retryable errors (4xx)', async () => {
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          json: () =>
+            Promise.resolve({
+              error: { message: 'Bad request' },
+            }),
+        })
+      );
+
+      await expect(
+        queryLLMWithRetries(mockHistory, mockConfig)
+      ).rejects.toThrow('OpenRouter API error: 400 Bad Request');
+      expect(global.fetch).toHaveBeenCalledTimes(1); // Should not retry
+    });
+  });
+});
+````
+
 ## File: tests/integration/workflow.test.ts
 ````typescript
 import {
@@ -4916,8 +4932,6 @@ import {
   afterEach,
 } from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import simpleGit from 'simple-git';
 import type { StatusUpdate } from '../../src/types';
 import {
   createTestHarness,
@@ -4982,7 +4996,7 @@ await mem.commitChanges('feat: initialize project with basic structure');
 await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
 await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
 await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', '// Test utilities\\nconst { formatDate } = require(\\\'../src/utils.js\\\');');
+await mem.writeFile('tests/utils.test.js', "// Test utilities\\nconst { formatDate } = require('../src/utils.js');");
 </typescript>`,
         `<think>Features added. Commit the new functionality.</think>
 <typescript>
@@ -5834,58 +5848,6 @@ export const searchGlobal =
   };
 ````
 
-## File: package.json
-````json
-{
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/server.js",
-    "start:termux": "npm run start",
-    "start:standard": "npm run start",
-    "build": "tsc",
-    "build:auto": "node scripts/build.js",
-    "build:termux": "node scripts/build.js termux",
-    "build:standard": "node scripts/build.js standard",
-    "dev": "tsx watch src/server.ts",
-    "dev:termux": "npm run dev",
-    "dev:standard": "npm run dev",
-    "test": "jest",
-    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
-    "install:auto": "node scripts/install.js",
-    "install:termux": "node scripts/install.js termux",
-    "install:standard": "node scripts/install.js standard",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "fastmcp": "^1.21.0",
-    "dotenv": "^16.4.5",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^4.0.2",
-    "ts-jest": "^29.1.2",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "license": "MIT"
-}
-````
-
 ## File: repomix.config.json
 ````json
 {
@@ -6271,6 +6233,58 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 });
 ````
 
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastmcp": "^1.21.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
+````
+
 ## File: src/core/sandbox.ts
 ````typescript
 import { createContext, runInContext } from 'node:vm';
@@ -6372,7 +6386,6 @@ import {
 import {
   createTestHarness,
   cleanupTestHarness,
-  resetTestHarness,
   type TestHarnessState,
 } from '../lib/test-harness';
 import type { MemAPI } from '../../src/types';

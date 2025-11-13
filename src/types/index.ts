@@ -5,6 +5,9 @@ export * from './llm.js';
 export * from './loop.js';
 export * from './mcp.js';
 
+// Re-export AppConfig from config module
+export type { AppConfig } from '../config.js';
+
 export interface RecursaConfig {
   knowledgeGraphPath: string;
   llm: {

@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { resolveSecurePath, validatePathBounds } from './secure-path';
+import { resolveSecurePath, validatePathBounds } from './secure-path.js';
 import platform from '../../lib/platform.js';
 
 // Note: Each function here is a HOF that takes dependencies (like graphRoot)
