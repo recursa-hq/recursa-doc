@@ -56,16 +56,16 @@ const main = async () => {
 
           switch (type) {
             case 'think':
-              log.info(content);
+              log.info(content || 'Thinking...');
               break;
             case 'act':
-              log.info(message, data);
+              log.info(message, data as any);
               break;
             case 'error':
-              log.error(message, data);
+              log.error(message, data as any);
               break;
             default:
-              log.debug(message, data);
+              log.debug(message, data as any);
           }
         };
 

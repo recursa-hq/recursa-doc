@@ -1,5 +1,5 @@
-import type { MemAPI } from './mem';
-import type { ChatMessage } from './llm';
+import type { MemAPI } from './mem.js';
+import type { ChatMessage } from './llm.js';
 
 // Real-time status update types
 export type StatusUpdate = {

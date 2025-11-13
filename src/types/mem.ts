@@ -1,4 +1,4 @@
-import type { LogEntry } from './git';
+import type { LogEntry } from './git.js';
 
 // --- Knowledge Graph & Git ---
 

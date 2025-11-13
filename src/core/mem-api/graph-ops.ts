@@ -1,9 +1,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path';
-import { walk } from './fs-walker';
-import { createIgnoreFilter } from '../../lib/gitignore-parser';
+import { resolveSecurePath } from './secure-path.js';
+import { walk } from './fs-walker.js';
+import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
 
 type PropertyCondition = {
   type: 'property';

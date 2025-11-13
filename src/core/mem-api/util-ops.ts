@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import type { PathTokenCount } from '../../types';
-import { resolveSecurePath } from './secure-path';
+import { resolveSecurePath } from './secure-path.js';
 
 // A private helper to centralize token counting logic.
 // This is a simple estimation and should be replaced with a proper

@@ -1,10 +1,10 @@
 import type { AppConfig } from '../config';
 import type { ExecutionContext, ChatMessage, StatusUpdate } from '../types';
-import { logger } from '../lib/logger';
-import { queryLLMWithRetries as defaultQueryLLM } from './llm';
-import { parseLLMResponse } from './parser';
-import { runInSandbox } from './sandbox';
-import { createMemAPI } from './mem-api';
+import { logger } from '../lib/logger.js';
+import { queryLLMWithRetries as defaultQueryLLM } from './llm.js';
+import { parseLLMResponse } from './parser.js';
+import { runInSandbox } from './sandbox.js';
+import { createMemAPI } from './mem-api/index.js';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';

@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config';
-import { logger } from '../lib/logger';
+import { logger } from '../lib/logger.js';
 import type { ChatMessage } from '../types';
 
 // Custom error class for HTTP errors with status code
