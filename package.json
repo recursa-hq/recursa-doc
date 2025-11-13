@@ -15,7 +15,7 @@
     "dev:termux": "npm run dev",
     "dev:standard": "npm run dev",
     "test": "jest",
-    "lint": "eslint 'src/**/*.ts'",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
     "install:auto": "node scripts/install.js",
     "install:termux": "node scripts/install.js termux",
     "install:standard": "node scripts/install.js standard",

@@ -6,8 +6,6 @@ import {
   afterEach,
 } from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
-import { createMemAPI } from '../../src/core/mem-api';
-import simpleGit from 'simple-git';
 import type { StatusUpdate } from '../../src/types';
 import {
   createTestHarness,
@@ -72,7 +70,7 @@ await mem.commitChanges('feat: initialize project with basic structure');
 await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
 await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
 await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', '// Test utilities\\nconst { formatDate } = require(\\\'../src/utils.js\\\');');
+await mem.writeFile('tests/utils.test.js', "// Test utilities\\nconst { formatDate } = require('../src/utils.js');");
 </typescript>`,
         `<think>Features added. Commit the new functionality.</think>
 <typescript>

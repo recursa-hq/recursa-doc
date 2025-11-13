@@ -8,7 +8,6 @@ import {
 import {
   createTestHarness,
   cleanupTestHarness,
-  resetTestHarness,
   type TestHarnessState,
 } from '../lib/test-harness';
 import type { MemAPI } from '../../src/types';
