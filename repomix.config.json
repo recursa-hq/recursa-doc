@@ -20,7 +20,7 @@
     "includeFullDirectoryStructure": false,
     "tokenCountTree": false,
     "git": {
-      "sortByChanges": true,
+      "sortByChanges": true,execute all parts in single trx
       "sortByChangesMaxCommits": 100,
       "includeDiffs": false,
       "includeLogs": false,

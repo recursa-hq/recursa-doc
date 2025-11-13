@@ -4,7 +4,7 @@ import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
 
 // Mock fetch globally
-global.fetch = jest.fn(() =>
+global.fetch = jest.fn((() =>
   Promise.resolve({
     ok: true,
     json: () =>
@@ -20,7 +20,7 @@ global.fetch = jest.fn(() =>
     status: 200,
     statusText: 'OK',
   })
-);
+) as jest.Mock);
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',

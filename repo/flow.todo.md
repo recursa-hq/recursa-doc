@@ -1,4 +1,12 @@
 
+===
+
+discrepancy analysis
+
+===
+
+fix fail test
+
 === DONE
 
 I thought based on readme, the file system content structure should be logseq - item based org-mode

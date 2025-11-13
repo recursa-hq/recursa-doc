@@ -236,11 +236,13 @@ export const verifyTestFiles = async (
  * @param responses - Array of predefined responses to return in sequence
  * @returns A mock function that simulates LLM responses
  */
-export const createMockQueryLLM = (responses: string[]) => {
+export const createMockQueryLLM = (
+  responses: string[]
+): ((history: ChatMessage[], config: AppConfig) => Promise<string>) => {
   let callCount = 0;
   return async (
     _history: ChatMessage[],
-    _config: AppConfig
+    _config: AppConfig,
   ): Promise<string> => {
     // Return the next pre-canned XML response from the `responses` array.
     const response = responses[callCount];
@@ -263,11 +265,13 @@ export const createMockQueryLLM = (responses: string[]) => {
  */
 export const createMockLLMQueryWithSpy = (responses: string[]) => {
   let callCount = 0;
-  return jest.fn(async (_history: unknown[], _config: unknown) => {
-    const response = responses[callCount] || responses[responses.length - 1];
-    callCount++;
-    return response;
-  });
+  return jest.fn(
+    async (_history: ChatMessage[], _config: AppConfig): Promise<string> => {
+      const response = responses[callCount] || responses[responses.length - 1];
+      callCount++;
+      return response as string;
+    }
+  );
 };
 
 /**
