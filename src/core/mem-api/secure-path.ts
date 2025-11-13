@@ -78,15 +78,30 @@ export const validatePathBounds = (
 
   try {
     const canonicalRoot = getCanonicalPath(allowedRoot);
-    let canonicalTarget = getCanonicalPath(testPath);
+    let canonicalTarget: string;
+    
+    // Handle non-existent paths specially
+    try {
+      canonicalTarget = getCanonicalPath(testPath);
+    } catch (error) {
+      // Path doesn't exist, use normalized path instead
+      canonicalTarget = platform.normalizePath(path.resolve(testPath));
+    }
 
     // If we shouldn't follow symlinks, check if the target itself is a symlink
-    if (!followSymlinks && fs.lstatSync(testPath).isSymbolicLink()) {
-      if (!allowSymlinks) {
-        return false;
+    if (!followSymlinks) {
+      try {
+        if (fs.lstatSync(testPath).isSymbolicLink()) {
+          if (!allowSymlinks) {
+            return false;
+          }
+          // Use lstat to get the symlink itself, not its target
+          canonicalTarget = platform.normalizePath(path.resolve(testPath));
+        }
+      } catch (error) {
+        // File doesn't exist, which is fine for write operations
+        // The canonicalTarget from resolveSecurePath is still valid
       }
-      // Use lstat to get the symlink itself, not its target
-      canonicalTarget = platform.normalizePath(path.resolve(testPath));
     }
 
     // Check if the target path exists (if required)

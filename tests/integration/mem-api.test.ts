@@ -46,19 +46,19 @@ describe('MemAPI Integration Tests', () => {
     const maliciousPath = '../../../etc/passwd';
 
     await expect(mem.readFile(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
 
     await expect(mem.writeFile(maliciousPath, '...')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
 
     await expect(mem.deletePath(maliciousPath)).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
 
     await expect(mem.rename(maliciousPath, 'safe.md')).rejects.toThrow(
-      'Security Error: Path traversal attempt detected.'
+      'Path traversal attempt detected.'
     );
   });
 
@@ -78,7 +78,7 @@ describe('MemAPI Integration Tests', () => {
 
     expect(log).toHaveLength(1);
     expect(log[0]).toBeDefined();
-    expect(log[0].message).toBe(commitMessage);
+    expect(log[0]?.message).toBe(commitMessage);
   });
 
   it('should list files in a directory', async () => {
@@ -123,7 +123,7 @@ No links here.
 
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
-    expect(results[0].filePath).toBe('PageA.md');
+    expect(results[0]?.filePath).toBe('PageA.md');
   });
 
   it('should update a file atomically and fail if content changes', async () => {

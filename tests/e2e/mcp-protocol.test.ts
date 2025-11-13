@@ -114,14 +114,33 @@ describe('MCP Protocol E2E Test', () => {
     await fs.mkdir(tempDir, { recursive: true });
 
     // Spawn the server as a child process for testing
-    proc = spawn('tsx', ['src/server.ts'], {
+    proc = spawn('node', ['dist/server.js'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         KNOWLEDGE_GRAPH_PATH: tempDir,
         OPENROUTER_API_KEY: 'mock-key-for-e2e-test',
+        NODE_ENV: 'test',
       },
     });
+
+    // Log any errors from the server process
+    if (proc.stderr) {
+      proc.stderr.on('data', (data) => {
+        console.error('Server stderr:', data.toString());
+      });
+    }
+
+    proc.on('error', (error) => {
+      console.error('Server process error:', error);
+    });
+
+    proc.on('exit', (code) => {
+      console.log('Server process exited with code:', code);
+    });
+    
+    // Give the server a moment to start up
+    await new Promise(resolve => setTimeout(resolve, 1000));
   });
 
   afterEach(() => {
@@ -151,8 +170,14 @@ describe('MCP Protocol E2E Test', () => {
     };
     await writer.write(JSON.stringify(initRequest) + '\n');
 
+    // Wait a moment for the server to process
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     // 2. Await and verify initialize response
     const initResponse = await reader.next();
+    if (initResponse.done) {
+      console.log('Stream is done, no response received');
+    }
     expect(initResponse.done).toBe(false);
     const initResponseValue = initResponse.value as MCPInitializeResponse;
     expect(initResponseValue.id).toBe(initRequestId);
@@ -179,7 +204,7 @@ describe('MCP Protocol E2E Test', () => {
       (t: MCPTool) => t.name === 'process_query'
     );
     expect(processQueryTool).toBeDefined();
-    expect(typeof processQueryTool.description).toBe('string');
+    expect(typeof processQueryTool?.description).toBe('string');
 
     // NOTE: Testing the 'call-tool' for 'process_query' is intentionally omitted here.
     // A true process-level E2E test for the agent loop would require either:

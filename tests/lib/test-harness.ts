@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import simpleGit from 'simple-git';
+import simpleGit, { type SimpleGit } from 'simple-git';
 import { createMemAPI } from '../../src/core/mem-api';
 import type { AppConfig } from '../../src/config';
 import type { MemAPI } from '../../src/types';
@@ -33,7 +33,7 @@ export interface TestHarnessState {
   readonly tempDir: string;
   readonly mockConfig: AppConfig;
   readonly mem: MemAPI;
-  readonly git: simpleGit.SimpleGit;
+  readonly git: SimpleGit;
 }
 
 /**

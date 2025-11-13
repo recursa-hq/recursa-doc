@@ -42,8 +42,8 @@ await mem.writeFile('package.json', JSON.stringify({
   scripts: { start: 'node index.js', test: 'jest' }
 }, null, 2));
 
-await mem.writeFile('README.md', '# Test Project\n\nThis is a comprehensive test project.');
-await mem.writeFile('index.js', 'console.log("Hello, World!");');
+await mem.writeFile('README.md', '# Test Project\\n\\nThis is a comprehensive test project.');
+await mem.writeFile('index.js', 'console.log(\\"Hello, World!\\");');
 await mem.createDir('src');
 await mem.writeFile('src/app.js', '// Application logic');
 </typescript>`,
@@ -69,10 +69,10 @@ await mem.commitChanges('feat: initialize project with basic structure');
         `<think>I'll add features to the existing project.</think>
 <typescript>
 // Add feature files
-await mem.writeFile('src/utils.js', '// Utility functions\nexports.formatDate = (date) => date.toISOString();');
+await mem.writeFile('src/utils.js', '// Utility functions\\nexports.formatDate = (date) => date.toISOString();');
 await mem.writeFile('src/config.js', '// Configuration\\nmodule.exports = { port: 3000 };');
 await mem.createDir('tests');
-await mem.writeFile('tests/utils.test.js', '// Test utilities\nconst { formatDate } = require('../src/utils.js');');
+await mem.writeFile('tests/utils.test.js', '// Test utilities\\nconst { formatDate } = require(\\\'../src/utils.js\\\');');
 </typescript>`,
         `<think>Features added. Commit the new functionality.</think>
 <typescript>
@@ -98,14 +98,14 @@ await mem.commitChanges('feat: add utilities, config, and test structure');
 // Update main file
 const indexContent = await mem.readFile('index.js');
 const updatedIndex = indexContent.replace(
-  'console.log("Hello, World!");',
-  'const { formatDate } = require("./src/utils.js");\nconsole.log("Current time:", formatDate(new Date()));'
+  'console.log(\\"Hello, World!\\");',
+  'const { formatDate } = require(\\"./src/utils.js\\");\\nconsole.log(\\"Current time:\\", formatDate(new Date()));'
 );
 await mem.updateFile('index.js', indexContent, updatedIndex);
 
 // Update README
 const readmeContent = await mem.readFile('README.md');
-const updatedReadme = readmeContent + '\n\n## Usage\n\nRun with: npm start';
+const updatedReadme = readmeContent + '\\n\\n## Usage\\n\\nRun with: npm start';
 await mem.updateFile('README.md', readmeContent, updatedReadme);
 </typescript>`,
         `<think>Main application updated. Commit the improvements.</think>
@@ -153,16 +153,16 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
       expect(readmeContent).toContain('Usage');
       expect(readmeContent).toContain('npm start');
 
-      // Verify git history shows all three commits
+      // Verify git history shows all three commits (plus initial .gitignore commit)
       const log = await harness.git.log();
-      expect(log.all.length).toBe(3);
-      expect(log.all[0].message).toBe(
+      expect(log.all.length).toBe(4);
+      expect(log.all[0]?.message).toBe(
         'feat: integrate utilities and update documentation'
       );
-      expect(log.all[1].message).toBe(
+      expect(log.all[1]?.message).toBe(
         'feat: add utilities, config, and test structure'
       );
-      expect(log.all[2].message).toBe(
+      expect(log.all[2]?.message).toBe(
         'feat: initialize project with basic structure'
       );
     });
@@ -178,15 +178,15 @@ await mem.commitChanges('feat: integrate utilities and update documentation');
         `<think>I'll demonstrate complex file operations including creating, updating, deleting, and renaming files.</think>
 <typescript>
 // Create multiple related files
-await mem.writeFile('docs/intro.md', '# Introduction\n\nProject introduction.');
-await mem.writeFile('docs/guide.md', '# User Guide\n\nDetailed user guide.');
-await mem.writeFile('docs/api.md', '# API Reference\n\nAPI documentation.');
+await mem.writeFile('docs/intro.md', '# Introduction\\n\\nProject introduction.');
+await mem.writeFile('docs/guide.md', '# User Guide\\n\\nDetailed user guide.');
+await mem.writeFile('docs/api.md', '# API Reference\\n\\nAPI documentation.');
 
 // Create a temporary file that will be renamed
-await mem.writeFile('docs/temp.md', '# Temporary\n\nThis will be renamed.');
+await mem.writeFile('docs/temp.md', '# Temporary\\n\\nThis will be renamed.');
 
 // Create a file that will be deleted
-await mem.writeFile('docs/obsolete.md', '# Obsolete\n\nThis will be deleted.');
+await mem.writeFile('docs/obsolete.md', '# Obsolete\\n\\nThis will be deleted.');
 
 // List files to verify
 const docsFiles = await mem.listFiles('docs');
@@ -202,7 +202,7 @@ await mem.deletePath('docs/obsolete.md');
 
 // Update the introduction to reference the overview
 const introContent = await mem.readFile('docs/intro.md');
-const updatedIntro = introContent + '\n\nSee also: [[Overview]] for a project overview.';
+const updatedIntro = introContent + '\\n\\nSee also: [[Overview]] for a project overview.';
 await mem.updateFile('docs/intro.md', introContent, updatedIntro);
 
 // Verify git staged files
@@ -270,10 +270,10 @@ Successfully performed complex file operations including creating multiple docum
       const introContent = await mem.readFile('docs/intro.md');
       expect(introContent).toContain('[[Overview]]');
 
-      // Verify git operations worked
+      // Verify git operations worked (plus initial .gitignore commit)
       const log = await harness.git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
+      expect(log.all.length).toBe(2);
+      expect(log.all[0]?.message).toBe(
         'feat: reorganize documentation structure'
       );
     });
@@ -304,8 +304,8 @@ try {
 
 // This should work - create the missing file
 await mem.writeFile('non-existent-config.json', JSON.stringify({
-  app: 'test',
-  version: '1.0.0'
+  app: \\"test\\",
+  version: \\"1.0.0\\"
 }, null, 2));
 </typescript>`,
         `<think>Now I'll test additional error scenarios.</think>
@@ -316,7 +316,7 @@ try {
 } catch (error) {
   console.log('Update error caught:', error.message);
   // Create the file instead
-  await mem.writeFile('missing.md', '# Created after error\n\nContent here.');
+  await mem.writeFile('missing.md', '# Created after error\\n\\nContent here.');
 }
 
 // Try to delete a file that doesn't exist
@@ -368,10 +368,10 @@ Successfully demonstrated comprehensive error handling and recovery. Caught and 
       const missingContent = await mem.readFile('missing.md');
       expect(missingContent).toContain('Created after error');
 
-      // Verify git commit was successful despite errors
+      // Verify git commit was successful despite errors (plus initial .gitignore commit)
       const log = await harness.git.log();
-      expect(log.all.length).toBe(1);
-      expect(log.all[0].message).toBe(
+      expect(log.all.length).toBe(2);
+      expect(log.all[0]?.message).toBe(
         'feat: demonstrate error handling and recovery'
       );
     });

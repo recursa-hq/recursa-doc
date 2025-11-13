@@ -7,7 +7,7 @@ import {
   beforeEach,
 } from '@jest/globals';
 import { handleUserQuery } from '../../src/core/loop';
-import { type AppConfig, loadAndValidateConfig } from '../../src/config';
+import type { AppConfig } from '../../src/config';
 import {
   createTestHarness,
   cleanupTestHarness,
@@ -19,8 +19,19 @@ describe('Agent End-to-End Workflow', () => {
   let appConfig: AppConfig;
   let harness: TestHarnessState;
 
-  beforeAll(async () => {
-    appConfig = await loadAndValidateConfig();
+  beforeAll(() => {
+    // Create a mock config for E2E tests to avoid environment variable dependencies
+    appConfig = {
+      openRouterApiKey: 'test-api-key',
+      knowledgeGraphPath: '/tmp/test-knowledge-graph',
+      llmModel: 'test-model',
+      llmTemperature: 0.7,
+      llmMaxTokens: 4000,
+      sandboxTimeout: 10000,
+      sandboxMemoryLimit: 100,
+      gitUserName: 'Test User',
+      gitUserEmail: 'test@example.com',
+    };
   });
 
   beforeEach(async () => {
@@ -45,9 +56,9 @@ describe('Agent End-to-End Workflow', () => {
 const orgPath = 'AI Research Institute.md';
 const orgExists = await mem.fileExists(orgPath);
 if (!orgExists) {
-  await mem.writeFile(orgPath, '# AI Research Institute\ntype:: organization\n');
+  await mem.writeFile(orgPath, '# AI Research Institute\\ntype:: organization\\n');
 }
-await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\ntype:: person\naffiliation:: [[AI Research Institute]]\nfield:: [[Symbolic Reasoning]]');
+await mem.writeFile('Dr. Aris Thorne.md', '# Dr. Aris Thorne\\ntype:: person\\naffiliation:: [[AI Research Institute]]\\nfield:: [[Symbolic Reasoning]]');
 </typescript>`;
     const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
 <typescript>
