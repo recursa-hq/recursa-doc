@@ -1,2870 +1,2002 @@
 # Directory Structure
 ```
-.claude/
-  settings.local.json
+docs/
+  fastmcp.doc.md
+  tools.md
 src/
   core/
     mem-api/
-      file-ops.ts
-      fs-walker.ts
-      git-ops.ts
-      graph-ops.ts
-      index.ts
       secure-path.ts
-      state-ops.ts
-      util-ops.ts
-    llm.ts
     loop.ts
-    parser.ts
-    sandbox.ts
-  lib/
-    gitignore-parser.ts
-    logger.ts
-    logseq-validator.ts
-    platform.ts
-  types/
-    git.ts
-    index.ts
-    llm.ts
-    loop.ts
-    mcp.ts
-    mem.ts
-    sandbox.ts
   config.ts
+  mcp-schemas.ts
   server.ts
 tests/
   e2e/
     mcp-workflow.test.ts
-  integration/
-    knowledge-graph-workflow.test.ts
-    mem-api-file-ops.test.ts
-    mem-api-git-ops.test.ts
-    mem-api-graph-ops.test.ts
-    mem-api-state-ops.test.ts
-    mem-api-util-ops.test.ts
-    workflow.test.ts
   lib/
     test-harness.ts
-    test-util.ts
-  unit/
-    llm.test.ts
-    logseq-validator.test.ts
-    parser.test.ts
-  setup.ts
-.dockerignore
-.env.example
-.env.test
-.gitignore
-.prettierrc.json
-debug-stash.ts
-Dockerfile
-eslint.config.js
-INSTALL_TERMUX.md
-jest.config.js
 package.json
-README.md
-relay.config.json
-repomix.config.json
-tasks.md
-tsconfig.json
 ```
 
 # Files
 
-## File: .claude/settings.local.json
-````json
-{
-  "permissions": {
-    "allow": [
-      "Bash(git config:*)"
-    ],
-    "deny": [],
-    "ask": []
-  }
-}
-````
-
-## File: src/lib/logseq-validator.ts
-````typescript
-export interface ValidationResult {
-  isValid: boolean;
-  errors: string[];
-}
-
-/**
- * Validates if the given string content conforms to the Logseq/Org-mode block format.
- * @param content The content to validate.
- * @returns A ValidationResult object.
- */
-export const validateLogseqContent = (content: string): ValidationResult => {
-  const errors: string[] = [];
-  const lines = content.split('\n');
-  const indentationStack: number[] = [-2]; // Stack to track indentation, -2 for a virtual root
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const lineNumber = i + 1;
-
-    // Skip undefined or null lines
-    if (line === undefined || line === null) {
-      continue;
-    }
-
-    // Ignore empty or whitespace-only lines
-    if (line.trim() === '') {
-      continue;
-    }
-
-    const indentation = line.length - line.trimStart().length;
-    const trimmedLine = line.trim();
-
-    // Rule 1: Must start with a dash
-    if (!trimmedLine.startsWith('- ')) {
-      errors.push(`Line ${lineNumber}: Must start with "- ". Found: "${trimmedLine}"`);
-      continue; // Skip other checks for this malformed line
-    }
-
-    // Rule 2: Indentation must be a multiple of 2
-    if (indentation % 2 !== 0) {
-      errors.push(
-        `Line ${lineNumber}: Indentation must be a multiple of 2. Found ${indentation} spaces.`
-      );
-    }
-
-    // Rule 3: Nesting must be logical
-    const parentIndentation = indentationStack[indentationStack.length - 1]!;
-    if (indentation > parentIndentation + 2) {
-      errors.push(
-        `Line ${lineNumber}: Invalid nesting. Indentation increased by more than one level (from ${parentIndentation} to ${indentation} spaces).`
-      );
-    }
-
-    // Adjust indentation stack
-    if (indentation > parentIndentation) {
-      indentationStack.push(indentation);
-    } else {
-      while (
-        indentationStack.length > 1 &&
-        indentationStack[indentationStack.length - 1]! > indentation
-      ) {
-        indentationStack.pop();
-      }
-    }
-
-    // Rule 4: Properties (::) cannot be at the root level
-    if (indentation === 0 && trimmedLine.includes('::')) {
-      errors.push(
-        `Line ${lineNumber}: Properties (using "::") cannot be at the root level.`
-      );
-    }
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-};
-````
-
-## File: src/lib/platform.ts
-````typescript
-/**
- * Platform detection and utilities for cross-platform compatibility
- */
-
-export const platform = {
-  /** Current operating system platform */
-  isWindows: process.platform === 'win32',
-  isMacOS: process.platform === 'darwin',
-  isLinux: process.platform === 'linux',
-  isAndroid: process.platform === 'android',
-
-  /** Termux environment detection */
-  get isTermux(): boolean {
-    return this.isAndroid ||
-           process.env.TERMUX === 'true' ||
-           process.env.PREFIX?.includes('/com.termux') ||
-           process.env.TERMUX_VERSION !== undefined;
-  },
-
-  /** WSL (Windows Subsystem for Linux) detection */
-  get isWSL(): boolean {
-    return this.isLinux && (
-      process.env.WSL_DISTRO_NAME !== undefined ||
-      process.env.WSLENV !== undefined ||
-      require('fs').existsSync('/proc/version') &&
-      require('fs').readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
-    );
-  },
-
-  /** File system capabilities */
-  get hasCaseInsensitiveFS(): boolean {
-    return this.isWindows || this.isMacOS;
-  },
-
-  get hasFilePermissions(): boolean {
-    return !this.isWindows;
-  },
-
-  get supportsSymlinks(): boolean {
-    return this.isLinux || this.isMacOS || this.isWSL;
-  },
-
-  get supportsHardLinks(): boolean {
-    return this.isLinux || this.isMacOS;
-  },
-
-  /** Path separator */
-  get pathSeparator(): string {
-    return this.isWindows ? '\\' : '/';
-  },
-
-  /** Line ending */
-  get lineEnding(): string {
-    return this.isWindows ? '\r\n' : '\n';
-  },
-
-  /** Executable file extensions */
-  get executableExtensions(): string[] {
-    return this.isWindows ? ['.exe', '.bat', '.cmd'] : [];
-  },
-
-  /** Environment variable normalization */
-  normalizeEnvVar(key: string): string {
-    return this.isWindows ? key.toUpperCase() : key;
-  },
-
-  /** Path normalization for cross-platform */
-  normalizePath(p: string): string {
-    const normalized = require('path').normalize(p);
-    if (this.isWindows) {
-      return normalized.replace(/\//g, '\\');
-    }
-    return normalized.replace(/\\/g, '/');
-  },
-
-  /** Check if path is absolute */
-  isAbsolute(p: string): boolean {
-    if (this.isWindows) {
-      return /^[A-Za-z]:\\|\\\\/.test(p) || require('path').isAbsolute(p);
-    }
-    return require('path').isAbsolute(p);
-  },
-
-  /** Get platform-specific resource limits */
-  getResourceLimits() {
-    const limits = {
-      maxMemory: 512 * 1024 * 1024, // 512MB default
-      maxCpuTime: 30000, // 30 seconds default
-      maxFileSize: 10 * 1024 * 1024, // 10MB default
-      maxProcesses: 10,
-    };
-
-    if (this.isTermux) {
-      // More conservative limits for mobile environments
-      return {
-        ...limits,
-        maxMemory: 256 * 1024 * 1024, // 256MB
-        maxCpuTime: 15000, // 15 seconds
-        maxFileSize: 5 * 1024 * 1024, // 5MB
-        maxProcesses: 5,
-      };
-    }
-
-    return limits;
-  },
-
-  /** Get platform-specific temp directory */
-  getTempDir(): string {
-    const os = require('os');
-    const path = require('path');
-
-    if (this.isWindows) {
-      return process.env.TEMP || process.env.TMP || path.join(os.tmpdir(), 'recursa');
-    }
-
-    return process.env.TMPDIR || os.tmpdir();
-  },
-
-  /** Get platform-specific user data directory */
-  getUserDataDir(appName: string = 'recursa'): string {
-    const os = require('os');
-    const path = require('path');
-    const homeDir = os.homedir();
-
-    if (this.isWindows) {
-      return process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming', appName);
-    }
-
-    if (this.isMacOS) {
-      return path.join(homeDir, 'Library', 'Application Support', appName);
-    }
-
-    // Linux, Android, etc.
-    return process.env.XDG_DATA_HOME || path.join(homeDir, '.local', 'share', appName);
-  },
-
-  /** Platform-specific error handling */
-  handleFileError(error: Error & { code?: string }, operation: string, filePath?: string): Error {
-    const message = filePath ? `${operation} failed for ${filePath}` : `${operation} failed`;
-
-    if (this.isWindows) {
-      // Windows-specific error codes and messages
-      if (error.code === 'EPERM') {
-        return new Error(`${message}: Permission denied. Try running as administrator.`);
-      }
-      if (error.code === 'EBUSY') {
-        return new Error(`${message}: File is in use by another process.`);
-      }
-    }
-
-    if (this.isTermux) {
-      // Termux/Android specific errors
-      if (error.code === 'EACCES') {
-        return new Error(`${message}: Permission denied. Check storage permissions.`);
-      }
-    }
-
-    return new Error(`${message}: ${error.message}`);
-  },
-
-  /** Platform detection string for logging */
-  get platformString(): string {
-    const parts: string[] = [process.platform, process.arch];
-
-    if (this.isTermux) parts.push('termux');
-    if (this.isWSL) parts.push('wsl');
-
-    return parts.join('-');
-  },
-
-  /** Feature detection */
-  async detectFeatures(): Promise<Record<string, boolean>> {
-    const fs = require('fs').promises;
-    const features: Record<string, boolean> = {};
-
-    // Test symlink support
-    try {
-      const testFile = require('path').join(this.getTempDir(), 'symlink-test');
-      await fs.writeFile(testFile, 'test');
-      const linkFile = testFile + '-link';
-      await fs.symlink(testFile, linkFile);
-      await fs.unlink(linkFile);
-      await fs.unlink(testFile);
-      features.symlinks = true;
-    } catch {
-      features.symlinks = false;
-    }
-
-    // Test hard link support
-    try {
-      const testFile = require('path').join(this.getTempDir(), 'hardlink-test');
-      await fs.writeFile(testFile, 'test');
-      const linkFile = testFile + '-hard';
-      await fs.link(testFile, linkFile);
-      await fs.unlink(linkFile);
-      await fs.unlink(testFile);
-      features.hardLinks = true;
-    } catch {
-      features.hardLinks = false;
-    }
-
-    // Test file permissions
-    try {
-      const testFile = require('path').join(this.getTempDir(), 'perm-test');
-      await fs.writeFile(testFile, 'test');
-      await fs.chmod(testFile, 0o755);
-      await fs.unlink(testFile);
-      features.filePermissions = true;
-    } catch {
-      features.filePermissions = false;
-    }
-
-    return features;
-  }
-};
-
-export default platform;
-````
-
-## File: tests/integration/knowledge-graph-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness.js';
-
-// This test suite is intentionally stateful.
-// Each `it` block builds on the state created by the previous ones
-// to simulate a real, multi-turn agent workflow.
-describe('Knowledge Graph Workflow Integration Test', () => {
-  let harness: TestHarnessState;
-
-  // Setup the test environment once before all tests in this suite
-  beforeAll(async () => {
-    harness = await createTestHarness();
-  });
-
-  // Cleanup the test environment once after all tests in this suite have run
-  afterAll(async () => {
-    if (harness) {
-      await cleanupTestHarness(harness);
-    }
-  });
-
-  // Part 2, Step 1: Create the central project hub
-  it('1. should create the project hub file', async () => {
-    const projectContent = `- # Project Singularity
-  - status:: active
-  - start-date:: 2024-06-01
-`;
-    await harness.mem.writeFile('projects/Project Singularity.md', projectContent);
-    await harness.mem.commitChanges('feat: create Project Singularity hub');
-
-    expect(
-      await harness.mem.fileExists('projects/Project Singularity.md')
-    ).toBe(true);
-  });
-
-  // Part 2, Step 2: Create the people entities
-  it('2. should create person entities and link them to the project', async () => {
-    const evelynContent = `- # Dr. Evelyn Reed
-  - type:: person
-  - role:: Lead Research Scientist
-  - leads-project::
-    - [[Project Singularity]]
-`;
-    const arisContent = `- # Dr. Aris Thorne
-  - type:: person
-  - role:: Research Scientist
-  - team-member::
-    - [[Project Singularity]]
-`;
-    await harness.mem.writeFile('people/Dr. Evelyn Reed.md', evelynContent);
-    await harness.mem.writeFile('people/Dr. Aris Thorne.md', arisContent);
-    await harness.mem.commitChanges('feat: add project team members');
-
-    expect(await harness.mem.fileExists('people/Dr. Evelyn Reed.md')).toBe(
-      true
-    );
-    expect(await harness.mem.fileExists('people/Dr. Aris Thorne.md')).toBe(
-      true
-    );
-  });
-
-  // Part 2, Step 3: Document the architecture meeting
-  it('3. should document the architecture meeting', async () => {
-    const meetingContent = `- # 2024-07-22 - Singularity Architecture Deep Dive
-  - type:: meeting
-  - project:: [[Project Singularity]]
-  - attendees:: [[Dr. Evelyn Reed]], [[Dr. Aris Thorne]]
-  - outcomes::
-    - This decision is formally documented in [[ADR-001 - Use Micro-frontend Architecture]].
-  - action-items::
-    - [[Dr. Aris Thorne]] to draft the initial ADR.
-`;
-    await harness.mem.writeFile(
-      'meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md',
-      meetingContent
-    );
-    await harness.mem.commitChanges('docs: record architecture deep dive meeting');
-
-    expect(
-      await harness.mem.fileExists(
-        'meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md'
-      )
-    ).toBe(true);
-  });
-
-  // Part 2, Step 4: Formalize the architectural decision
-  it('4. should formalize the architectural decision', async () => {
-    const adrContent = `- # ADR-001: Use Micro-frontend Architecture
-  - status:: accepted
-  - date:: 2024-07-25
-  - authors:: [[Dr. Aris Thorne]]
-  - decided-in:: [[2024-07-22 - Singularity Architecture Deep Dive]]
-  - context::
-    - The UI for the reasoning engine needs to be modular to allow different teams to work on visualization and input components independently.
-  - justification::
-    - Enables independent deployment cycles.
-    - Reduces cognitive load for new developers.
-  - consequences::
-    - Increased complexity in the build pipeline.
-    - Requires a robust component sharing strategy.
-`;
-    await harness.mem.writeFile(
-      'decisions/ADR-001 - Use Micro-frontend Architecture.md',
-      adrContent
-    );
-    await harness.mem.commitChanges('feat: add ADR-001 for micro-frontends');
-
-    expect(
-      await harness.mem.fileExists(
-        'decisions/ADR-001 - Use Micro-frontend Architecture.md'
-      )
-    ).toBe(true);
-  });
-
-  // Part 2, Step 5: Update the project hub with all links
-  it('5. should update the project hub with all new links', async () => {
-    const projectPath = 'projects/Project Singularity.md';
-    const oldContent = await harness.mem.readFile(projectPath);
-
-    const newContent = `${oldContent}
-  - lead:: [[Dr. Evelyn Reed]]
-  - team:: [[Dr. Aris Thorne]]
-  - key-decisions::
-    - [[ADR-001 - Use Micro-frontend Architecture]]
-  - meetings::
-    - [[2024-07-22 - Singularity Architecture Deep Dive]]
-`;
-
-    await harness.mem.updateFile(projectPath, oldContent, newContent);
-    await harness.mem.commitChanges(
-      'refactor: update project hub with all entity links'
-    );
-
-    const updatedContent = await harness.mem.readFile(projectPath);
-    expect(updatedContent).toContain('[[Dr. Evelyn Reed]]');
-    expect(updatedContent).toContain(
-      '[[ADR-001 - Use Micro-frontend Architecture]]'
-    );
-    expect(updatedContent).toContain(
-      '[[2024-07-22 - Singularity Architecture Deep Dive]]'
-    );
-  });
-
-  // Part 3, Step 1: Test backlink and outgoing link resolution
-  it('6. should resolve backlinks and outgoing links correctly', async () => {
-    // Test backlinks for Dr. Aris Thorne
-    const arisBacklinks = await harness.mem.getBacklinks(
-      'people/Dr. Aris Thorne.md'
-    );
-    expect(arisBacklinks).toEqual(
-      expect.arrayContaining([
-        'decisions/ADR-001 - Use Micro-frontend Architecture.md',
-        'meetings/2024/2024-07-22 - Singularity Architecture Deep Dive.md',
-        'projects/Project Singularity.md',
-      ])
-    );
-    // Add a negative assertion for robustness
-    expect(arisBacklinks).not.toContain('people/Dr. Evelyn Reed.md');
-
-    // Test outgoing links for the main project file
-    const projectOutgoingLinks = await harness.mem.getOutgoingLinks(
-      'projects/Project Singularity.md'
-    );
-    expect(projectOutgoingLinks).toEqual(
-      expect.arrayContaining([
-        'Dr. Evelyn Reed',
-        'Dr. Aris Thorne',
-        'ADR-001 - Use Micro-frontend Architecture',
-        '2024-07-22 - Singularity Architecture Deep Dive',
-      ])
-    );
-    // Add a negative assertion for robustness
-    expect(projectOutgoingLinks).not.toContain('Some Random Unlinked Page');
-  });
-
-  // Part 3, Step 2: Simulate the complex user query from docs/overview.md
-  it('7. should simulate the complex query for micro-frontend decision', async () => {
-    // 1. "User is asking about a decision for 'Singularity'. I'll start by searching for a decision record."
-    // A more realistic initial search. The agent wouldn't know to combine terms yet.
-    // This failed because "Singularity" is not in the ADR file itself.
-    const searchResults = await harness.mem.searchGlobal('micro-frontend');
-    expect(searchResults).toContain(
-      'decisions/ADR-001 - Use Micro-frontend Architecture.md'
-    );
-
-    // 2. "Found the ADR. I'll read it to get the justification and find the source meeting."
-    const adrPath = searchResults.find(p =>
-      p.startsWith('decisions/')
-    );
-    expect(adrPath).toBeDefined();
-
-    const adrContent = await harness.mem.readFile(adrPath!);
-    const meetingLinkMatch = adrContent.match(/decided-in::\s*\[\[(.*?)\]\]/);
-    expect(meetingLinkMatch).not.toBeNull();
-    const meetingTitle = meetingLinkMatch![1];
-
-    // 3. "Okay, the decision was made in that meeting. Now I'll read the meeting file to find the attendees."
-    const meetingPath = `meetings/2024/${meetingTitle}.md`;
-    const meetingContent = await harness.mem.readFile(meetingPath);
-    const attendeesMatch = meetingContent.match(/attendees::\s*(.*)/);
-    expect(attendeesMatch).not.toBeNull();
-
-    // 4. "I have all the pieces. I'll synthesize the final answer."
-    const attendees = attendeesMatch![1];
-    expect(attendees).toContain('[[Dr. Evelyn Reed]]');
-    expect(attendees).toContain('[[Dr. Aris Thorne]]');
-  });
-
-  // Part 3, Step 3: Validate git history
-  it('8. should have a complete and accurate git history', async () => {
-    const log = await harness.mem.gitLog('projects/Project Singularity.md', 5);
-    expect(log.length).toBeGreaterThanOrEqual(2);
-    expect(log[0]?.message).toBe(
-      'refactor: update project hub with all entity links'
-    );
-    expect(log[log.length - 1]?.message).toBe(
-      'feat: create Project Singularity hub'
-    );
-  });
-});
-````
-
-## File: tests/unit/logseq-validator.test.ts
-````typescript
-import { describe, it, expect } from '@jest/globals';
-import { validateLogseqContent } from '../../src/lib/logseq-validator.js';
-
-describe('Logseq Content Validator', () => {
-  it('should return valid for correct Logseq content', () => {
-    const content = `
-- # Page Title
-  - property:: value
-  - List item 1
-    - Nested item 1.1
-      - Doubly nested item
-  - List item 2
-- Another root item
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(true);
-    expect(result.errors).toEqual([]);
-  });
-
-  it('should return valid for empty or whitespace-only content', () => {
-    expect(validateLogseqContent('').isValid).toBe(true);
-    expect(validateLogseqContent('   \n\n  ').isValid).toBe(true);
-  });
-
-  it('should detect lines not starting with "- "', () => {
-    const content = `
-- Valid item
-Invalid item
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Must start with "- ". Found: "Invalid item"'
-    );
-  });
-
-  it('should detect incorrect indentation (not a multiple of 2)', () => {
-    const content = `
-- Root
-   - Invalid indentation
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Indentation must be a multiple of 2. Found 3 spaces.'
-    );
-  });
-
-  it('should detect incorrect single-space indentation', () => {
-    const content = `
-- Root
- - Invalid indentation
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Indentation must be a multiple of 2. Found 1 spaces.'
-    );
-  });
-
-  it('should detect illogical nesting (jumping more than one level)', () => {
-    const content = `
-- Root
-    - Invalid jump
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 3: Invalid nesting. Indentation increased by more than one level (from 0 to 4 spaces).'
-    );
-  });
-
-  it('should detect properties at the root level', () => {
-    const content = `
-- property:: not-allowed-at-root
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'Line 2: Properties (using "::") cannot be at the root level.'
-    );
-  });
-
-  it('should allow properties at nested levels', () => {
-    const content = `
-- Item
-  - property:: allowed-here
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(true);
-  });
-
-  it('should handle multiple errors at once', () => {
-    const content = `
-Root without dash
-- property:: at-root
-   - bad indent
-        - bad nesting jump
-`;
-    const result = validateLogseqContent(content);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toEqual([
-      'Line 2: Must start with "- ". Found: "Root without dash"',
-      'Line 3: Properties (using "::") cannot be at the root level.',
-      'Line 4: Indentation must be a multiple of 2. Found 3 spaces.',
-      'Line 4: Invalid nesting. Indentation increased by more than one level (from 0 to 3 spaces).',
-      'Line 5: Invalid nesting. Indentation increased by more than one level (from 3 to 8 spaces).',
-    ]);
-  });
-});
-````
-
-## File: debug-stash.ts
-````typescript
-#!/usr/bin/env ts-node
-
-import simpleGit from 'simple-git';
-import { createTestHarness, cleanupTestHarness } from './tests/lib/test-harness.ts';
-
-async function debugStashOperations() {
-  console.log('=== Debugging Stash Operations ===');
-
-  const harness = await createTestHarness();
-
-  try {
-    // Step 1: Create initial commit
-    console.log('\n1. Creating initial commit...');
-    await harness.mem.writeFile('init.txt', 'initial file');
-    await harness.mem.commitChanges('initial commit for stash test');
-    console.log('Initial commit created');
-
-    // Step 2: Create file1.md and save checkpoint
-    console.log('\n2. Creating file1.md and saving checkpoint...');
-    await harness.mem.writeFile('file1.md', 'content1');
-    console.log('file1.md created, exists:', await harness.mem.fileExists('file1.md'));
-
-    const saveSuccess = await harness.mem.saveCheckpoint();
-    console.log('saveCheckpoint success:', saveSuccess);
-    console.log('file1.md exists after saveCheckpoint:', await harness.mem.fileExists('file1.md'));
-
-    // Check git status
-    const status1 = await harness.git.status();
-    console.log('Git status after saveCheckpoint:', {
-      staged: status1.staged,
-      modified: status1.modified,
-      created: status1.created,
-      not_added: status1.not_added,
-      isClean: status1.isClean()
-    });
-
-    // Check stash list
-    const stashes = await harness.git.stashList();
-    console.log('Stash list:', stashes.all.length, 'stashes');
-
-    // Step 3: Create file2.md
-    console.log('\n3. Creating file2.md...');
-    await harness.mem.writeFile('file2.md', 'content2');
-    console.log('file2.md created, exists:', await harness.mem.fileExists('file2.md'));
-    console.log('file1.md exists:', await harness.mem.fileExists('file1.md'));
-
-    // Check git status
-    const status2 = await harness.git.status();
-    console.log('Git status after creating file2.md:', {
-      staged: status2.staged,
-      modified: status2.modified,
-      created: status2.created,
-      not_added: status2.not_added,
-      isClean: status2.isClean()
-    });
-
-    // Step 4: Revert to checkpoint
-    console.log('\n4. Reverting to checkpoint...');
-    const revertSuccess = await harness.mem.revertToLastCheckpoint();
-    console.log('revertToLastCheckpoint success:', revertSuccess);
-    console.log('file1.md exists after revert:', await harness.mem.fileExists('file1.md'));
-    console.log('file2.md exists after revert:', await harness.mem.fileExists('file2.md'));
-
-    // Check git status after revert
-    const status3 = await harness.git.status();
-    console.log('Git status after revert:', {
-      staged: status3.staged,
-      modified: status3.modified,
-      created: status3.created,
-      not_added: status3.not_added,
-      isClean: status3.isClean()
-    });
-
-    // Check stash list after revert
-    const stashesAfter = await harness.git.stashList();
-    console.log('Stash list after revert:', stashesAfter.all.length, 'stashes');
-
-  } finally {
-    await cleanupTestHarness(harness);
-  }
-}
-
-debugStashOperations().catch(console.error);
-````
-
-## File: INSTALL_TERMUX.md
+## File: docs/fastmcp.doc.md
 ````markdown
-# Termux Installation Guide
+# FastMCP
 
-This project works on Termux with some modifications due to Android's filesystem limitations.
+A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
 
-## Prerequisites
+> [!NOTE]
+>
+> For a Python implementation, see [FastMCP](https://github.com/jlowin/fastmcp).
+
+## Features
+
+- Simple Tool, Resource, Prompt definition
+- [Authentication](#authentication)
+- [Passing headers through context](#passing-headers-through-context)
+- [Session ID and Request ID tracking](#session-id-and-request-id-tracking)
+- [Sessions](#sessions)
+- [Image content](#returning-an-image)
+- [Audio content](#returning-an-audio)
+- [Embedded](#embedded-resources)
+- [Logging](#logging)
+- [Error handling](#errors)
+- [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [Stateless mode](#stateless-mode) for serverless deployments
+- CORS (enabled by default)
+- [Progress notifications](#progress)
+- [Streaming output](#streaming-output)
+- [Typed server events](#typed-server-events)
+- [Prompt argument auto-completion](#prompt-argument-auto-completion)
+- [Sampling](#requestsampling)
+- [Configurable ping behavior](#configurable-ping-behavior)
+- [Health-check endpoint](#health-check-endpoint)
+- [Roots](#roots-management)
+- CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
+
+## When to use FastMCP over the official SDK?
+
+FastMCP is built on top of the official SDK.
+
+The official SDK provides foundational blocks for building MCPs, but leaves many implementation details to you:
+
+- [Initiating and configuring](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L664-L744) all the server components
+- [Handling of connections](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850)
+- [Handling of tools](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1303-L1498)
+- [Handling of responses](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L989-L1060)
+- [Handling of resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1151-L1242)
+- Adding [prompts](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850), [resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L960-L962), [resource templates](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L964-L987)
+- Embedding [resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1569-L1643), [image](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L51-L111) and [audio](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L113-L173) content blocks
+
+FastMCP eliminates this complexity by providing an opinionated framework that:
+
+- Handles all the boilerplate automatically
+- Provides simple, intuitive APIs for common tasks
+- Includes built-in best practices and error handling
+- Lets you focus on your MCP's core functionality
+
+**When to choose FastMCP:** You want to build MCP servers quickly without dealing with low-level implementation details.
+
+**When to use the official SDK:** You need maximum control or have specific architectural requirements. In this case, we encourage referencing FastMCP's implementation to avoid common pitfalls.
+
+## Installation
+
 ```bash
-pkg update && pkg upgrade
-pkg install nodejs npm git
+npm install fastmcp
 ```
 
-## Installation (Termux-specific)
-```bash
-# Install dependencies with Termux compatibility flags
-npm install --ignore-scripts --no-bin-links
+## Quickstart
 
-# Make binaries executable
-find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \;
-find node_modules -name "tsx" -type f -exec chmod +x {} \;
-find node_modules -name "esbuild" -type f -exec chmod +x {} \;
+> [!NOTE]
+>
+> There are many real-world examples of using FastMCP in the wild. See the [Showcase](#showcase) for examples.
 
-# Run TypeScript compiler directly using npx
-npx tsc
+```ts
+import { FastMCP } from "fastmcp";
+import { z } from "zod"; // Or any validation library that supports Standard Schema
 
-# Start development server
-npx tsx watch src/server.ts
-```
-
-## Alternative: Use the prepared scripts
-```bash
-npm run install:termux
-npm run dev:termux
-```
-
-## Known Limitations
-- Binary executables need manual permission fixes
-- Some linting tools may not work due to missing binaries
-- ESLint and Prettier dependencies removed for compatibility
-````
-
-## File: src/lib/gitignore-parser.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-
-/**
- * Represents a parsed gitignore pattern
- */
-interface GitignorePattern {
-  pattern: string;
-  isNegated: boolean;
-  isDirectory: boolean;
-}
-
-/**
- * Creates a gitignore pattern object from a raw pattern string
- */
-const parsePattern = (rawPattern: string): GitignorePattern | null => {
-  // Skip empty lines and comments
-  if (!rawPattern.trim() || rawPattern.trim().startsWith('#')) {
-    return null;
-  }
-
-  const trimmed = rawPattern.trim();
-  const isNegated = trimmed.startsWith('!');
-  const pattern = isNegated ? trimmed.slice(1) : trimmed;
-  const isDirectory = pattern.endsWith('/');
-
-  return {
-    pattern: isDirectory ? pattern.slice(0, -1) : pattern,
-    isNegated,
-    isDirectory,
-  };
-};
-
-/**
- * Tests if a file path matches a gitignore pattern
- */
-const matchesPattern = (
-  filePath: string,
-  relativePath: string,
-  parsedPattern: GitignorePattern
-): boolean => {
-  const { pattern, isDirectory } = parsedPattern;
-  
-  // Convert gitignore pattern to regex
-  let regexPattern = pattern
-    // Escape special regex characters except * and ?
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    // Convert * to match any characters except path separators
-    .replace(/\*/g, '[^/]*')
-    // Convert ? to match any single character except path separators
-    .replace(/\?/g, '[^/]')
-    // Convert ** to match any characters including path separators
-    .replace(/\*\*/g, '.*')
-    // Anchors for start and end
-    .replace(/^(?![^/])/, '^')
-    .replace(/(?<![^/])$/, '$');
-
-  // If pattern doesn't contain a slash, match against basename only
-  if (!pattern.includes('/')) {
-    regexPattern = `(?:^|.*/)${regexPattern}`;
-  }
-
-  const regex = new RegExp(regexPattern);
-  
-  // For directory patterns, ensure we're matching directories
-  if (isDirectory) {
-    // Check if it's a directory (ends with / in relative path)
-    if (!relativePath.endsWith('/')) {
-      return false;
-    }
-  }
-
-  // Test against relative path
-  const matches = regex.test(relativePath);
-  
-  return matches;
-};
-
-/**
- * Creates an ignore filter function from a .gitignore file
- * @param directory The directory containing the .gitignore file
- * @returns A function that returns true if a path should be ignored
- */
-export const createIgnoreFilter = async (
-  directory: string
-): Promise<(filePath: string) => boolean> => {
-  const gitignorePath = path.join(directory, '.gitignore');
-  
-  try {
-    const content = await fs.readFile(gitignorePath, 'utf-8');
-    const lines = content.split('\n');
-    
-    const patterns: GitignorePattern[] = [];
-    for (const line of lines) {
-      const parsed = parsePattern(line);
-      if (parsed) {
-        patterns.push(parsed);
-      }
-    }
-
-    // Return the filter function
-    return (filePath: string): boolean => {
-      const relativePath = path.relative(directory, filePath);
-      
-      if (relativePath === '') return false; // Never ignore the root directory
-      
-      let isIgnored = false;
-      
-      // Process patterns in order
-      for (const pattern of patterns) {
-        if (matchesPattern(filePath, relativePath, pattern)) {
-          isIgnored = !pattern.isNegated;
-        }
-      }
-      
-      return isIgnored;
-    };
-  } catch {
-    // .gitignore doesn't exist or can't be read, return a function that never ignores
-    return (): boolean => false;
-  }
-};
-
-/**
- * Creates an ignore filter that combines multiple ignore filters
- * @param filters Array of ignore filter functions
- * @returns A combined ignore filter function
- */
-export const combineIgnoreFilters = (
-  filters: Array<(filePath: string) => boolean>
-): ((filePath: string) => boolean) => {
-  return (filePath: string): boolean => {
-    return filters.some(filter => filter(filePath));
-  };
-};
-````
-
-## File: tests/integration/mem-api-file-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-import path from 'path';
-import { promises as fs } from 'fs';
-
-describe('MemAPI File Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should write, read, and check existence of a file', async () => {
-    const filePath = 'test.md';
-    const content = '- hello world';
-
-    await mem.writeFile(filePath, content);
-
-    const readContent = await mem.readFile(filePath);
-    expect(readContent).toBe(content);
-
-    const exists = await mem.fileExists(filePath);
-    expect(exists).toBe(true);
-
-    const nonExistent = await mem.fileExists('not-real.md');
-    expect(nonExistent).toBe(false);
-  });
-
-  it('should create nested directories', async () => {
-    const dirPath = 'a/b/c';
-    await mem.createDir(dirPath);
-    const stats = await fs.stat(path.join(harness.tempDir, dirPath));
-    expect(stats.isDirectory()).toBe(true);
-  });
-
-  it('should list files in a directory', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.writeFile('b.txt', 'b');
-    await mem.createDir('subdir');
-    await mem.writeFile('subdir/c.txt', 'c');
-
-    const rootFiles = await mem.listFiles();
-    expect(rootFiles).toEqual(
-      expect.arrayContaining(['a.txt', 'b.txt', 'subdir'])
-    );
-    expect(rootFiles.length).toBeGreaterThanOrEqual(3); // .gitignore might be there
-
-    const subdirFiles = await mem.listFiles('subdir');
-    expect(subdirFiles).toEqual(['c.txt']);
-
-    await mem.createDir('empty');
-    const emptyFiles = await mem.listFiles('empty');
-    expect(emptyFiles).toEqual([]);
-  });
-
-  it('should update a file atomically and fail if content changes', async () => {
-    const filePath = 'atomic.txt';
-    const originalContent = 'version 1';
-    const newContent = 'version 2';
-
-    // 1. Successful update
-    await mem.writeFile(filePath, originalContent);
-    const success = await mem.updateFile(filePath, originalContent, newContent);
-    expect(success).toBe(true);
-    const readContent1 = await mem.readFile(filePath);
-    expect(readContent1).toBe(newContent);
-
-    // 2. Failed update (content changed underneath)
-    const currentContent = await mem.readFile(filePath); // "version 2"
-    const nextContent = 'version 3';
-
-    // Simulate another process changing the file
-    await fs.writeFile(path.join(harness.tempDir, filePath), 'version 2.5');
-
-    // The update should fail because 'currentContent' ("version 2") no longer matches the file on disk ("version 2.5")
-    await expect(
-      mem.updateFile(filePath, currentContent, nextContent)
-    ).rejects.toThrow(/File content has changed since it was last read/);
-
-    // Verify the file was NOT changed by the failed update
-    const readContent2 = await mem.readFile(filePath);
-    expect(readContent2).toBe('version 2.5');
-  });
-
-  it('should delete a file and a directory recursively', async () => {
-    // Delete file
-    await mem.writeFile('file-to-delete.txt', 'content');
-    expect(await mem.fileExists('file-to-delete.txt')).toBe(true);
-    await mem.deletePath('file-to-delete.txt');
-    expect(await mem.fileExists('file-to-delete.txt')).toBe(false);
-
-    // Delete directory
-    await mem.createDir('dir-to-delete/subdir');
-    await mem.writeFile('dir-to-delete/subdir/file.txt', 'content');
-    expect(await mem.fileExists('dir-to-delete/subdir/file.txt')).toBe(true);
-    await mem.deletePath('dir-to-delete');
-    expect(await mem.fileExists('dir-to-delete')).toBe(false);
-  });
-
-  it('should rename a file and a directory', async () => {
-    // Rename file
-    await mem.writeFile('old-name.txt', 'content');
-    expect(await mem.fileExists('old-name.txt')).toBe(true);
-    await mem.rename('old-name.txt', 'new-name.txt');
-    expect(await mem.fileExists('old-name.txt')).toBe(false);
-    expect(await mem.fileExists('new-name.txt')).toBe(true);
-    expect(await mem.readFile('new-name.txt')).toBe('content');
-
-    // Rename directory
-    await mem.createDir('old-dir/subdir');
-    await mem.writeFile('old-dir/subdir/file.txt', 'content');
-    expect(await mem.fileExists('old-dir')).toBe(true);
-    await mem.rename('old-dir', 'new-dir');
-    expect(await mem.fileExists('old-dir')).toBe(false);
-    expect(await mem.fileExists('new-dir/subdir/file.txt')).toBe(true);
-  });
-
-  describe('Path Traversal Security', () => {
-    const maliciousPath = '../../../etc/malicious';
-    const ops: { name: string; fn: (mem: MemAPI) => Promise<unknown> }[] = [
-      { name: 'readFile', fn: (mem) => mem.readFile(maliciousPath) },
-      { name: 'writeFile', fn: (mem) => mem.writeFile(maliciousPath, '...') },
-      {
-        name: 'updateFile',
-        fn: (mem) => mem.updateFile(maliciousPath, 'old', 'new'),
-      },
-      { name: 'deletePath', fn: (mem) => mem.deletePath(maliciousPath) },
-      { name: 'rename_from', fn: (mem) => mem.rename(maliciousPath, 'safe') },
-      { name: 'rename_to', fn: (mem) => mem.rename('safe', maliciousPath) },
-      { name: 'fileExists', fn: (mem) => mem.fileExists(maliciousPath) },
-      { name: 'createDir', fn: (mem) => mem.createDir(maliciousPath) },
-      { name: 'listFiles', fn: (mem) => mem.listFiles(maliciousPath) },
-    ];
-
-    for (const op of ops) {
-      it(`should block path traversal for ${op.name}`, async () => {
-        // fileExists should return false, not throw, for security reasons.
-        if (op.name === 'fileExists') {
-          await expect(op.fn(mem)).resolves.toBe(false);
-        } else {
-          // All other ops should reject with a security error.
-          await expect(op.fn(mem)).rejects.toThrow(
-            /Path traversal attempt detected|Security violation/
-          );
-        }
-      });
-    }
-  });
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
 });
-````
 
-## File: tests/integration/mem-api-state-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI State Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should save and revert to a checkpoint', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'version a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes and save checkpoint
-    await mem.writeFile('b.txt', 'version b');
-    const successSave = await mem.saveCheckpoint();
-    expect(successSave).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
-
-    // 3. Make more changes
-    await mem.writeFile('c.txt', 'version c');
-    expect(await mem.fileExists('c.txt')).toBe(true);
-
-    // 4. Revert by applying the stashed changes
-    const successRevert = await mem.revertToLastCheckpoint();
-    expect(successRevert).toBe(true);
-
-    // 5. Assert state
-    expect(await mem.fileExists('a.txt')).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
-    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
-  });
-
-  it('should discard all staged and unstaged changes', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'original a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes
-    await mem.writeFile('a.txt', 'modified a'); // unstaged
-    await mem.writeFile('b.txt', 'new b'); // unstaged
-    await mem.writeFile('c.txt', 'new c'); // will be staged
-    await harness.git.add('c.txt');
-
-    // 3. Discard
-    const successDiscard = await mem.discardChanges();
-    expect(successDiscard).toBe(true);
-
-    // 4. Assert state
-    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
-    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
-    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
-
-    const status = await harness.git.status();
-    expect(status.isClean()).toBe(true);
-  });
-
-  it('should handle reverting when no checkpoint exists', async () => {
-    await mem.writeFile('a.txt', 'content');
-    const success = await mem.revertToLastCheckpoint();
-
-    // It should not throw an error and return false to indicate nothing was reverted.
-    expect(success).toBe(false);
-    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
-  });
-});
-````
-
-## File: tests/integration/mem-api-util-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Util Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should return the correct graph root path', async () => {
-    const root = await mem.getGraphRoot();
-    expect(root).toBe(harness.tempDir);
-  });
-
-  it('should correctly estimate token count for a single file', async () => {
-    const content = 'This is a test sentence with several words.'; // 44 chars
-    await mem.writeFile('test.txt', content);
-    const tokenCount = await mem.getTokenCount('test.txt');
-    const expected = Math.ceil(content.length / 4); // 11
-    expect(tokenCount).toBe(expected);
-  });
-
-  it('should correctly estimate token counts for multiple files', async () => {
-    const content1 = 'File one content.'; // 17 chars -> 5 tokens
-    const content2 = 'File two has slightly more content here.'; // 38 chars -> 10 tokens
-    await mem.writeFile('file1.txt', content1);
-    await mem.writeFile('sub/file2.txt', content2);
-
-    const results = await mem.getTokenCountForPaths([
-      'file1.txt',
-      'sub/file2.txt',
-    ]);
-
-    expect(results).toHaveLength(2);
-    expect(results).toEqual(
-      expect.arrayContaining([
-        { path: 'file1.txt', tokenCount: Math.ceil(content1.length / 4) },
-        { path: 'sub/file2.txt', tokenCount: Math.ceil(content2.length / 4) },
-      ])
-    );
-  });
-
-  it('should throw an error when counting tokens for a non-existent file', async () => {
-    await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
-      /Failed to count tokens for not-real.txt/
-    );
-  });
-});
-````
-
-## File: tests/setup.ts
-````typescript
-import { beforeAll, afterAll, jest } from '@jest/globals';
-
-// Jest setup file to handle Node.js v25+ compatibility issues
-Object.defineProperty(global, 'localStorage', {
-  value: {
-    getItem: jest.fn(),
-    setItem: jest.fn(),
-    removeItem: jest.fn(),
-    clear: jest.fn(),
+server.addTool({
+  name: "add",
+  description: "Add two numbers",
+  parameters: z.object({
+    a: z.number(),
+    b: z.number(),
+  }),
+  execute: async (args) => {
+    return String(args.a + args.b);
   },
-  writable: true,
 });
 
-
-// --- Console Output Suppression ---
-// The following hooks suppress console output during test runs to keep the output clean.
-// This is crucial for identifying real test failures without noise from application logs.
-// The original console methods are restored after all tests complete.
-
-beforeAll(() => {
-  jest.spyOn(console, 'log').mockImplementation(() => {});
-  jest.spyOn(console, 'warn').mockImplementation(() => {});
-  jest.spyOn(console, 'error').mockImplementation(() => {});
-  jest.spyOn(console, 'info').mockImplementation(() => {});
-  jest.spyOn(console, 'debug').mockImplementation(() => {});
+server.start({
+  transportType: "stdio",
 });
+```
 
-afterAll(() => {
-  jest.restoreAllMocks();
+_That's it!_ You have a working MCP server.
+
+You can test the server in terminal with:
+
+```bash
+git clone https://github.com/punkpeye/fastmcp.git
+cd fastmcp
+
+pnpm install
+pnpm build
+
+# Test the addition server example using CLI:
+npx fastmcp dev src/examples/addition.ts
+# Test the addition server example using MCP Inspector:
+npx fastmcp inspect src/examples/addition.ts
+```
+
+If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
+
+### Remote Server Options
+
+FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
+
+#### HTTP Streaming
+
+[HTTP streaming](https://www.cloudflare.com/learning/video/what-is-http-live-streaming/) provides a more efficient alternative to SSE in environments that support it, with potentially better performance for larger payloads.
+
+You can run the server with HTTP streaming support:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+  },
 });
-````
+```
 
-## File: .dockerignore
-````
-# Git
-.git
-.gitignore
+This will start the server and listen for HTTP streaming connections on `http://localhost:8080/mcp`.
 
-# Node
-node_modules
+> **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
 
-# Local Environment
-.env
-.env.*
-! .env.example
+> **Note:** This also starts an SSE server on `http://localhost:8080/sse`.
 
-# IDE / OS
-.vscode
-.idea
-.DS_Store
+You can connect to these servers using the appropriate client transport.
 
-# Logs and temp files
-npm-debug.log*
-yarn-debug.log*
-*.log
+For HTTP streaming connections:
 
-# Build output & test artifacts
-dist
-coverage
-jest.config.js
+```ts
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-# Docker
-Dockerfile
-.dockerignore
-````
-
-## File: .prettierrc.json
-````json
-{
-  "semi": true,
-  "trailingComma": "es5",
-  "singleQuote": true,
-  "printWidth": 80,
-  "tabWidth": 2,
-  "endOfLine": "lf"
-}
-````
-
-## File: Dockerfile
-````dockerfile
-# ---- Base Stage ----
-# Use an official Node.js image.
-FROM node:20-slim as base
-WORKDIR /usr/src/app
-
-# ---- Dependencies Stage ----
-# Install dependencies. This layer is cached to speed up subsequent builds
-# if dependencies haven't changed.
-FROM base as deps
-COPY package.json package-lock.json* ./
-RUN npm ci
-
-# ---- Build Stage ----
-# Copy source code and build the application.
-FROM base as build
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY . .
-RUN npm run build
-
-# ---- Production Stage ----
-# Create a smaller final image.
-# We only copy the necessary files to run the application.
-FROM node:20-slim as production
-WORKDIR /usr/src/app
-
-# Copy production dependencies and built source code
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY --from=build /usr/src/app/dist ./dist
-COPY --from=build /usr/src/app/package.json ./package.json
-COPY .env.example ./.env.example
-
-# Expose the port the app runs on
-EXPOSE 3000
-
-# The command to run the application
-CMD ["node", "dist/server.js"]
-````
-
-## File: eslint.config.js
-````javascript
-import js from '@eslint/js';
-import typescript from '@typescript-eslint/eslint-plugin';
-import typescriptParser from '@typescript-eslint/parser';
-
-export default [
-  js.configs.recommended,
+const client = new Client(
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.js', 'tests/**/*.ts'],
-    languageOptions: {
-      parser: typescriptParser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-      globals: {
-        console: 'readonly',
-        process: 'readonly',
-        Buffer: 'readonly',
-        __dirname: 'readonly',
-        __filename: 'readonly',
-      },
-    },
-    plugins: {
-      '@typescript-eslint': typescript,
-    },
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { argsIgnorePattern: '^_' }
-      ],
-      'no-console': 'off', // Allow console for build scripts and logging
-      'no-unused-vars': 'off', // Let TypeScript handle this
-      'no-undef': 'off', // Let TypeScript handle this
-    },
+    name: "example-client",
+    version: "1.0.0",
   },
-];
-````
+  {
+    capabilities: {},
+  },
+);
 
-## File: README.md
-````markdown
-# Recursa MCP Server
+const transport = new StreamableHTTPClientTransport(
+  new URL(`http://localhost:8080/mcp`),
+);
 
-A Git-Native AI agent with MCP (Model Context Protocol) support that works across multiple platforms.
-
-## 🌟 Cross-Platform Support
-
-✅ **Linux, macOS, Windows (WSL2), Termux/Android**
-📱 **Mobile-optimized** with conservative resource limits
-🔒 **Enhanced security** with cross-platform path protection
-⚡ **Auto-detecting** platform detection and optimization
-
-## 🚀 Getting Started
-
-### Automatic Installation (Recommended)
-```bash
-# Clone and install with automatic platform detection
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-npm run install:auto
-npm run build:auto
-npm run dev
+await client.connect(transport);
 ```
 
-Your server is now running on `http://localhost:8080` (or the port specified in your `.env` file).
+For SSE connections:
 
-### Interacting with the Server
+```ts
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
-Recursa is a `fastmcp` server. You can interact with it using any MCP-compatible client, including the command-line tools that come with `fastmcp`.
+const client = new Client(
+  {
+    name: "example-client",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {},
+  },
+);
 
-#### Authentication
+const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
-All requests to the server must be authenticated. You need to provide the `RECURSA_API_KEY` from your `.env` file as a bearer token.
-
-When using `fastmcp` tools, you can set the key via an environment variable:
-
-```bash
-export RECURSA_API_KEY="a-very-secret-key"
+await client.connect(transport);
 ```
 
-#### Testing with the Interactive CLI
+#### Stateless Mode
 
-The `fastmcp dev` command is the quickest way to test your server. It starts your server and connects an interactive client in your terminal.
+FastMCP supports stateless operation for HTTP streaming, where each request is handled independently without maintaining persistent sessions. This is ideal for serverless environments, load-balanced deployments, or when session state isn't required.
 
-```bash
-# Make sure your RECURSA_API_KEY is exported
-npx fastmcp dev src/server.ts
+In stateless mode:
+
+- No sessions are tracked on the server
+- Each request creates a temporary session that's discarded after the response
+- Reduced memory usage and better scalability
+- Perfect for stateless deployment environments
+
+You can enable stateless mode by adding the `stateless: true` option:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+    stateless: true,
+  },
+});
 ```
 
-#### Inspecting with the Web UI
+> **Note:** Stateless mode is only available with HTTP streaming transport. Features that depend on persistent sessions (like session-specific state) will not be available in stateless mode.
 
-For a more visual way to explore your server's tools and capabilities, use the `fastmcp inspect` command.
-
-```bash
-# Make sure your RECURSA_API_KEY is exported
-npx fastmcp inspect src/server.ts
-
-### Platform-Specific Installation
-
-#### Linux, macOS, Windows (WSL2)
-```bash
-npm run install:standard
-npm run build:standard
-npm run dev:standard
-```
-
-#### Termux/Android
-```bash
-# Install Termux from F-Droid, then:
-pkg update && pkg install nodejs npm git
-npm run install:termux
-npm run build:termux
-npm run dev:termux
-```
-
-## 📋 Prerequisites
-
-### Minimum Requirements
-- **Node.js 18+**
-- **Git** for version control
-- **512MB RAM** (1GB+ recommended)
-
-### Platform-Specific
-
-#### Termux/Android
-- Android 7.0+ with Termux app
-- Storage permissions (`termux-setup-storage`)
-
-#### Windows
-- Windows 10/11 (WSL2 recommended)
-- PowerShell or Git Bash
-- Developer mode enabled (for symlink support)
-
-#### Linux
-- Build tools for native modules:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install build-essential
-
-  # Fedora
-  sudo dnf groupinstall "Development Tools"
-  ```
-
-## ⚙️ Configuration
-
-Create a `.env` file with your configuration:
+You can also enable stateless mode using CLI arguments or environment variables:
 
 ```bash
-# Required
-OPENROUTER_API_KEY=your_api_key_here
-KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
+# Via CLI argument
+npx fastmcp dev src/server.ts --transport http-stream --port 8080 --stateless true
 
-# Required: API key for securing the Recursa server endpoint
-RECURSA_API_KEY=a-very-secret-key
-
-# Optional: Port for the HTTP server
-HTTP_PORT=8080
-
-# Optional (platform-specific defaults apply)
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4000
-SANDBOX_TIMEOUT=10000
-SANDBOX_MEMORY_LIMIT=100
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
+# Via environment variable
+FASTMCP_STATELESS=true npx fastmcp dev src/server.ts
 ```
 
-### Platform-Specific Defaults
+The `/ready` health check endpoint will indicate when the server is running in stateless mode:
 
-| Platform | Memory Limit | Max Tokens | Timeout |
-|----------|--------------|------------|---------|
-| Desktop (Linux/macOS/Windows) | 512MB | 4000 | 10s |
-| Termux/Android | 256MB | 2000 | 15s |
-
-## 🏗️ Build & Development
-
-### Available Scripts
-```bash
-# Installation
-npm run install:auto     # Auto-detect platform and install
-npm run install:termux   # Termux/Android specific
-npm run install:standard # Standard platforms
-
-# Building
-npm run build:auto       # Auto-detect platform and build
-npm run build:termux     # Termux/Android specific
-npm run build:standard   # Standard platforms
-
-# Development
-npm run dev              # Standard development
-npm run dev:termux       # Termux development
-npm run dev:standard     # Standard development
-
-# Production
-npm run start            # Start production server
-npm run start:termux     # Termux production
-npm run start:standard   # Standard production
-
-# Utilities
-npm run typecheck        # TypeScript type checking
-npm run test             # Run tests
+```json
+{
+  "mode": "stateless",
+  "ready": 1,
+  "status": "ready",
+  "total": 1
+}
 ```
 
-## 📁 Project Structure
+## Core Concepts
 
-```
-recursa-doc/
-├── src/
-│   ├── lib/
-│   │   └── platform.ts          # Cross-platform utilities
-│   ├── core/
-│   │   ├── mem-api/
-│   │   │   ├── secure-path.ts   # Enhanced path security
-│   │   │   └── file-ops.ts      # Cross-platform file operations
-│   │   └── sandbox.ts           # Platform-aware sandbox
-│   ├── config.ts                # Platform-aware configuration
-│   └── server.ts                # Main server
-├── scripts/
-│   ├── install.js               # Cross-platform installer
-│   └── build.js                 # Cross-platform builder
-├── docs/
-│   ├── PLATFORM_SUPPORT.md      # Detailed platform info
-│   └── TROUBLESHOOTING.md       # Troubleshooting guide
-└── tests/                       # Cross-platform tests
-```
+### Tools
 
-## 🔧 Features
+[Tools](https://modelcontextprotocol.io/docs/concepts/tools) in MCP allow servers to expose executable functions that can be invoked by clients and used by LLMs to perform actions.
 
-### Cross-Platform Capabilities
-- **Automatic platform detection** (Linux, macOS, Windows, Termux/Android)
-- **Adaptive resource limits** based on platform capabilities
-- **Cross-platform path security** with symlink protection
-- **Atomic file operations** with platform-specific error handling
-- **Platform-aware build system** with automatic fallbacks
+FastMCP uses the [Standard Schema](https://standardschema.dev) specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, or Valibot) as long as it implements the spec.
 
-### Core Functionality
-- **MCP Protocol Support** for model context integration
-- **Git-Native Operations** with full repository management
-- **Secure File Operations** with path traversal protection
-- **Sandboxed Execution** with resource limits
-- **TypeScript Support** with full type safety
-
-### Security Features
-- **Path Traversal Protection** with cross-platform validation
-- **Symlink Attack Prevention** with configurable policies
-- **Resource Limiting** (memory, CPU, file size)
-- **Sandbox Isolation** with platform-specific constraints
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Installation Fails
-```bash
-# Try platform-specific installation
-npm run install:termux    # For Termux/Android
-npm run install:standard  # For desktop platforms
-
-# Or manual installation
-npm install --ignore-scripts --no-bin-links
-```
-
-#### Permission Errors
-```bash
-# Termux: Setup storage access
-termux-setup-storage
-
-# Linux/macOS: Fix npm permissions
-sudo chown -R $(whoami) ~/.npm
-
-# Windows: Run as administrator or enable Developer Mode
-```
-
-#### Build Fails
-```bash
-# Clean and rebuild
-rm -rf node_modules dist
-npm run install:auto
-npm run build:auto
-
-# Check platform detection
-node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-```
-
-For detailed troubleshooting, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-
-## 📚 Documentation
-
-- [Platform Support](docs/PLATFORM_SUPPORT.md) - Detailed platform information
-- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [API Documentation](docs/API.md) - API reference (coming soon)
-- [Development Guide](docs/DEVELOPMENT.md) - Contributing guidelines (coming soon)
-
-## 🔍 Platform Detection
-
-The server automatically detects and optimizes for your platform:
+**Zod Example:**
 
 ```typescript
-import platform from './src/lib/platform.js';
+import { z } from "zod";
 
-console.log(`Platform: ${platform.platformString}`);
-console.log(`Is Termux: ${platform.isTermux}`);
-console.log(`Resource limits:`, platform.getResourceLimits());
-console.log(`Temp directory: ${platform.getTempDir()}`);
+server.addTool({
+  name: "fetch-zod",
+  description: "Fetch the content of a url (using Zod)",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return await fetchWebpageContent(args.url);
+  },
+});
 ```
 
-## 🤝 Contributing
+**ArkType Example:**
 
-Contributions are welcome! Please ensure:
-1. Test on all supported platforms
-2. Use platform detection utilities
-3. Update documentation
-4. Include cross-platform tests
+```typescript
+import { type } from "arktype";
 
-### Development Setup
+server.addTool({
+  name: "fetch-arktype",
+  description: "Fetch the content of a url (using ArkType)",
+  parameters: type({
+    url: "string",
+  }),
+  execute: async (args) => {
+    return await fetchWebpageContent(args.url);
+  },
+});
+```
+
+**Valibot Example:**
+
+Valibot requires the peer dependency @valibot/to-json-schema.
+
+```typescript
+import * as v from "valibot";
+
+server.addTool({
+  name: "fetch-valibot",
+  description: "Fetch the content of a url (using Valibot)",
+  parameters: v.object({
+    url: v.string(),
+  }),
+  execute: async (args) => {
+    return await fetchWebpageContent(args.url);
+  },
+});
+```
+
+#### Tools Without Parameters
+
+When creating tools that don't require parameters, you have two options:
+
+1. Omit the parameters property entirely:
+
+   ```typescript
+   server.addTool({
+     name: "sayHello",
+     description: "Say hello",
+     // No parameters property
+     execute: async () => {
+       return "Hello, world!";
+     },
+   });
+   ```
+
+2. Explicitly define empty parameters:
+
+   ```typescript
+   import { z } from "zod";
+
+   server.addTool({
+     name: "sayHello",
+     description: "Say hello",
+     parameters: z.object({}), // Empty object
+     execute: async () => {
+       return "Hello, world!";
+     },
+   });
+   ```
+
+> [!NOTE]
+>
+> Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
+
+#### Tool Authorization
+
+You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
+
+```typescript
+server.addTool({
+  name: "admin-tool",
+  description: "An admin-only tool",
+  canAccess: (auth) => auth?.role === "admin",
+  execute: async () => "Welcome, admin!",
+});
+```
+
+#### Returning a string
+
+`execute` can return a string:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return "Hello, world!";
+  },
+});
+```
+
+The latter is equivalent to:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Hello, world!",
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Returning a list
+
+If you want to return a list of messages, you can return an object with a `content` property:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        { type: "text", text: "First message" },
+        { type: "text", text: "Second message" },
+      ],
+    };
+  },
+});
+```
+
+#### Returning an image
+
+Use the `imageContent` to create a content object for an image:
+
+```js
+import { imageContent } from "fastmcp";
+
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return imageContent({
+      url: "https://example.com/image.png",
+    });
+
+    // or...
+    // return imageContent({
+    //   path: "/path/to/image.png",
+    // });
+
+    // or...
+    // return imageContent({
+    //   buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
+    // });
+
+    // or...
+    // return {
+    //   content: [
+    //     await imageContent(...)
+    //   ],
+    // };
+  },
+});
+```
+
+The `imageContent` function takes the following options:
+
+- `url`: The URL of the image.
+- `path`: The path to the image file.
+- `buffer`: The image data as a buffer.
+
+Only one of `url`, `path`, or `buffer` must be specified.
+
+The above example is equivalent to:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "image",
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+          mimeType: "image/png",
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Configurable Ping Behavior
+
+FastMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  ping: {
+    // Explicitly enable or disable pings (defaults vary by transport)
+    enabled: true,
+    // Configure ping interval in milliseconds (default: 5000ms)
+    intervalMs: 10000,
+    // Set log level for ping-related messages (default: 'debug')
+    logLevel: "debug",
+  },
+});
+```
+
+By default, ping behavior is optimized for each transport type:
+
+- Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
+- Disabled for `stdio` connections (where pings are typically unnecessary)
+
+This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
+
+### Health-check Endpoint
+
+When you run FastMCP with the `httpStream` transport you can optionally expose a
+simple HTTP endpoint that returns a plain-text response useful for load-balancer
+or container orchestration liveness checks.
+
+Enable (or customise) the endpoint via the `health` key in the server options:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  health: {
+    // Enable / disable (default: true)
+    enabled: true,
+    // Body returned by the endpoint (default: 'ok')
+    message: "healthy",
+    // Path that should respond (default: '/health')
+    path: "/healthz",
+    // HTTP status code to return (default: 200)
+    status: 200,
+  },
+});
+
+await server.start({
+  transportType: "httpStream",
+  httpStream: { port: 8080 },
+});
+```
+
+Now a request to `http://localhost:8080/healthz` will return:
+
+```
+HTTP/1.1 200 OK
+content-type: text/plain
+
+healthy
+```
+
+The endpoint is ignored when the server is started with the `stdio` transport.
+
+#### Roots Management
+
+FastMCP supports [Roots](https://modelcontextprotocol.io/docs/concepts/roots) - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  roots: {
+    // Set to false to explicitly disable roots support
+    enabled: false,
+    // By default, roots support is enabled (true)
+  },
+});
+```
+
+This provides the following benefits:
+
+- Better compatibility with different clients that may not support Roots
+- Reduced error logs when connecting to clients that don't implement roots capability
+- More explicit control over MCP server capabilities
+- Graceful degradation when roots functionality isn't available
+
+You can listen for root changes in your server:
+
+```ts
+server.on("connect", (event) => {
+  const session = event.session;
+
+  // Access the current roots
+  console.log("Initial roots:", session.roots);
+
+  // Listen for changes to the roots
+  session.on("rootsChanged", (event) => {
+    console.log("Roots changed:", event.roots);
+  });
+});
+```
+
+When a client doesn't support roots or when roots functionality is explicitly disabled, these operations will gracefully handle the situation without throwing errors.
+
+### Returning an audio
+
+Use the `audioContent` to create a content object for an audio:
+
+```js
+import { audioContent } from "fastmcp";
+
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return audioContent({
+      url: "https://example.com/audio.mp3",
+    });
+
+    // or...
+    // return audioContent({
+    //   path: "/path/to/audio.mp3",
+    // });
+
+    // or...
+    // return audioContent({
+    //   buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
+    // });
+
+    // or...
+    // return {
+    //   content: [
+    //     await audioContent(...)
+    //   ],
+    // };
+  },
+});
+```
+
+The `audioContent` function takes the following options:
+
+- `url`: The URL of the audio.
+- `path`: The path to the audio file.
+- `buffer`: The audio data as a buffer.
+
+Only one of `url`, `path`, or `buffer` must be specified.
+
+The above example is equivalent to:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "audio",
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+          mimeType: "audio/mpeg",
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Return combination type
+
+You can combine various types in this way and send them back to AI
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Hello, world!",
+        },
+        {
+          type: "image",
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+          mimeType: "image/png",
+        },
+        {
+          type: "audio",
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+          mimeType: "audio/mpeg",
+        },
+      ],
+    };
+  },
+
+  // or...
+  // execute: async (args) => {
+  //   const imgContent = await imageContent({
+  //     url: "https://example.com/image.png",
+  //   });
+  //   const audContent = await audioContent({
+  //     url: "https://example.com/audio.mp3",
+  //   });
+  //   return {
+  //     content: [
+  //       {
+  //         type: "text",
+  //         text: "Hello, world!",
+  //       },
+  //       imgContent,
+  //       audContent,
+  //     ],
+  //   };
+  // },
+});
+```
+
+#### Custom Logger
+
+FastMCP allows you to provide a custom logger implementation to control how the server logs messages. This is useful for integrating with existing logging infrastructure or customizing log formatting.
+
+```ts
+import { FastMCP, Logger } from "fastmcp";
+
+class CustomLogger implements Logger {
+  debug(...args: unknown[]): void {
+    console.log("[DEBUG]", new Date().toISOString(), ...args);
+  }
+
+  error(...args: unknown[]): void {
+    console.error("[ERROR]", new Date().toISOString(), ...args);
+  }
+
+  info(...args: unknown[]): void {
+    console.info("[INFO]", new Date().toISOString(), ...args);
+  }
+
+  log(...args: unknown[]): void {
+    console.log("[LOG]", new Date().toISOString(), ...args);
+  }
+
+  warn(...args: unknown[]): void {
+    console.warn("[WARN]", new Date().toISOString(), ...args);
+  }
+}
+
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  logger: new CustomLogger(),
+});
+```
+
+See `src/examples/custom-logger.ts` for examples with Winston, Pino, and file-based logging.
+
+#### Logging
+
+Tools can log messages to the client using the `log` object in the context object:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args, { log }) => {
+    log.info("Downloading file...", {
+      url,
+    });
+
+    // ...
+
+    log.info("Downloaded file");
+
+    return "done";
+  },
+});
+```
+
+The `log` object has the following methods:
+
+- `debug(message: string, data?: SerializableValue)`
+- `error(message: string, data?: SerializableValue)`
+- `info(message: string, data?: SerializableValue)`
+- `warn(message: string, data?: SerializableValue)`
+
+#### Errors
+
+The errors that are meant to be shown to the user should be thrown as `UserError` instances:
+
+```js
+import { UserError } from "fastmcp";
+
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    if (args.url.startsWith("https://example.com")) {
+      throw new UserError("This URL is not allowed");
+    }
+
+    return "done";
+  },
+});
+```
+
+#### Progress
+
+Tools can report progress by calling `reportProgress` in the context object:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args, { reportProgress }) => {
+    await reportProgress({
+      progress: 0,
+      total: 100,
+    });
+
+    // ...
+
+    await reportProgress({
+      progress: 100,
+      total: 100,
+    });
+
+    return "done";
+  },
+});
+```
+
+#### Streaming Output
+
+FastMCP supports streaming partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
+
+- Long-running operations that generate content incrementally
+- Progressive generation of text, images, or other media
+- Operations where users benefit from seeing immediate partial results
+
+To enable streaming for a tool, add the `streamingHint` annotation and use the `streamContent` method:
+
+```js
+server.addTool({
+  name: "generateText",
+  description: "Generate text incrementally",
+  parameters: z.object({
+    prompt: z.string(),
+  }),
+  annotations: {
+    streamingHint: true, // Signals this tool uses streaming
+    readOnlyHint: true,
+  },
+  execute: async (args, { streamContent }) => {
+    // Send initial content immediately
+    await streamContent({ type: "text", text: "Starting generation...\n" });
+
+    // Simulate incremental content generation
+    const words = "The quick brown fox jumps over the lazy dog.".split(" ");
+    for (const word of words) {
+      await streamContent({ type: "text", text: word + " " });
+      await new Promise((resolve) => setTimeout(resolve, 300)); // Simulate delay
+    }
+
+    // When using streamContent, you can:
+    // 1. Return void (if all content was streamed)
+    // 2. Return a final result (which will be appended to streamed content)
+
+    // Option 1: All content was streamed, so return void
+    return;
+
+    // Option 2: Return final content that will be appended
+    // return "Generation complete!";
+  },
+});
+```
+
+Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
+
+```js
+server.addTool({
+  name: "processData",
+  description: "Process data with streaming updates",
+  parameters: z.object({
+    datasetSize: z.number(),
+  }),
+  annotations: {
+    streamingHint: true,
+  },
+  execute: async (args, { streamContent, reportProgress }) => {
+    const total = args.datasetSize;
+
+    for (let i = 0; i < total; i++) {
+      // Report numeric progress
+      await reportProgress({ progress: i, total });
+
+      // Stream intermediate results
+      if (i % 10 === 0) {
+        await streamContent({
+          type: "text",
+          text: `Processed ${i} of ${total} items...\n`,
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    return "Processing complete!";
+  },
+});
+```
+
+#### Tool Annotations
+
+As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
+
+```typescript
+server.addTool({
+  name: "fetch-content",
+  description: "Fetch content from a URL",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  annotations: {
+    title: "Web Content Fetcher", // Human-readable title for UI display
+    readOnlyHint: true, // Tool doesn't modify its environment
+    openWorldHint: true, // Tool interacts with external entities
+  },
+  execute: async (args) => {
+    return await fetchWebpageContent(args.url);
+  },
+});
+```
+
+The available annotations are:
+
+| Annotation        | Type    | Default | Description                                                                                                                          |
+| :---------------- | :------ | :------ | :----------------------------------------------------------------------------------------------------------------------------------- |
+| `title`           | string  | -       | A human-readable title for the tool, useful for UI display                                                                           |
+| `readOnlyHint`    | boolean | `false` | If true, indicates the tool does not modify its environment                                                                          |
+| `destructiveHint` | boolean | `true`  | If true, the tool may perform destructive updates (only meaningful when `readOnlyHint` is false)                                     |
+| `idempotentHint`  | boolean | `false` | If true, calling the tool repeatedly with the same arguments has no additional effect (only meaningful when `readOnlyHint` is false) |
+| `openWorldHint`   | boolean | `true`  | If true, the tool may interact with an "open world" of external entities                                                             |
+
+These annotations help clients and LLMs better understand how to use the tools and what to expect when calling them.
+
+### Resources
+
+[Resources](https://modelcontextprotocol.io/docs/concepts/resources) represent any kind of data that an MCP server wants to make available to clients. This can include:
+
+- File contents
+- Screenshots and images
+- Log files
+- And more
+
+Each resource is identified by a unique URI and can contain either text or binary data.
+
+```ts
+server.addResource({
+  uri: "file:///logs/app.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  async load() {
+    return {
+      text: await readLogFile(),
+    };
+  },
+});
+```
+
+> [!NOTE]
+>
+> `load` can return multiple resources. This could be used, for example, to return a list of files inside a directory when the directory is read.
+>
+> ```ts
+> async load() {
+>   return [
+>     {
+>       text: "First file content",
+>     },
+>     {
+>       text: "Second file content",
+>     },
+>   ];
+> }
+> ```
+
+You can also return binary contents in `load`:
+
+```ts
+async load() {
+  return {
+    blob: 'base64-encoded-data'
+  };
+}
+```
+
+### Resource templates
+
+You can also define resource templates:
+
+```ts
+server.addResourceTemplate({
+  uriTemplate: "file:///logs/{name}.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  arguments: [
+    {
+      name: "name",
+      description: "Name of the log",
+      required: true,
+    },
+  ],
+  async load({ name }) {
+    return {
+      text: `Example log content for ${name}`,
+    };
+  },
+});
+```
+
+#### Resource template argument auto-completion
+
+Provide `complete` functions for resource template arguments to enable automatic completion:
+
+```ts
+server.addResourceTemplate({
+  uriTemplate: "file:///logs/{name}.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  arguments: [
+    {
+      name: "name",
+      description: "Name of the log",
+      required: true,
+      complete: async (value) => {
+        if (value === "Example") {
+          return {
+            values: ["Example Log"],
+          };
+        }
+
+        return {
+          values: [],
+        };
+      },
+    },
+  ],
+  async load({ name }) {
+    return {
+      text: `Example log content for ${name}`,
+    };
+  },
+});
+```
+
+### Embedded Resources
+
+FastMCP provides a convenient `embedded()` method that simplifies including resources in tool responses. This feature reduces code duplication and makes it easier to reference resources from within tools.
+
+#### Basic Usage
+
+```js
+server.addTool({
+  name: "get_user_data",
+  description: "Retrieve user information",
+  parameters: z.object({
+    userId: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded(`user://profile/${args.userId}`),
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Working with Resource Templates
+
+The `embedded()` method works seamlessly with resource templates:
+
+```js
+// Define a resource template
+server.addResourceTemplate({
+  uriTemplate: "docs://project/{section}",
+  name: "Project Documentation",
+  mimeType: "text/markdown",
+  arguments: [
+    {
+      name: "section",
+      required: true,
+    },
+  ],
+  async load(args) {
+    const docs = {
+      "getting-started": "# Getting Started\n\nWelcome to our project!",
+      "api-reference": "# API Reference\n\nAuthentication is required.",
+    };
+    return {
+      text: docs[args.section] || "Documentation not found",
+    };
+  },
+});
+
+// Use embedded resources in a tool
+server.addTool({
+  name: "get_documentation",
+  description: "Retrieve project documentation",
+  parameters: z.object({
+    section: z.enum(["getting-started", "api-reference"]),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded(`docs://project/${args.section}`),
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Working with Direct Resources
+
+It also works with directly defined resources:
+
+```js
+// Define a direct resource
+server.addResource({
+  uri: "system://status",
+  name: "System Status",
+  mimeType: "text/plain",
+  async load() {
+    return {
+      text: "System operational",
+    };
+  },
+});
+
+// Use in a tool
+server.addTool({
+  name: "get_system_status",
+  description: "Get current system status",
+  parameters: z.object({}),
+  execute: async () => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded("system://status"),
+        },
+      ],
+    };
+  },
+});
+```
+
+### Prompts
+
+[Prompts](https://modelcontextprotocol.io/docs/concepts/prompts) enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
+
+```ts
+server.addPrompt({
+  name: "git-commit",
+  description: "Generate a Git commit message",
+  arguments: [
+    {
+      name: "changes",
+      description: "Git diff or description of changes",
+      required: true,
+    },
+  ],
+  load: async (args) => {
+    return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
+  },
+});
+```
+
+#### Prompt argument auto-completion
+
+Prompts can provide auto-completion for their arguments:
+
+```js
+server.addPrompt({
+  name: "countryPoem",
+  description: "Writes a poem about a country",
+  load: async ({ name }) => {
+    return `Hello, ${name}!`;
+  },
+  arguments: [
+    {
+      name: "name",
+      description: "Name of the country",
+      required: true,
+      complete: async (value) => {
+        if (value === "Germ") {
+          return {
+            values: ["Germany"],
+          };
+        }
+
+        return {
+          values: [],
+        };
+      },
+    },
+  ],
+});
+```
+
+#### Prompt argument auto-completion using `enum`
+
+If you provide an `enum` array for an argument, the server will automatically provide completions for the argument.
+
+```js
+server.addPrompt({
+  name: "countryPoem",
+  description: "Writes a poem about a country",
+  load: async ({ name }) => {
+    return `Hello, ${name}!`;
+  },
+  arguments: [
+    {
+      name: "name",
+      description: "Name of the country",
+      required: true,
+      enum: ["Germany", "France", "Italy"],
+    },
+  ],
+});
+```
+
+### Authentication
+
+FastMCP supports session-based authentication, allowing you to secure your server and control access to its features.
+
+> [!NOTE]
+> For more granular control over which tools are available to authenticated users, see the [Tool Authorization](#tool-authorization) section.
+
+To enable authentication, provide an `authenticate` function in the server options. This function receives the incoming HTTP request and should return a promise that resolves with the authentication context.
+
+If authentication fails, the function should throw a `Response` object, which will be sent to the client.
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  authenticate: (request) => {
+    const apiKey = request.headers["x-api-key"];
+
+    if (apiKey !== "123") {
+      throw new Response(null, {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+    }
+
+    // Whatever you return here will be accessible in the `context.session` object.
+    return {
+      id: 1,
+    };
+  },
+});
+```
+
+Now you can access the authenticated session data in your tools:
+
+```ts
+server.addTool({
+  name: "sayHello",
+  execute: async (args, { session }) => {
+    return `Hello, ${session.id}!`;
+  },
+});
+```
+
+#### Tool Authorization
+
+You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
+
+If `canAccess` is not provided, the tool is accessible to all authenticated users by default. If no authentication is configured on the server, all tools are available to all clients.
+
+**Example:**
+
+```typescript
+const server = new FastMCP<{ role: "admin" | "user" }>({
+  authenticate: async (request) => {
+    const role = request.headers["x-role"] as string;
+    return { role: role === "admin" ? "admin" : "user" };
+  },
+  name: "My Server",
+  version: "1.0.0",
+});
+
+server.addTool({
+  name: "admin-dashboard",
+  description: "An admin-only tool",
+  // Only users with the 'admin' role can see and execute this tool
+  canAccess: (auth) => auth?.role === "admin",
+  execute: async () => {
+    return "Welcome to the admin dashboard!";
+  },
+});
+
+server.addTool({
+  name: "public-info",
+  description: "A tool available to everyone",
+  execute: async () => {
+    return "This is public information.";
+  },
+});
+```
+
+In this example, only clients authenticating with the `admin` role will be able to list or call the `admin-dashboard` tool. The `public-info` tool will be available to all authenticated users.
+
+#### OAuth Support
+
+FastMCP includes built-in support for OAuth discovery endpoints, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18** for OAuth integration. This makes it easy to integrate with OAuth authorization flows by providing standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
+
+```ts
+import { FastMCP, DiscoveryDocumentCache } from "fastmcp";
+import { buildGetJwks } from "get-jwks";
+import fastJwt from "fast-jwt";
+
+// Create a cache for discovery documents (reuse across requests)
+const discoveryCache = new DiscoveryDocumentCache({
+  ttl: 3600000, // Cache for 1 hour (default)
+});
+
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  oauth: {
+    enabled: true,
+    authorizationServer: {
+      issuer: "https://auth.example.com",
+      authorizationEndpoint: "https://auth.example.com/oauth/authorize",
+      tokenEndpoint: "https://auth.example.com/oauth/token",
+      jwksUri: "https://auth.example.com/.well-known/jwks.json",
+      responseTypesSupported: ["code"],
+    },
+    protectedResource: {
+      resource: "mcp://my-server",
+      authorizationServers: ["https://auth.example.com"],
+    },
+  },
+  authenticate: async (request) => {
+    const authHeader = request.headers.authorization;
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      throw new Response(null, {
+        status: 401,
+        statusText: "Missing or invalid authorization header",
+      });
+    }
+
+    const token = authHeader.slice(7); // Remove 'Bearer ' prefix
+
+    // Validate OAuth JWT access token using OpenID Connect discovery
+    try {
+      // Fetch and cache the discovery document
+      const discoveryUrl =
+        "https://auth.example.com/.well-known/openid-configuration";
+      // Alternative: Use OAuth authorization server metadata endpoint
+      // const discoveryUrl = 'https://auth.example.com/.well-known/oauth-authorization-server';
+
+      const config = (await discoveryCache.get(discoveryUrl)) as {
+        jwks_uri: string;
+        issuer: string;
+      };
+      const jwksUri = config.jwks_uri;
+      const issuer = config.issuer;
+
+      // Create JWKS client for token verification using discovered endpoint
+      const getJwks = buildGetJwks({
+        jwksUrl: jwksUri,
+        cache: true,
+        rateLimit: true,
+      });
+
+      // Create JWT verifier with JWKS and discovered issuer
+      const verify = fastJwt.createVerifier({
+        key: async (token) => {
+          const { header } = fastJwt.decode(token, { complete: true });
+          const jwk = await getJwks.getJwk({
+            kid: header.kid,
+            alg: header.alg,
+          });
+          return jwk;
+        },
+        algorithms: ["RS256", "ES256"],
+        issuer: issuer,
+        audience: "mcp://my-server",
+      });
+
+      // Verify the JWT token
+      const payload = await verify(token);
+
+      return {
+        userId: payload.sub,
+        scope: payload.scope,
+        email: payload.email,
+        // Include other claims as needed
+      };
+    } catch (error) {
+      throw new Response(null, {
+        status: 401,
+        statusText: "Invalid OAuth token",
+      });
+    }
+  },
+});
+```
+
+This configuration automatically exposes OAuth discovery endpoints:
+
+- `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
+- `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9470)
+
+For JWT token validation, you can use libraries like [`get-jwks`](https://github.com/nearform/get-jwks) and [`@fastify/jwt`](https://github.com/fastify/fastify-jwt) for OAuth JWT tokens.
+
+#### Passing Headers Through Context
+
+If you are exposing your MCP server via HTTP, you may wish to allow clients to supply sensitive keys via headers, which can then be passed along to APIs that your tools interact with, allowing each client to supply their own API keys. This can be done by capturing the HTTP headers in the `authenticate` section and storing them in the session to be referenced by the tools later.
+
+```ts
+import { FastMCP } from "fastmcp";
+import { IncomingHttpHeaders } from "http";
+
+// Define the session data type
+interface SessionData {
+  headers: IncomingHttpHeaders;
+  [key: string]: unknown; // Add index signature to satisfy Record<string, unknown>
+}
+
+// Create a server instance
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  authenticate: async (request: any): Promise<SessionData> => {
+    // Authentication logic
+    return {
+      headers: request.headers,
+    };
+  },
+});
+
+// Tool to display HTTP headers
+server.addTool({
+  name: "headerTool",
+  description: "Reads HTTP headers from the request",
+  execute: async (args: any, context: any) => {
+    const session = context.session as SessionData;
+    const headers = session?.headers ?? {};
+
+    const getHeaderString = (header: string | string[] | undefined) =>
+      Array.isArray(header) ? header.join(", ") : (header ?? "N/A");
+
+    const userAgent = getHeaderString(headers["user-agent"]);
+    const authorization = getHeaderString(headers["authorization"]);
+    return `User-Agent: ${userAgent}\nAuthorization: ${authorization}\nAll Headers: ${JSON.stringify(headers, null, 2)}`;
+  },
+});
+
+// Start the server
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+  },
+});
+```
+
+A client that would connect to this may look something like this:
+
+```ts
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+
+const transport = new StreamableHTTPClientTransport(
+  new URL(`http://localhost:8080/mcp`),
+  {
+    requestInit: {
+      headers: {
+        Authorization: "Test 123",
+      },
+    },
+  },
+);
+
+const client = new Client({
+  name: "example-client",
+  version: "1.0.0",
+});
+
+(async () => {
+  await client.connect(transport);
+
+  // Call a tool
+  const result = await client.callTool({
+    name: "headerTool",
+    arguments: {
+      arg1: "value",
+    },
+  });
+
+  console.log("Tool result:", result);
+})().catch(console.error);
+```
+
+What would show up in the console after the client runs is something like this:
+
+```
+Tool result: {
+  content: [
+    {
+      type: 'text',
+      text: 'User-Agent: node\n' +
+        'Authorization: Test 123\n' +
+        'All Headers: {\n' +
+        '  "host": "localhost:8080",\n' +
+        '  "connection": "keep-alive",\n' +
+        '  "authorization": "Test 123",\n' +
+        '  "content-type": "application/json",\n' +
+        '  "accept": "application/json, text/event-stream",\n' +
+        '  "accept-language": "*",\n' +
+        '  "sec-fetch-mode": "cors",\n' +
+        '  "user-agent": "node",\n' +
+        '  "accept-encoding": "gzip, deflate",\n' +
+        '  "content-length": "163"\n' +
+        '}'
+    }
+  ]
+}
+```
+
+#### Session ID and Request ID Tracking
+
+FastMCP automatically exposes session and request IDs to tool handlers through the context parameter. This enables per-session state management and request tracking.
+
+**Session ID** (`context.sessionId`):
+
+- Available only for HTTP-based transports (HTTP Stream, SSE)
+- Extracted from the `Mcp-Session-Id` header
+- Remains constant across multiple requests from the same client
+- Useful for maintaining per-session state, counters, or user-specific data
+
+**Request ID** (`context.requestId`):
+
+- Available for all transports when provided by the client
+- Unique for each individual request
+- Useful for request tracing and debugging
+
+```ts
+import { FastMCP } from "fastmcp";
+import { z } from "zod";
+
+const server = new FastMCP({
+  name: "Session Counter Server",
+  version: "1.0.0",
+});
+
+// Per-session counter storage
+const sessionCounters = new Map<string, number>();
+
+server.addTool({
+  name: "increment_counter",
+  description: "Increment a per-session counter",
+  parameters: z.object({}),
+  execute: async (args, context) => {
+    if (!context.sessionId) {
+      return "Session ID not available (requires HTTP transport)";
+    }
+
+    const counter = sessionCounters.get(context.sessionId) || 0;
+    const newCounter = counter + 1;
+    sessionCounters.set(context.sessionId, newCounter);
+
+    return `Counter for session ${context.sessionId}: ${newCounter}`;
+  },
+});
+
+server.addTool({
+  name: "show_ids",
+  description: "Display session and request IDs",
+  parameters: z.object({}),
+  execute: async (args, context) => {
+    return `Session ID: ${context.sessionId || "N/A"}
+Request ID: ${context.requestId || "N/A"}`;
+  },
+});
+
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+  },
+});
+```
+
+**Use Cases:**
+
+- **Per-session state management**: Maintain counters, caches, or temporary data unique to each client session
+- **User authentication and authorization**: Track authenticated users across requests
+- **Session-specific resource management**: Allocate and manage resources per session
+- **Multi-tenant implementations**: Isolate data and operations by session
+- **Request tracing**: Track individual requests for debugging and monitoring
+
+**Example:**
+
+See [`src/examples/session-id-counter.ts`](src/examples/session-id-counter.ts) for a complete example demonstrating session-based counter management.
+
+**Notes:**
+
+- Session IDs are automatically generated by the MCP transport layer
+- In stateless mode, session IDs are not persisted across requests
+- For stdio transport, `sessionId` will be `undefined` as there's no HTTP session concept
+
+### Providing Instructions
+
+You can provide instructions to the server using the `instructions` option:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  instructions:
+    'Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM\'s understanding of available tools, resources, etc. It can be thought of like a "hint" to the model. For example, this information MAY be added to the system prompt.',
+});
+```
+
+### Sessions
+
+The `session` object is an instance of `FastMCPSession` and it describes active client sessions.
+
+```ts
+server.sessions;
+```
+
+We allocate a new server instance for each client connection to enable 1:1 communication between a client and the server.
+
+### Typed server events
+
+You can listen to events emitted by the server using the `on` method:
+
+```ts
+server.on("connect", (event) => {
+  console.log("Client connected:", event.session);
+});
+
+server.on("disconnect", (event) => {
+  console.log("Client disconnected:", event.session);
+});
+```
+
+## `FastMCPSession`
+
+`FastMCPSession` represents a client session and provides methods to interact with the client.
+
+Refer to [Sessions](#sessions) for examples of how to obtain a `FastMCPSession` instance.
+
+### `requestSampling`
+
+`requestSampling` creates a [sampling](https://modelcontextprotocol.io/docs/concepts/sampling) request and returns the response.
+
+```ts
+await session.requestSampling({
+  messages: [
+    {
+      role: "user",
+      content: {
+        type: "text",
+        text: "What files are in the current directory?",
+      },
+    },
+  ],
+  systemPrompt: "You are a helpful file system assistant.",
+  includeContext: "thisServer",
+  maxTokens: 100,
+});
+```
+
+#### Options
+
+`requestSampling` accepts an optional second parameter for request options:
+
+```ts
+await session.requestSampling(
+  {
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: "What files are in the current directory?",
+        },
+      },
+    ],
+    systemPrompt: "You are a helpful file system assistant.",
+    includeContext: "thisServer",
+    maxTokens: 100,
+  },
+  {
+    // Progress callback - called when progress notifications are received
+    onprogress: (progress) => {
+      console.log(`Progress: ${progress.progress}/${progress.total}`);
+    },
+
+    // Abort signal for cancelling the request
+    signal: abortController.signal,
+
+    // Request timeout in milliseconds (default: DEFAULT_REQUEST_TIMEOUT_MSEC)
+    timeout: 30000,
+
+    // Whether progress notifications reset the timeout (default: false)
+    resetTimeoutOnProgress: true,
+
+    // Maximum total timeout regardless of progress (no default)
+    maxTotalTimeout: 60000,
+  },
+);
+```
+
+**Options:**
+
+- `onprogress?: (progress: Progress) => void` - Callback for progress notifications from the remote end
+- `signal?: AbortSignal` - Abort signal to cancel the request
+- `timeout?: number` - Request timeout in milliseconds
+- `resetTimeoutOnProgress?: boolean` - Whether progress notifications reset the timeout
+- `maxTotalTimeout?: number` - Maximum total timeout regardless of progress notifications
+
+### `clientCapabilities`
+
+The `clientCapabilities` property contains the client capabilities.
+
+```ts
+session.clientCapabilities;
+```
+
+### `loggingLevel`
+
+The `loggingLevel` property describes the logging level as set by the client.
+
+```ts
+session.loggingLevel;
+```
+
+### `roots`
+
+The `roots` property contains the roots as set by the client.
+
+```ts
+session.roots;
+```
+
+### `server`
+
+The `server` property contains an instance of MCP server that is associated with the session.
+
+```ts
+session.server;
+```
+
+### Typed session events
+
+You can listen to events emitted by the session using the `on` method:
+
+```ts
+session.on("rootsChanged", (event) => {
+  console.log("Roots changed:", event.roots);
+});
+
+session.on("error", (event) => {
+  console.error("Error:", event.error);
+});
+```
+
+## Running Your Server
+
+### Test with `mcp-cli`
+
+The fastest way to test and debug your server is with `fastmcp dev`:
+
 ```bash
-# Clone and install for development
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-npm run install:auto
-npm run dev
-
-# Run tests across platforms
-npm run test
+npx fastmcp dev server.js
+npx fastmcp dev server.ts
 ```
 
-## 📄 License
+This will run your server with [`mcp-cli`](https://github.com/wong2/mcp-cli) for testing and debugging your MCP server in the terminal.
 
-MIT License - see [LICENSE](LICENSE) file for details.
+### Inspect with `MCP Inspector`
 
-## 🆘 Support
+Another way is to use the official [`MCP Inspector`](https://modelcontextprotocol.io/docs/tools/inspector) to inspect your server with a Web UI:
 
-- 📖 Check [documentation](docs/)
-- 🐛 [Report issues](https://github.com/your-repo/recursa-doc/issues)
-- 💬 [Discussions](https://github.com/your-repo/recursa-doc/discussions)
+```bash
+npx fastmcp inspect server.ts
+```
 
-## 🔮 Roadmap
+## FAQ
 
-- [ ] Additional platform support (FreeBSD, iOS)
-- [ ] Docker multi-platform builds
-- [ ] Performance optimizations
-- [ ] Enhanced monitoring and logging
-- [ ] Plugin system for extensions
-- [ ] Web UI for configuration
+### How to use with Claude Desktop?
+
+Follow the guide https://modelcontextprotocol.io/quickstart/user and add the following configuration:
+
+```json
+{
+  "mcpServers": {
+    "my-mcp-server": {
+      "command": "npx",
+      "args": ["tsx", "/PATH/TO/YOUR_PROJECT/src/index.ts"],
+      "env": {
+        "YOUR_ENV_VAR": "value"
+      }
+    }
+  }
+}
+```
+
+### How to run FastMCP behind a proxy?
+
+Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment-3004568732) for an example of using FastMCP with `express` and `http-proxy-middleware`.
+
+## Showcase
+
+> [!NOTE]
+>
+> If you've developed a server using FastMCP, please [submit a PR](https://github.com/punkpeye/fastmcp) to showcase it here!
+
+> [!NOTE]
+>
+> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
+
+- [apinetwork/piapi-mcp-server](https://github.com/apinetwork/piapi-mcp-server) - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
+- [domdomegg/computer-use-mcp](https://github.com/domdomegg/computer-use-mcp) - controls your computer
+- [LiterallyBlah/Dradis-MCP](https://github.com/LiterallyBlah/Dradis-MCP) – manages projects and vulnerabilities in Dradis
+- [Meeting-Baas/meeting-mcp](https://github.com/Meeting-Baas/meeting-mcp) - create meeting bots, search transcripts, and manage recording data
+- [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
+- [ssmanji89/halopsa-workflows-mcp](https://github.com/ssmanji89/halopsa-workflows-mcp) - HaloPSA Workflows integration with AI assistants
+- [aiamblichus/mcp-chat-adapter](https://github.com/aiamblichus/mcp-chat-adapter) – provides a clean interface for LLMs to use chat completion
+- [eyaltoledano/claude-task-master](https://github.com/eyaltoledano/claude-task-master) – advanced AI project/task manager powered by FastMCP
+- [cswkim/discogs-mcp-server](https://github.com/cswkim/discogs-mcp-server) - connects to the Discogs API for interacting with your music collection
+- [Panzer-Jack/feuse-mcp](https://github.com/Panzer-Jack/feuse-mcp) - Frontend Useful MCP Tools - Essential utilities for web developers to automate API integration and code generation
+- [sunra-ai/sunra-clients](https://github.com/sunra-ai/sunra-clients/tree/main/mcp-server) - Sunra.ai is a generative media platform built for developers, providing high-performance AI model inference capabilities.
+- [foxtrottwist/shortcuts-mcp](https://github.com/foxtrottwist/shortcuts-mcp) - connects Claude to macOS Shortcuts for system automation, app integration, and interactive workflows
+
+## Acknowledgements
+
+- FastMCP is inspired by the [Python implementation](https://github.com/jlowin/fastmcp) by [Jonathan Lowin](https://github.com/jlowin).
+- Parts of codebase were adopted from [LiteMCP](https://github.com/wong2/litemcp).
+- Parts of codebase were adopted from [Model Context protocolでSSEをやってみる](https://dev.classmethod.jp/articles/mcp-sse/).
+````
+
+## File: src/mcp-schemas.ts
+````typescript
+import { z } from 'zod';
+
+// A map of MemAPI function names to their Zod parameter schemas.
+// This provides strong typing and validation for all exposed MCP tools.
+export const memApiSchemas: Record<string, z.ZodObject<any>> = {
+  // Core File I/O
+  readFile: z.object({ filePath: z.string() }),
+  writeFile: z.object({ filePath: z.string(), content: z.string() }),
+  updateFile: z.object({
+    filePath: z.string(),
+    oldContent: z.string(),
+    newContent: z.string(),
+  }),
+  deletePath: z.object({ filePath: z.string() }),
+  rename: z.object({ oldPath: z.string(), newPath: z.string() }),
+  fileExists: z.object({ filePath: z.string() }),
+  createDir: z.object({ directoryPath: z.string() }),
+  listFiles: z.object({ directoryPath: z.string().optional() }),
+
+  // Git-Native Operations
+  gitDiff: z.object({
+    filePath: z.string(),
+    fromCommit: z.string().optional(),
+    toCommit: z.string().optional(),
+  }),
+  gitLog: z.object({
+    filePath: z.string().optional(),
+    maxCommits: z.number().optional(),
+  }),
+  getChangedFiles: z.object({}),
+  commitChanges: z.object({ message: z.string() }),
+
+  // Intelligent Graph Operations
+  queryGraph: z.object({ query: z.string() }),
+  getBacklinks: z.object({ filePath: z.string() }),
+  getOutgoingLinks: z.object({ filePath: z.string() }),
+  searchGlobal: z.object({ query: z.string() }),
+
+  // State Management
+  saveCheckpoint: z.object({}),
+  revertToLastCheckpoint: z.object({}),
+  discardChanges: z.object({}),
+
+  // Utility
+  getGraphRoot: z.object({}),
+  getTokenCount: z.object({ filePath: z.string() }),
+  getTokenCountForPaths: z.object({ paths: z.array(z.string()) }),
+};
+````
+
+## File: docs/tools.md
+````markdown
+# TOOLS.md: Recursa Sandboxed API (`mem` Object)
+
+The Large Language Model is granted access to the `mem` object, which contains a suite of asynchronous methods for interacting with the local knowledge graph and the underlying Git repository.
+
+**All methods are asynchronous (`Promise<T>`) and MUST be called using `await`.**
+
+## Category 1: Core File & Directory Operations
+
+These are the fundamental building blocks for manipulating the Logseq/Obsidian graph structure.
+
+| Method               | Signature                                                                      | Returns             | Description                                                                                                                                                                                                                                                                                                                              |
+| :------------------- | :----------------------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.readFile`**   | `(filePath: string): Promise<string>`                                          | `Promise<string>`   | Reads and returns the full content of the specified file.                                                                                                                                                                                                                                                                                |
+| **`mem.writeFile`**  | `(filePath: string, content: string): Promise<boolean>`                        | `Promise<boolean>`  | Creates a new file at the specified path with the given content. Automatically creates any necessary parent directories. **Note:** For files ending in `.md`, the content is automatically validated against Logseq/Org-mode block format rules. An error will be thrown if validation fails.                       |
+| **`mem.updateFile`** | `(filePath: string, oldContent: string, newContent: string): Promise<boolean>` | `Promise<boolean>`  | **Performs an atomic Compare-and-Swap.** Replaces the entire file content with `newContent` ONLY IF the current content exactly matches `oldContent`. This prevents race conditions and overwriting other changes. **Usage:** Read a file, transform its content in your code, then call `updateFile` with the original and new content. **Note:** For files ending in `.md`, the `newContent` is automatically validated against Logseq/Org-mode block format rules. An error will be thrown if validation fails. |
+| **`mem.deletePath`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Deletes the specified file or directory recursively.                                                                                                                                                                                                                                                                                     |
+| **`mem.rename`**     | `(oldPath: string, newPath: string): Promise<boolean>`                         | `Promise<boolean>`  | Renames or moves a file or directory. Used for refactoring.                                                                                                                                                                                                                                                                              |
+| **`mem.fileExists`** | `(filePath: string): Promise<boolean>`                                         | `Promise<boolean>`  | Checks if a file exists.                                                                                                                                                                                                                                                                                                                 |
+| **`mem.createDir`**  | `(directoryPath: string): Promise<boolean>`                                    | `Promise<boolean>`  | Creates a new directory, including any necessary nested directories.                                                                                                                                                                                                                                                                     |
+| **`mem.listFiles`**  | `(directoryPath?: string): Promise<string[]>`                                  | `Promise<string[]>` | Lists all files and directories (non-recursive) within a path, or the root if none is provided.                                                                                                                                                                                                                                          |
 
 ---
 
-**Built with ❤️ for cross-platform AI agent development**
-````
+## Category 2: Git-Native Operations (Auditing & Versioning)
 
-## File: src/core/mem-api/fs-walker.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
+These tools leverage the Git repository tracking the knowledge graph, allowing the agent to audit its own memory and understand historical context.
 
-/**
- * Asynchronously and recursively walks a directory, yielding the full path of each file.
- * @param dir The directory to walk.
- * @param isIgnored Optional function to determine if a path should be ignored.
- * @returns An async generator that yields file paths.
- */
-export async function* walk(
-  dir: string,
-  isIgnored: (path: string) => boolean = () => false
-): AsyncGenerator<string> {
-  for await (const d of await fs.opendir(dir)) {
-    const entry = path.join(dir, d.name);
-    
-    // Skip ignored entries
-    if (isIgnored(entry)) {
-      continue;
-    }
-    
-    if (d.isDirectory()) {
-      yield* walk(entry, isIgnored);
-    } else if (d.isFile()) {
-      yield entry;
-    }
-  }
-}
-````
+| Method                    | Signature                                                                                              | Returns               | Description                                                                                                                                               |
+| :------------------------ | :----------------------------------------------------------------------------------------------------- | :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.gitDiff`**         | `(filePath: string, fromCommit?: string, toCommit?: string): Promise<string>`                          | `Promise<string>`     | Gets the `git diff` output for a specific file between two commits (or HEAD/WORKTREE if not specified). **Crucial for understanding how a page evolved.** |
+| **`mem.gitLog`**          | `(filePath: string, maxCommits: number = 5): Promise<{hash: string, message: string, date: string}[]>` | `Promise<LogEntry[]>` | Returns the commit history for a file or the entire repo. Used to understand **when** and **why** a file was last changed.                                |
+| **`mem.getChangedFiles`** | `(): Promise<string[]>`                                                                                | `Promise<string[]>`   | Lists all files that have been created, modified, staged, or deleted in the working tree. Provides a complete view of pending changes.                    |
+| **`mem.commitChanges`**   | `(message: string): Promise<string>`                                                                   | `Promise<string>`     | **Performs the final `git commit`**. The agent must generate a concise, human-readable commit message summarizing its actions. Returns the commit hash.   |
 
-## File: src/types/sandbox.ts
-````typescript
-export interface SandboxOptions {
-  timeout?: number;
-  memoryLimit?: number;
-  allowedGlobals?: string[];
-  forbiddenGlobals?: string[];
-}
+---
 
-export interface SandboxExecutionContext {
-  mem: import('./mem.js').MemAPI;
-  console: Console;
-}
+## Category 3: Intelligent Graph & Semantic Operations
 
-export interface SandboxResult {
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  output?: string;
-  executionTime: number;
-}
+These tools allow the agent to reason about the relationships and structure inherent in Logseq/Org Mode syntax, moving beyond simple file I/O.
 
-export type SandboxCode = string;
+| Method                     | Signature                                                           | Returns                  | Description                                                                                                                                                                                                                                               |
+| :------------------------- | :------------------------------------------------------------------ | :----------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.queryGraph`**       | `(query: string): Promise<{filePath: string, matches: string[]}[]>` | `Promise<QueryResult[]>` | **Executes a powerful graph query.** Can find pages by property (`key:: value`), links (`[[Page]]`), or block content. Used for complex retrieval. _Example: `(property affiliation:: AI Research Institute) AND (outgoing-link [[Symbolic Reasoning]])`_ |
+| **`mem.getBacklinks`**     | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Finds all other files that contain a link **to** the specified file. Essential for understanding context and usage.                                                                                                                                       |
+| **`mem.getOutgoingLinks`** | `(filePath: string): Promise<string[]>`                             | `Promise<string[]>`      | Extracts all unique wikilinks (`[[Page Name]]`) that the specified file links **to**.                                                                                                                                                                     |
+| **`mem.searchGlobal`**     | `(query: string): Promise<string[]>`                                | `Promise<string[]>`      | Performs a simple, full-text search across the entire graph. Returns a list of file paths that contain the match.                                                                                                                                         |
 
-export interface ExecutionConstraints {
-  maxExecutionTime: number;
-  maxMemoryBytes: number;
-  allowedModules: string[];
-  forbiddenAPIs: string[];
-}
-````
+---
 
-## File: tests/integration/mem-api-git-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
+## Category 4: State Management & Checkpoints
 
-describe('MemAPI Git Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
+Tools for managing the working state during complex, multi-turn operations, providing a safety net against errors.
 
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
+| Method                           | Signature              | Returns            | Description                                                                                                                             |
+| :------------------------------- | :--------------------- | :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| **`mem.saveCheckpoint`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Saves the current state.** Stages all working changes (`git add .`) and creates a temporary stash. Use this before a risky operation. |
+| **`mem.revertToLastCheckpoint`** | `(): Promise<boolean>` | `Promise<boolean>` | **Reverts to the last saved state.** Restores the files to how they were when `saveCheckpoint` was last called.                         |
+| **`mem.discardChanges`**         | `(): Promise<boolean>` | `Promise<boolean>` | **Performs a hard reset.** Abandons all current work (staged and unstaged changes) and reverts the repository to the last commit.       |
 
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
+---
 
-  it('should commit a change and log it', async () => {
-    const filePath = 'a.md';
-    const content = '- content';
-    const commitMessage = 'feat: add a.md';
+## Category 5: Utility & Diagnostics
 
-    await mem.writeFile(filePath, content);
+General-purpose operations for the sandbox environment.
 
-    const commitHash = await mem.commitChanges(commitMessage);
-
-    expect(typeof commitHash).toBe('string');
-    expect(commitHash.length).toBeGreaterThan(5);
-
-    const log = await mem.gitLog(filePath, 1);
-
-    expect(log).toHaveLength(1);
-    expect(log[0]).toBeDefined();
-    expect(log[0]?.message).toBe(commitMessage);
-  });
-
-  it('should return diff for a file', async () => {
-    const filePath = 'a.md';
-    await mem.writeFile(filePath, '- version 1');
-    await mem.commitChanges('v1');
-
-    await mem.writeFile(filePath, '- version 1\n- version 2');
-    const commitV2Hash = await mem.commitChanges('v2');
-
-    await mem.writeFile(filePath, '- version 1\n- version 2\n- version 3');
-
-    // Diff against HEAD (working tree vs last commit)
-    const diffWorking = await mem.gitDiff(filePath);
-    expect(diffWorking).toContain('+- version 3');
-
-    // Diff between two commits
-    const diffCommits = await mem.gitDiff(filePath, 'HEAD~1', 'HEAD');
-    expect(diffCommits).toContain('+- version 2');
-    expect(diffCommits).not.toContain('+ - version 3');
-
-    // Diff from a specific commit to HEAD
-    const diffFromCommit = await mem.gitDiff(filePath, commitV2Hash);
-    expect(diffFromCommit).toContain('+- version 3');
-  });
-
-  it('should get changed files from the working tree', async () => {
-    // Setup
-    await mem.writeFile('a.txt', 'a');
-    await mem.writeFile('b.txt', 'b');
-    await mem.commitChanges('initial commit');
-
-    // 1. Modify a.txt
-    await mem.writeFile('a.txt', 'a modified');
-
-    // 2. Create c.txt
-    await mem.writeFile('c.txt', 'c');
-
-    // 3. Delete b.txt
-    await mem.deletePath('b.txt');
-
-    // 4. Create and stage d.txt
-    await mem.writeFile('d.txt', 'd');
-    await harness.git.add('d.txt');
-
-    const changedFiles = await mem.getChangedFiles();
-
-    expect(changedFiles).toEqual(
-      expect.arrayContaining(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
-    );
-    expect(changedFiles.length).toBe(4);
-  });
-
-  it('should handle commit with no changes', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.commitChanges('commit 1');
-
-    // Calling commitChanges with no changes should not throw an error
-    const commitHash = await mem.commitChanges('no changes');
-    expect(commitHash).toBe('No changes to commit.');
-
-    // Verify no new commit was created
-    const log = await mem.gitLog(undefined, 2);
-    expect(log).toHaveLength(2); // commit 1 + initial .gitignore commit
-    expect(log[0]?.message).toBe('commit 1');
-  });
-
-  it('should get git log for the whole repo', async () => {
-    await mem.writeFile('a.txt', 'a');
-    await mem.commitChanges('commit A');
-    await mem.writeFile('b.txt', 'b');
-    await mem.commitChanges('commit B');
-
-    // Get full repo log
-    const log = await mem.gitLog(undefined, 3);
-    expect(log).toHaveLength(3); // A, B, and initial .gitignore
-    expect(log[0]?.message).toBe('commit B');
-    expect(log[1]?.message).toBe('commit A');
-    expect(log[2]?.message).toContain('Initial commit');
-  });
-});
-````
-
-## File: tests/integration/mem-api-graph-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Graph Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    // Disable .gitignore for these tests so we can correctly search .log files
-    harness = await createTestHarness({ withGitignore: false });
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should query the graph with multiple conditions', async () => {
-    const pageAContent = `
-- # Page A
-  - prop:: value
-  - Link to [[Page B]].
-    `;
-    const pageBContent = `
-- # Page B
-  - prop:: other
-  - No links here.
-    `;
-
-    await mem.writeFile('PageA.md', pageAContent);
-    await mem.writeFile('PageB.md', pageBContent);
-
-    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(1);
-    expect(results[0]).toBeDefined();
-    expect(results[0]?.filePath).toBe('PageA.md');
-  });
-
-  it('should return an empty array for a query with no matches', async () => {
-    const pageAContent = `- # Page A\n  - prop:: value`;
-    await mem.writeFile('PageA.md', pageAContent);
-
-    const query = `(property prop:: non-existent-value)`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(0);
-  });
-
-  it('should get backlinks and outgoing links', async () => {
-    // PageA links to PageB and PageC
-    await mem.writeFile('PageA.md', '- Links to [[Page B]] and [[Page C]].');
-    // PageB links to PageC
-    await mem.writeFile('PageB.md', '- Links to [[Page C]].');
-    // PageC has no outgoing links
-    await mem.writeFile('PageC.md', '- No links.');
-    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
-    await mem.writeFile('PageD.md', '- Links to [[PageA]].');
-
-    // Test outgoing links
-    const outgoingA = await mem.getOutgoingLinks('PageA.md');
-    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
-    expect(outgoingA.length).toBe(2);
-
-    const outgoingC = await mem.getOutgoingLinks('PageC.md');
-    expect(outgoingC).toEqual([]);
-
-    // Test backlinks
-    const backlinksA = await mem.getBacklinks('PageA.md');
-    expect(backlinksA).toEqual(['PageD.md']);
-
-    const backlinksC = await mem.getBacklinks('PageC.md');
-    expect(backlinksC).toEqual(
-      expect.arrayContaining(['PageA.md', 'PageB.md'])
-    );
-    expect(backlinksC.length).toBe(2);
-  });
-
-  it('should perform a global full-text search', async () => {
-    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
-    await mem.writeFile('b.md', '- This file has a common-search-term.');
-    await mem.writeFile('c.log', 'This one also has a common-search-term.');
-    await mem.writeFile(
-      'd.txt',
-      'This file has nothing interesting to find.'
-    );
-
-    // Search for a unique term
-    const uniqueResults = await mem.searchGlobal('unique-search-term');
-    expect(uniqueResults).toEqual(['a.txt']);
-
-    // Search for a common term
-    const commonResults = await mem.searchGlobal('common-search-term');
-    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
-    expect(commonResults.length).toBe(2);
-
-    // Search for a non-existent term
-    const noResults = await mem.searchGlobal('non-existent-term');
-    expect(noResults).toEqual([]);
-  });
-});
-````
-
-## File: .env.test
-````
-# Test Environment Configuration
-OPENROUTER_API_KEY="mock-test-api-key"
-KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
-LLM_MODEL="mock-test-model"
-````
-
-## File: jest.config.js
-````javascript
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-export default {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  moduleNameMapper: {
-    '(.+)\\.js$': '$1',
-  },
-  transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        useESM: true,
-      },
-    ],
-  },
-  extensionsToTreatAsEsm: ['.ts'],
-  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
-  clearMocks: true,
-  collectCoverage: true,
-  coverageDirectory: 'coverage',
-  coverageProvider: 'v8',
-  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
-};
-````
-
-## File: src/types/llm.ts
-````typescript
-export type ParsedLLMResponse = {
-  think?: string;
-  typescript?: string;
-  reply?: string;
-};
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
-export interface LLMRequest {
-  messages: ChatMessage[];
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-  topP?: number;
-}
-
-export interface LLMResponse {
-  content: string;
-  model: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
-
-export interface LLMConfig {
-  apiKey: string;
-  baseUrl?: string;
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-}
-
-export interface LLMProvider {
-  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
-  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
-}
-
-export type StreamingCallback = (chunk: string) => void;
-````
-
-## File: src/types/loop.ts
-````typescript
-import type { MemAPI } from './mem.js';
-import type { ChatMessage } from './llm.js';
-
-// The execution context passed through the agent loop.
-export type ExecutionContext = {
-  // The complete conversation history for this session.
-  history: ChatMessage[];
-  // The API implementation available to the sandbox.
-  memAPI: MemAPI;
-  // The application configuration.
-  config: import('../config').AppConfig;
-  // A unique ID for this execution run.
-  runId: string;
-  // Function to stream content back to the client.
-  streamContent: (content: { type: 'text'; text: string }) => Promise<void>;
-};
-````
-
-## File: tests/lib/test-util.ts
-````typescript
-// This file can be used for shared test utilities.
-// Currently, it has no content as previous imports were unused.
-````
-
-## File: tests/unit/parser.test.ts
-````typescript
-import { describe, it, expect } from '@jest/globals';
-import { parseLLMResponse } from '../../src/core/parser';
-
-describe('LLM Response Parser', () => {
-  it('should parse a full, valid response', () => {
-    const xml = `<think>Thinking about stuff.</think><typescript>console.log("hello");</typescript><reply>All done!</reply>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: 'Thinking about stuff.',
-      typescript: 'console.log("hello");',
-      reply: 'All done!',
-    });
-  });
-
-  it('should parse a partial response (think/act)', () => {
-    const xml = `<think>Let me write a file.</think><typescript>await mem.writeFile('a.txt', 'hi');</typescript>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: 'Let me write a file.',
-      typescript: "await mem.writeFile('a.txt', 'hi');",
-      reply: undefined,
-    });
-  });
-
-  it('should handle extra whitespace and newlines', () => {
-    const xml = `
-      <think>
-        I need to think about this...
-        With newlines.
-      </think>
-      <typescript>
-        const x = 1;
-      </typescript>
-    `;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: `I need to think about this...\n        With newlines.`,
-      typescript: 'const x = 1;',
-      reply: undefined,
-    });
-  });
-
-  it('should return an object with undefined for missing tags', () => {
-    const xml = `<reply>Just a reply.</reply>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: undefined,
-      typescript: undefined,
-      reply: 'Just a reply.',
-    });
-  });
-
-  it('should handle an empty string', () => {
-    const xml = '';
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: undefined,
-      typescript: undefined,
-      reply: undefined,
-    });
-  });
-
-  it('should handle tags in a different order', () => {
-    const xml = `<reply>Final answer.</reply><think>One last thought.</think>`;
-    const result = parseLLMResponse(xml);
-    expect(result).toEqual({
-      think: 'One last thought.',
-      typescript: undefined,
-      reply: 'Final answer.',
-    });
-  });
-});
-````
-
-## File: .gitignore
-````
-# Dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# Testing
-/coverage
-
-# Production
-/build
-/dist
-
-# Misc
-.DS_Store
-*.pem
-
-# Debugging
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Environment Variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDEs
-.idea
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-*.sublime-workspace
-
-# Relay
-.relay/
-
-# Worktrees (from original)
-worktrees/*/node_modules/
-worktrees/*/.git/
-````
-
-## File: relay.config.json
-````json
-{
-  "$schema": "https://relay.noca.pro/schema.json",
-  "projectId": "doc",
-  "core": {
-    "logLevel": "info",
-    "enableNotifications": false,
-    "watchConfig": false
-  },
-  "watcher": {
-    "clipboardPollInterval": 2000,
-    "preferredStrategy": "auto",
-    "enableBulkProcessing": false,
-    "bulkSize": 5,
-    "bulkTimeout": 30000
-  },
-  "patch": {
-    "approvalMode": "manual",
-    "approvalOnErrorCount": 0,
-    "linter": "",
-    "preCommand": "",
-    "postCommand": "",
-    "minFileChanges": 0
-  },
-  "git": {
-    "autoGitBranch": false,
-    "gitBranchPrefix": "relay/",
-    "gitBranchTemplate": "gitCommitMsg"
-  }
-}
-````
-
-## File: src/types/git.ts
-````typescript
-export interface GitOptions {
-  baseDir?: string;
-}
-
-// Structure for a single Git log entry.
-export type LogEntry = {
-  hash: string;
-  message: string;
-  date: string;
-};
-
-export interface GitDiffResult {
-  additions: number;
-  deletions: number;
-  patch: string;
-}
-
-export interface GitStatus {
-  staged: string[];
-  unstaged: string[];
-  untracked: string[];
-}
-
-export type GitCommand =
-  | 'init'
-  | 'add'
-  | 'commit'
-  | 'status'
-  | 'log'
-  | 'diff'
-  | 'branch';
-````
-
-## File: src/core/mem-api/secure-path.ts
-````typescript
-import path from 'path';
-import fs from 'fs';
-import platform from '../../lib/platform.js';
-
-/**
- * Cross-platform path traversal protection utilities
- * The LLM should never be able to access files outside the knowledge graph.
- */
-
-/**
- * Enhanced path resolution with canonicalization for cross-platform security
- * @param graphRoot The absolute path to the root of the knowledge graph.
- * @param userPath The user-provided sub-path.
- * @returns The resolved, secure absolute path.
- * @throws If a path traversal attempt is detected.
- */
-export const resolveSecurePath = (
-  graphRoot: string,
-  userPath: string
-): string => {
-  // Normalize and resolve paths using platform-aware normalization
-  const normalizedRoot = platform.normalizePath(path.resolve(graphRoot));
-  const normalizedUserPath = platform.normalizePath(path.resolve(normalizedRoot, userPath));
-
-  // Get canonical paths to handle symlinks and case-insensitive filesystems
-  const canonicalRoot = getCanonicalPath(normalizedRoot);
-  const canonicalTarget = getCanonicalPath(normalizedUserPath);
-
-  // Security check with case-insensitive comparison when needed
-  const isSecure = platform.hasCaseInsensitiveFS
-    ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
-    : canonicalTarget.startsWith(canonicalRoot);
-
-  if (!isSecure) {
-    throw new SecurityError(`Path traversal attempt detected. User path: ${userPath}, resolved to: ${canonicalTarget}`);
-  }
-
-  return canonicalTarget;
-};
-
-/**
- * Get canonical path by resolving symlinks and normalizing
- * @param filePath The path to canonicalize
- * @returns The canonical absolute path
- */
-export const getCanonicalPath = (filePath: string): string => {
-  try {
-    // Use realpath to resolve all symlinks and normalize
-    const canonical = fs.realpathSync(filePath);
-    return platform.normalizePath(canonical);
-  } catch {
-    // If path doesn't exist, return normalized path
-    return platform.normalizePath(path.resolve(filePath));
-  }
-};
-
-/**
- * Validate that a path is within allowed bounds
- * @param allowedRoot The root directory that's allowed
- * @param testPath The path to test
- * @param options Additional validation options
- * @returns True if path is valid and within bounds
- */
-export const validatePathBounds = (
-  allowedRoot: string,
-  testPath: string,
-  options: {
-    allowSymlinks?: boolean;
-    requireExistence?: boolean;
-    followSymlinks?: boolean;
-  } = {}
-): boolean => {
-  const {
-    allowSymlinks = false,
-    requireExistence = false,
-    followSymlinks = true
-  } = options;
-
-  try {
-    const canonicalRoot = getCanonicalPath(allowedRoot);
-    let canonicalTarget: string;
-    
-    // Handle non-existent paths specially
-    try {
-      canonicalTarget = getCanonicalPath(testPath);
-    } catch {
-      // Path doesn't exist, use normalized path instead
-      canonicalTarget = platform.normalizePath(path.resolve(testPath));
-    }
-
-    // If we shouldn't follow symlinks, check if the target itself is a symlink
-    if (!followSymlinks) {
-      try {
-        if (fs.lstatSync(testPath).isSymbolicLink()) {
-          if (!allowSymlinks) {
-            return false;
-          }
-          // Use lstat to get the symlink itself, not its target
-          canonicalTarget = platform.normalizePath(path.resolve(testPath));
-        }
-      } catch {
-        // File doesn't exist, which is fine for write operations
-        // The canonicalTarget from resolveSecurePath is still valid
-      }
-    }
-
-    // Check if the target path exists (if required)
-    if (requireExistence && !fs.existsSync(canonicalTarget)) {
-      return false;
-    }
-
-    // Final security check
-    const isSecure = platform.hasCaseInsensitiveFS
-      ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
-      : canonicalTarget.startsWith(canonicalRoot);
-
-    return isSecure;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Sanitize a user-provided path to remove dangerous components
- * @param userPath The user-provided path
- * @returns A sanitized path string
- */
-export const sanitizePath = (userPath: string): string => {
-  // Remove null bytes and other dangerous characters
-  let sanitized = userPath.replace(/\0/g, '');
-
-  // Handle Windows-specific path patterns
-  if (platform.isWindows) {
-    // Remove drive letter switching attempts
-    sanitized = sanitized.replace(/^[a-zA-Z]:[\\/]/, '');
-    // Remove UNC path attempts
-    sanitized = sanitized.replace(/^\\\\[\\?]/, '');
-    // Remove device namespace access attempts
-    sanitized = sanitized.replace(/^\\\\\.\\[a-zA-Z]/, '');
-  }
-
-  // Remove excessive path separators
-  const separator = platform.pathSeparator;
-  const doubleSeparator = separator + separator;
-  while (sanitized.includes(doubleSeparator)) {
-    sanitized = sanitized.replace(doubleSeparator, separator);
-  }
-
-  // Normalize relative path components
-  const parts = sanitized.split(separator);
-  const filteredParts: string[] = [];
-
-  for (const part of parts) {
-    if (part === '..') {
-      // Don't allow going above the current directory in user input
-      continue;
-    }
-    if (part === '.' || part === '') {
-      continue;
-    }
-    filteredParts.push(part);
-  }
-
-  return filteredParts.join(separator);
-};
-
-/**
- * Security error class for path traversal attempts
- */
-export class SecurityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SecurityError';
-
-    // Maintain proper stack trace for where our error was thrown (only available on V8)
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, SecurityError);
-    }
-  }
-}
-
-/**
- * Cross-platform path validation utilities
- */
-export const pathValidation = {
-  /**
-   * Check if a path contains potentially dangerous patterns
-   */
-  isDangerousPath(userPath: string): boolean {
-    // Check for common traversal patterns
-    const dangerousPatterns = [
-      /\.\.[/\\]/,    // ../ or ..\
-      /[/\\]\.\./,    // /.. or \..
-      /\0/,          // null byte injection
-      /[/\\]\0/,      // null byte with separator
-    ];
-
-    // Windows-specific dangerous patterns
-    if (platform.isWindows) {
-      dangerousPatterns.push(
-        /^[a-zA-Z]:[/\\].*[/\\][a-zA-Z]:[/\\]/, // drive letter switching
-        /^\\\\/,                                 // UNC paths
-        /\\\\\.\\[a-zA-Z]/,                      // device namespace
-        /[/\\]CON$|[/\\]PRN$|[/\\]AUX$|[/\\]COM\d$|[/\\]LPT\d$/i // reserved names
-      );
-    }
-
-    return dangerousPatterns.some(pattern => pattern.test(userPath));
-  },
-
-  /**
-   * Validate and sanitize a user path in one step
-   */
-  validateAndSanitizePath(graphRoot: string, userPath: string): string {
-    if (this.isDangerousPath(userPath)) {
-      throw new SecurityError(`Dangerous path pattern detected: ${userPath}`);
-    }
-
-    const sanitizedPath = sanitizePath(userPath);
-    return resolveSecurePath(graphRoot, sanitizedPath);
-  }
-};
-
-export default {
-  resolveSecurePath,
-  getCanonicalPath,
-  validatePathBounds,
-  sanitizePath,
-  SecurityError,
-  pathValidation
-};
-````
-
-## File: src/core/parser.ts
-````typescript
-import type { ParsedLLMResponse } from '../types';
-
-/**
- * Parses the LLM's XML-like response string into a structured object.
- * This function uses a simple regex-based approach for robustness against
- * potentially malformed, non-XML-compliant output from the LLM, which is
- * often more reliable than a strict XML parser.
- *
- * @param response The raw string response from the LLM.
- * @returns A ParsedLLMResponse object with optional `think`, `typescript`, and `reply` fields.
- */
-export const parseLLMResponse = (response: string): ParsedLLMResponse => {
-  const extractTagContent = (tagName: string): string | undefined => {
-    const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
-    const match = response.match(regex);
-    // If a match is found, return the captured group (the content), trimmed.
-    return match && match[1] ? match[1].trim() : undefined;
-  };
-
-  return {
-    think: extractTagContent('think'),
-    typescript: extractTagContent('typescript'),
-    reply: extractTagContent('reply'),
-  };
-};
-````
-
-## File: src/lib/logger.ts
-````typescript
-import 'dotenv/config';
-
-// Cheatsheet for implementation:
-// 1. Define log levels using a numeric enum for easy comparison.
-// 2. Create a logger that can be configured with a minimum log level (from env).
-// 3. The logger should support adding structured context.
-// 4. Implement a `child` method to create a new logger instance with pre-filled context.
-//    This is useful for adding request or session IDs to all logs within that scope.
-// 5. The actual logging should be done to console.log as a JSON string.
-
-export enum LogLevel {
-  DEBUG = 10,
-  INFO = 20,
-  WARN = 30,
-  ERROR = 40,
-}
-
-const LOG_LEVEL_NAMES: Record<LogLevel, string> = {
-  [LogLevel.DEBUG]: 'debug',
-  [LogLevel.INFO]: 'info',
-  [LogLevel.WARN]: 'warn',
-  [LogLevel.ERROR]: 'error',
-};
-
-const LOG_LEVEL_MAP: Record<string, LogLevel> = {
-  debug: LogLevel.DEBUG,
-  info: LogLevel.INFO,
-  warn: LogLevel.WARN,
-  error: LogLevel.ERROR,
-};
-
-const MIN_LOG_LEVEL: LogLevel =
-  LOG_LEVEL_MAP[process.env.LOG_LEVEL?.toLowerCase() ?? 'info'] ??
-  LogLevel.INFO;
-
-type LogContext = Record<string, unknown>;
-
-export type Logger = {
-  debug: (message: string, context?: LogContext) => void;
-  info: (message: string, context?: LogContext) => void;
-  warn: (message: string, context?: LogContext) => void;
-  error: (message: string, error?: Error, context?: LogContext) => void;
-  child: (childContext: LogContext) => Logger;
-};
-
-const createLoggerInternal = (baseContext: LogContext = {}): Logger => {
-  const log = (level: LogLevel, message: string, context: LogContext = {}) => {
-    if (level < MIN_LOG_LEVEL) {
-      return;
-    }
-    const finalContext = { ...baseContext, ...context };
-    const logEntry = {
-      level: LOG_LEVEL_NAMES[level],
-      timestamp: new Date().toISOString(),
-      message,
-      ...finalContext,
-    };
-     
-    console.log(JSON.stringify(logEntry));
-  };
-
-  const error = (message: string, err?: Error, context?: LogContext) => {
-    const errorContext = {
-      ...context,
-      error: err ? { message: err.message, stack: err.stack } : undefined,
-    };
-    log(LogLevel.ERROR, message, errorContext);
-  };
-
-  return {
-    debug: (message, context) => log(LogLevel.DEBUG, message, context),
-    info: (message, context) => log(LogLevel.INFO, message, context),
-    warn: (message, context) => log(LogLevel.WARN, message, context),
-    error,
-    child: (childContext: LogContext) => {
-      const mergedContext = { ...baseContext, ...childContext };
-      return createLoggerInternal(mergedContext);
-    },
-  };
-};
-
-export const createLogger = (): Logger => createLoggerInternal();
-
-export const logger = createLogger();
-````
-
-## File: src/types/index.ts
-````typescript
-export * from './mem.js';
-export * from './git.js';
-export * from './sandbox.js';
-export * from './llm.js';
-export * from './loop.js';
-export * from './mcp.js';
-
-// Re-export AppConfig from config module
-export type { AppConfig } from '../config.js';
-
-export interface RecursaConfig {
-  knowledgeGraphPath: string;
-  llm: {
-    apiKey: string;
-    baseUrl?: string;
-    model: string;
-    maxTokens?: number;
-    temperature?: number;
-  };
-  sandbox: {
-    timeout: number;
-    memoryLimit: number;
-  };
-  git: {
-    userName: string;
-    userEmail: string;
-  };
-}
-
-export interface EnvironmentVariables {
-  KNOWLEDGE_GRAPH_PATH: string;
-  OPENROUTER_API_KEY: string;
-  OPENROUTER_MODEL?: string;
-  LLM_TEMPERATURE?: string;
-  LLM_MAX_TOKENS?: string;
-  SANDBOX_TIMEOUT?: string;
-  SANDBOX_MEMORY_LIMIT?: string;
-  GIT_USER_NAME?: string;
-  GIT_USER_EMAIL?: string;
-}
-````
-
-## File: src/types/mcp.ts
-````typescript
-// Based on MCP Specification
-
-// --- Requests ---
-export interface MCPRequest {
-  jsonrpc: '2.0';
-  id: number | string;
-  method: string;
-  params?: unknown;
-}
-
-export interface InitializeParams {
-  processId?: number;
-  clientInfo: {
-    name: string;
-    version: string;
-    [key: string]: unknown;
-  };
-  capabilities: Record<string, unknown>;
-}
-
-// --- Responses ---
-export interface MCPResponse {
-  jsonrpc: '2.0';
-  id: number | string;
-  result?: unknown;
-  error?: MCPError;
-}
-
-export interface MCPError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-
-// --- Tooling ---
-export interface MCPTool {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>; // JSON Schema
-  [key: string]: unknown;
-}
-
-export interface ListToolsResult {
-  tools: MCPTool[];
-}
-
-// --- Notifications ---
-export interface MCPNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: unknown;
-}
+| Method                          | Signature                                                          | Returns                     | Description                                                                                           |
+| :------------------------------ | :----------------------------------------------------------------- | :-------------------------- | :---------------------------------------------------------------------------------------------------- |
+| **`mem.getGraphRoot`**          | `(): Promise<string>`                                              | `Promise<string>`           | Returns the absolute path of the root directory of the knowledge graph.                               |
+| **`mem.getTokenCount`**         | `(filePath: string): Promise<number>`                              | `Promise<number>`           | Calculates and returns the estimated token count for a single file. Useful for managing context size. |
+| **`mem.getTokenCountForPaths`** | `(paths: string[]): Promise<{path: string, tokenCount: number}[]>` | `Promise<PathTokenCount[]>` | A more efficient way to get token counts for multiple files in a single call.                         |
 ````
 
 ## File: tests/e2e/mcp-workflow.test.ts
@@ -3061,478 +2193,262 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 });
 ````
 
-## File: src/core/mem-api/git-ops.ts
+## File: src/core/mem-api/secure-path.ts
 ````typescript
-import type { SimpleGit } from 'simple-git';
-import type { LogEntry } from '../../types';
-
-// Note: These functions take a pre-configured simple-git instance.
-
-export const gitDiff =
-  (git: SimpleGit) =>
-  async (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ): Promise<string> => {
-    try {
-      if (fromCommit && toCommit) {
-        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
-      } else if (fromCommit) {
-        return await git.diff([`${fromCommit}`, '--', filePath]);
-      } else {
-        return await git.diff([filePath]);
-      }
-    } catch (error) {
-      throw new Error(
-        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const gitLog =
-  (git: SimpleGit) =>
-  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
-    try {
-      const options = {
-        maxCount: maxCommits,
-        ...(filePath ? { file: filePath } : {}),
-      };
-      const result = await git.log(options);
-      return result.all.map((entry) => ({
-        hash: entry.hash,
-        message: entry.message,
-        date: entry.date,
-      }));
-    } catch (error) {
-      const target = filePath || 'repository';
-      throw new Error(
-        `Failed to get git log for ${target}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getChangedFiles =
-  (git: SimpleGit) => async (): Promise<string[]> => {
-    try {
-      const status = await git.status();
-      // Combine all relevant file arrays and remove duplicates
-      const allFiles = new Set([
-        ...status.staged,
-        ...status.modified,
-        ...status.created,
-        ...status.deleted,
-        ...status.not_added, // Add untracked files
-        ...status.renamed.map((r) => r.to),
-      ]);
-      return Array.from(allFiles);
-    } catch (error) {
-      throw new Error(
-        `Failed to get changed files: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const commitChanges =
-  (git: SimpleGit) =>
-  async (message: string): Promise<string> => {
-    try {
-      // Stage all changes
-      await git.add('.');
-
-      // Commit staged changes
-      const result = await git.commit(message);
-
-      // Return the commit hash
-      if (result.commit) {
-        return result.commit;
-      }
-      // If result.commit is empty or null, it means no changes were committed. This is not an error.
-      return 'No changes to commit.';
-    } catch (error) {
-      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
-    }
-  };
-````
-
-## File: src/core/mem-api/index.ts
-````typescript
-import type { MemAPI } from '../../types';
-import type { AppConfig } from '../../config';
-import simpleGit from 'simple-git';
-
-import * as fileOps from './file-ops.js';
-import * as gitOps from './git-ops.js';
-import * as graphOps from './graph-ops.js';
-import * as stateOps from './state-ops.js';
-import * as utilOps from './util-ops.js';
+import path from 'path';
+import fs from 'fs';
+import platform from '../../lib/platform.js';
 
 /**
- * Creates a fully-functional MemAPI object.
- * This is a Higher-Order Function that takes the application configuration
- * and returns an object where each method is pre-configured with the necessary
- * context (like the knowledge graph path or a git instance).
- *
- * @param config The application configuration.
- * @returns A complete MemAPI object ready to be used by the sandbox.
+ * Cross-platform path traversal protection utilities
+ * The LLM should never be able to access files outside the knowledge graph.
  */
-export const createMemAPI = (config: AppConfig): MemAPI => {
-  const git = simpleGit(config.knowledgeGraphPath)
-    .addConfig('user.name', config.gitUserName)
-    .addConfig('user.email', config.gitUserEmail);
-  const graphRoot = config.knowledgeGraphPath;
 
-  return {
-    // Core File I/O
-    readFile: fileOps.readFile(graphRoot),
-    writeFile: fileOps.writeFile(graphRoot),
-    updateFile: fileOps.updateFile(graphRoot),
-    deletePath: fileOps.deletePath(graphRoot),
-    rename: fileOps.rename(graphRoot),
-    fileExists: fileOps.fileExists(graphRoot),
-    createDir: fileOps.createDir(graphRoot),
-    listFiles: fileOps.listFiles(graphRoot),
+/**
+ * Enhanced path resolution with canonicalization for cross-platform security
+ * @param graphRoot The absolute path to the root of the knowledge graph.
+ * @param userPath The user-provided sub-path.
+ * @returns The resolved, secure absolute path.
+ * @throws If a path traversal attempt is detected.
+ */
+export const resolveSecurePath = (
+  graphRoot: string,
+  userPath: string
+): string => {
+  // Normalize and resolve paths using platform-aware normalization
+  const normalizedRoot = platform.normalizePath(path.resolve(graphRoot));
+  const normalizedUserPath = platform.normalizePath(path.resolve(normalizedRoot, userPath));
 
-    // Git-Native Operations
-    gitDiff: gitOps.gitDiff(git),
-    gitLog: gitOps.gitLog(git),
-    getChangedFiles: gitOps.getChangedFiles(git),
-    commitChanges: gitOps.commitChanges(git),
+  // Get canonical paths to handle symlinks and case-insensitive filesystems
+  const canonicalRoot = getCanonicalPath(normalizedRoot);
+  const canonicalTarget = getCanonicalPath(normalizedUserPath);
 
-    // Intelligent Graph Operations
-    queryGraph: graphOps.queryGraph(graphRoot),
-    getBacklinks: graphOps.getBacklinks(graphRoot),
-    getOutgoingLinks: graphOps.getOutgoingLinks(graphRoot),
-    searchGlobal: graphOps.searchGlobal(graphRoot),
+  // Security check with case-insensitive comparison when needed
+  const isSecure = platform.hasCaseInsensitiveFS
+    ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
+    : canonicalTarget.startsWith(canonicalRoot);
 
-    // State Management & Checkpoints
-    saveCheckpoint: stateOps.saveCheckpoint(git), // Implemented
-    revertToLastCheckpoint: stateOps.revertToLastCheckpoint(git), // Implemented
-    discardChanges: stateOps.discardChanges(git), // Implemented
+  if (!isSecure) {
+    throw new SecurityError(`Path traversal attempt detected. User path: ${userPath}, resolved to: ${canonicalTarget}`);
+  }
 
-    // Utility & Diagnostics
-    getGraphRoot: utilOps.getGraphRoot(graphRoot),
-    getTokenCount: utilOps.getTokenCount(graphRoot), // Implemented
-    getTokenCountForPaths: utilOps.getTokenCountForPaths(graphRoot), // Implemented
-  };
-};
-````
-
-## File: tsconfig.json
-````json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "lib": ["ES2022"],
-    "moduleResolution": "node",
-    "rootDir": "src",
-    "outDir": "dist",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noPropertyAccessFromIndexSignature": false,
-    "resolveJsonModule": true,
-    "allowImportingTsExtensions": false,
-    "noEmit": false,
-    "types": ["node", "jest"]
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
-}
-````
-
-## File: src/core/mem-api/state-ops.ts
-````typescript
-import type { SimpleGit } from 'simple-git';
-
-// Note: These functions map to specific git commands for state management.
-
-export const saveCheckpoint =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    // 1. Stage all changes except session files to prevent conflicts during stash operations.
-    // Use git add . followed by git reset .sessions/ if it exists
-    await git.add('.');
-    // Check if .sessions directory exists and unstage it
-    try {
-      await git.raw('ls-files', '.sessions/');
-      await git.reset(['.sessions/']);
-    } catch {
-      // .sessions directory doesn't exist or is empty, which is fine
-    }
-    // 2. Save to stash with a message: `await git.stash(['push', '-m', 'recursa-checkpoint'])`.
-    await git.stash(['push', '-m', 'recursa-checkpoint']);
-    // 3. Return true on success.
-    return true;
-  };
-
-export const revertToLastCheckpoint =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    try {
-      // Check if there are any stashes before trying to apply
-      const stashes = await git.stashList();
-      if (stashes.all.length > 0) {
-        console.log('Found stash, applying to restore checkpoint...');
-
-        try {
-          // Try to apply with --index to preserve untracked files
-          await git.stash(['apply', '--index', 'stash@{0}']);
-          console.log('Stash applied with --index successfully');
-        } catch (applyError) {
-          console.log('Stash apply with --index failed, trying without --index:', (applyError as Error).message);
-
-          // If --index fails, try without it
-          await git.stash(['apply', 'stash@{0}']);
-          console.log('Stash applied without --index successfully');
-        }
-
-        // Remove the stash after successful application
-        await git.stash(['drop', 'stash@{0}']);
-
-        console.log('Stash applied and dropped successfully');
-        return true;
-      }
-      // No stashes exist, which is not an error state.
-      // It just means there's nothing to revert to.
-      console.log('No stashes found');
-      return false;
-    } catch (error) {
-      console.warn(
-        `Could not revert to checkpoint: ${(error as Error).message}`
-      );
-      return false;
-    }
-  };
-
-export const discardChanges =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    // 1. Reset all tracked files: `await git.reset(['--hard', 'HEAD'])`.
-    await git.reset(['--hard', 'HEAD']);
-    // 2. Remove all untracked files and directories: `await git.clean('f', ['-d'])`.
-    await git.clean('f', ['-d']);
-    // 3. Return true on success.
-    return true;
-  };
-````
-
-## File: src/core/mem-api/util-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import type { PathTokenCount } from '../../types';
-import { resolveSecurePath } from './secure-path.js';
-
-// A private helper to centralize token counting logic.
-// This is a simple estimation and should be replaced with a proper
-// tokenizer library like tiktoken if higher accuracy is needed.
-const countTokensForContent = (content: string): number => {
-  // A common rough estimate is 4 characters per token.
-  return Math.ceil(content.length / 4);
+  return canonicalTarget;
 };
 
-// Note: HOFs returning the final mem API functions.
-
-export const getGraphRoot =
-  (graphRoot: string) => async (): Promise<string> => {
-    return graphRoot;
-  };
-
-export const getTokenCount =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<number> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    try {
-      const content = await fs.readFile(fullPath, 'utf-8');
-      return countTokensForContent(content);
-    } catch (error) {
-      throw new Error(
-        `Failed to count tokens for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getTokenCountForPaths =
-  (graphRoot: string) =>
-  async (paths: string[]): Promise<PathTokenCount[]> => {
-    return Promise.all(
-      paths.map(async (filePath) => {
-        const tokenCount = await getTokenCount(graphRoot)(filePath);
-        return {
-          path: filePath,
-          tokenCount,
-        };
-      })
-    );
-  };
-````
-
-## File: src/types/mem.ts
-````typescript
-import type { LogEntry } from './git.js';
-
-// --- Knowledge Graph & Git ---
-
-// Structure for a graph query result.
-export type GraphQueryResult = {
-  filePath: string;
-  matches: string[];
-};
-
-// Structure for token count results for multiple paths.
-export type PathTokenCount = {
-  path: string;
-  tokenCount: number;
-};
-
-// --- MemAPI Interface (Matches tools.md) ---
-
-// This is the "cheatsheet" for what's available in the sandbox.
-// It must be kept in sync with the tools documentation.
-export type MemAPI = {
-  // Core File I/O
-  readFile: (filePath: string) => Promise<string>;
-  writeFile: (filePath: string, content: string) => Promise<boolean>;
-  updateFile: (
-    filePath: string,
-    oldContent: string,
-    newContent: string
-  ) => Promise<boolean>;
-  deletePath: (filePath: string) => Promise<boolean>;
-  rename: (oldPath: string, newPath: string) => Promise<boolean>;
-  fileExists: (filePath: string) => Promise<boolean>;
-  createDir: (directoryPath: string) => Promise<boolean>;
-  listFiles: (directoryPath?: string) => Promise<string[]>;
-
-  // Git-Native Operations
-  gitDiff: (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ) => Promise<string>;
-  gitLog: (filePath?: string, maxCommits?: number) => Promise<LogEntry[]>;
-  getChangedFiles: () => Promise<string[]>;
-  commitChanges: (message: string) => Promise<string>;
-
-  // Intelligent Graph Operations
-  queryGraph: (query: string) => Promise<GraphQueryResult[]>;
-  getBacklinks: (filePath: string) => Promise<string[]>;
-  getOutgoingLinks: (filePath: string) => Promise<string[]>;
-  searchGlobal: (query: string) => Promise<string[]>;
-
-  // State Management
-  saveCheckpoint: () => Promise<boolean>;
-  revertToLastCheckpoint: () => Promise<boolean>;
-  discardChanges: () => Promise<boolean>;
-
-  // Utility
-  getGraphRoot: () => Promise<string>;
-  getTokenCount: (filePath: string) => Promise<number>;
-  getTokenCountForPaths: (paths: string[]) => Promise<PathTokenCount[]>;
-};
-````
-
-## File: .env.example
-````
-# Recursa MCP Server Configuration
-# Copy this file to .env and update the values
-
-# Required: Path to your knowledge graph directory
-KNOWLEDGE_GRAPH_PATH=./knowledge-graph
-
-# Required: OpenRouter API key for LLM access
-# Get your API key from: https://openrouter.ai/keys
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Required: API key for securing the Recursa server endpoint
-RECURSA_API_KEY=a-very-secret-key
-
-# Optional: Port for the HTTP server
-HTTP_PORT=8080
-
-# Optional: LLM model to use (default: anthropic/claude-3-haiku-20240307)
-# See https://openrouter.ai/models for a list of available models
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-
-# Optional: LLM Configuration
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4096
-
-# Optional: Sandbox Configuration (in milliseconds and megabytes)
-SANDBOX_TIMEOUT=30000
-SANDBOX_MEMORY_LIMIT=100
-
-# Optional: Git Configuration
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-
-# Usage:
-# 1. Copy this file: cp .env.example .env
-# 2. Update OPENROUTER_API_KEY and RECURSA_API_KEY with your actual keys
-# 3. Update KNOWLEDGE_GRAPH_PATH to point to your knowledge graph
-# 4. Run the server: npm run dev
-````
-
-## File: src/core/llm.ts
-````typescript
-import { generateText } from 'ai';
-import { openrouter } from '@openrouter/ai-sdk-provider';
-import type { AppConfig } from '../config';
-import { logger } from '../lib/logger.js';
-import type { ChatMessage } from '../types';
-
-export const queryLLM = async (
-  history: ChatMessage[],
-  config: AppConfig
-): Promise<string> => {
+/**
+ * Get canonical path by resolving symlinks and normalizing
+ * @param filePath The path to canonicalize
+ * @returns The canonical absolute path
+ */
+export const getCanonicalPath = (filePath: string): string => {
   try {
-    // Set environment variables for the default openrouter provider
-    process.env.OPENROUTER_API_KEY = config.openRouterApiKey;
-    process.env['HTTP-REFERER'] = 'https://github.com/rec/ursa';
-    process.env['X-TITLE'] = 'Recursa';
-
-    const model = openrouter(config.llmModel);
-
-    // 2. Separate system prompt from the rest of the message history
-    const systemPrompt = history.find((m) => m.role === 'system')?.content;
-    const messages = history.filter(
-      (m) => m.role === 'user' || m.role === 'assistant'
-    );
-
-    // 3. Call the AI SDK's generateText function
-    const { text } = await generateText({
-      model,
-      system: systemPrompt,
-      messages,
-      temperature: config.llmTemperature,
-      maxTokens: config.llmMaxTokens,
-    });
-
-    // 4. Validate and return the response
-    if (!text) {
-      throw new Error('Empty content received from OpenRouter API');
-    }
-
-    return text;
-  } catch (error) {
-    logger.error('Failed to query OpenRouter API', error as Error);
-    // Re-throw the error to be handled by the agent loop
-    throw new Error(
-      `Failed to query OpenRouter API: ${(error as Error).message}`
-    );
+    // Use realpath to resolve all symlinks and normalize
+    const canonical = fs.realpathSync(filePath);
+    return platform.normalizePath(canonical);
+  } catch {
+    // If path doesn't exist, return normalized path
+    return platform.normalizePath(path.resolve(filePath));
   }
 };
 
-// The AI SDK's underlying `fetch` implementation (`ofetch`) has built-in retry logic
-// for transient network errors and 5xx server errors, so our custom `withRetry` HOF is no longer needed.
-// We export `queryLLM` as `queryLLMWithRetries` to maintain the same interface for the agent loop.
-export const queryLLMWithRetries = queryLLM as (
-  ...args: unknown[]
-) => Promise<unknown>;
+/**
+ * Validate that a path is within allowed bounds
+ * @param allowedRoot The root directory that's allowed
+ * @param testPath The path to test
+ * @param options Additional validation options
+ * @returns True if path is valid and within bounds
+ */
+export const validatePathBounds = (
+  allowedRoot: string,
+  testPath: string,
+  options: {
+    allowSymlinks?: boolean;
+    requireExistence?: boolean;
+    followSymlinks?: boolean;
+  } = {}
+): boolean => {
+  const {
+    allowSymlinks = false,
+    requireExistence = false,
+    followSymlinks = true
+  } = options;
+
+  try {
+    const canonicalRoot = getCanonicalPath(allowedRoot);
+    let canonicalTarget: string;
+    
+    // Handle non-existent paths specially
+    try {
+      canonicalTarget = getCanonicalPath(testPath);
+    } catch {
+      // Path doesn't exist, use normalized path instead
+      canonicalTarget = platform.normalizePath(path.resolve(testPath));
+    }
+
+    // If we shouldn't follow symlinks, check if the target itself is a symlink
+    if (!followSymlinks) {
+      try {
+        if (fs.lstatSync(testPath).isSymbolicLink()) {
+          if (!allowSymlinks) {
+            return false;
+          }
+          // Use lstat to get the symlink itself, not its target
+          canonicalTarget = platform.normalizePath(path.resolve(testPath));
+        }
+      } catch {
+        // File doesn't exist, which is fine for write operations
+        // The canonicalTarget from resolveSecurePath is still valid
+      }
+    }
+
+    // Check if the target path exists (if required)
+    if (requireExistence && !fs.existsSync(canonicalTarget)) {
+      return false;
+    }
+
+    // Final security check
+    const isSecure = platform.hasCaseInsensitiveFS
+      ? canonicalTarget.toLowerCase().startsWith(canonicalRoot.toLowerCase())
+      : canonicalTarget.startsWith(canonicalRoot);
+
+    return isSecure;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Sanitize a user-provided path to remove dangerous components
+ * @param userPath The user-provided path
+ * @returns A sanitized path string
+ */
+export const sanitizePath = (userPath: string): string => {
+  // Remove null bytes and other dangerous characters
+  let sanitized = userPath.replace(/\0/g, '');
+
+  // Handle Windows-specific path patterns
+  if (platform.isWindows) {
+    // Remove drive letter switching attempts
+    sanitized = sanitized.replace(/^[a-zA-Z]:[\\/]/, '');
+    // Remove UNC path attempts
+    sanitized = sanitized.replace(/^\\\\[\\?]/, '');
+    // Remove device namespace access attempts
+    sanitized = sanitized.replace(/^\\\\\.\\[a-zA-Z]/, '');
+  }
+
+  // Remove excessive path separators
+  const separator = platform.pathSeparator;
+  const doubleSeparator = separator + separator;
+  while (sanitized.includes(doubleSeparator)) {
+    sanitized = sanitized.replace(doubleSeparator, separator);
+  }
+
+  // Normalize relative path components
+  const parts = sanitized.split(separator);
+  const filteredParts: string[] = [];
+
+  for (const part of parts) {
+    if (part === '..') {
+      // Don't allow going above the current directory in user input
+      continue;
+    }
+    if (part === '.' || part === '') {
+      continue;
+    }
+    filteredParts.push(part);
+  }
+
+  return filteredParts.join(separator);
+};
+
+/**
+ * Sanitize a tenant ID to ensure it's a safe directory name.
+ * @param tenantId The user-provided tenant ID.
+ * @returns A sanitized, safe-to-use tenant ID.
+ * @throws If the tenantId is empty or becomes empty after sanitization.
+ */
+export const sanitizeTenantId = (tenantId: string): string => {
+  if (!tenantId || !tenantId.trim()) {
+    throw new Error('Tenant ID cannot be empty.');
+  }
+
+  // Remove potentially dangerous characters and patterns.
+  // This regex replaces any character that is not a letter, number, hyphen, or underscore.
+  const sanitized = tenantId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  if (!sanitized) {
+    throw new Error('Sanitized tenant ID is empty, please provide a valid ID.');
+  }
+
+  return sanitized;
+};
+
+/**
+ * Security error class for path traversal attempts
+ */
+export class SecurityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SecurityError';
+
+    // Maintain proper stack trace for where our error was thrown (only available on V8)
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, SecurityError);
+    }
+  }
+}
+
+/**
+ * Cross-platform path validation utilities
+ */
+export const pathValidation = {
+  /**
+   * Check if a path contains potentially dangerous patterns
+   */
+  isDangerousPath(userPath: string): boolean {
+    // Check for common traversal patterns
+    const dangerousPatterns = [
+      /\.\.[/\\]/,    // ../ or ..\
+      /[/\\]\.\./,    // /.. or \..
+      /\0/,          // null byte injection
+      /[/\\]\0/,      // null byte with separator
+    ];
+
+    // Windows-specific dangerous patterns
+    if (platform.isWindows) {
+      dangerousPatterns.push(
+        /^[a-zA-Z]:[/\\].*[/\\][a-zA-Z]:[/\\]/, // drive letter switching
+        /^\\\\/,                                 // UNC paths
+        /\\\\\.\\[a-zA-Z]/,                      // device namespace
+        /[/\\]CON$|[/\\]PRN$|[/\\]AUX$|[/\\]COM\d$|[/\\]LPT\d$/i // reserved names
+      );
+    }
+
+    return dangerousPatterns.some(pattern => pattern.test(userPath));
+  },
+
+  /**
+   * Validate and sanitize a user path in one step
+   */
+  validateAndSanitizePath(graphRoot: string, userPath: string): string {
+    if (this.isDangerousPath(userPath)) {
+      throw new SecurityError(`Dangerous path pattern detected: ${userPath}`);
+    }
+
+    const sanitizedPath = sanitizePath(userPath);
+    return resolveSecurePath(graphRoot, sanitizedPath);
+  }
+};
+
+export default {
+  resolveSecurePath,
+  getCanonicalPath,
+  validatePathBounds,
+  sanitizePath,
+  sanitizeTenantId,
+  SecurityError,
+  pathValidation
+};
 ````
 
 ## File: src/config.ts
@@ -4006,6 +2922,21 @@ export const verifyTestFiles = async (
 };
 
 /**
+ * Creates a tenant-specific workspace directory within the test harness.
+ * @param harness The test harness state.
+ * @param tenantId The ID of the tenant.
+ */
+export const setupTenantWorkspace = async (
+  harness: TestHarnessState,
+  tenantId: string
+): Promise<void> => {
+  // Note: handleUserQuery also creates this, but this helper is useful
+  // for explicit setup or pre-populating a tenant's workspace.
+  const tenantPath = path.join(harness.tempDir, tenantId);
+  await fs.mkdir(tenantPath, { recursive: true });
+};
+
+/**
  * Creates a mock LLM query function for testing purposes.
  * This replaces the duplicate Mock LLM utilities found across different test files.
  *
@@ -4088,747 +3019,6 @@ export const createMockHistory = (
 ];
 ````
 
-## File: tasks.md
-````markdown
-# Tasks
-
-Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
-
-## Part 1: Purge `any` Types to Enforce Strict Type Safety
-
-### Task 1.1: Harden Emitter with `unknown`
-
-- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
-- **files**: src/lib/events.ts
-
-### Task 1.2: Add Strict Types to MCP E2E Test
-
-- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
-- **files**: tests/e2e/mcp-protocol.test.ts
-
-## Part 2: Abstract Test Environment Setup (DRY)
-
-### Task 2.1: Create a `TestHarness` for Environment Management
-
-- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: []
-- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
-- **files**: tests/lib/test-harness.ts (new)
-
-### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
-
-- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
-- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Part 3: Consolidate Mock LLM Utility (DRY)
-
-### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
-
-- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
-- **files**: tests/lib/test-harness.ts
-
-### Task 3.2: Refactor Tests to Use Shared LLM Mock
-
-- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
-- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
-- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Audit Task
-
-### Task A.1: Final Audit and Merge
-
-- **uuid**: audit-001
-- **status**: todo
-- **job-id**:
-- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
-- **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
-````
-
-## File: tests/unit/llm.test.ts
-````typescript
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { queryLLM } from '../../src/core/llm';
-import { generateText } from 'ai';
-import { openrouter } from '@openrouter/ai-sdk-provider';
-import type { AppConfig } from '../../src/config';
-import type { ChatMessage } from '../../src/types';
-
-// Mock the Vercel AI SDK and the OpenRouter provider
-jest.mock('ai', () => ({
-  generateText: jest.fn(),
-}));
-
-jest.mock('@openrouter/ai-sdk-provider', () => ({
-  openrouter: jest.fn((modelId: string) => ({
-    modelId,
-    provider: 'mockOpenRouterProvider',
-  })),
-}));
-
-// Cast the mocked functions to Jest's mock type for type safety
-const mockGenerateText = generateText as jest.MockedFunction<typeof generateText>;
-const mockOpenRouter = openrouter as unknown as jest.Mock;
-
-const mockConfig: AppConfig = {
-  openRouterApiKey: 'test-api-key',
-  knowledgeGraphPath: '/test/path',
-  recursaApiKey: 'test-api-key',
-  httpPort: 8080,
-  llmModel: 'anthropic/claude-3-haiku-20240307',
-  llmTemperature: 0.7,
-  llmMaxTokens: 4000,
-  sandboxTimeout: 10000,
-  sandboxMemoryLimit: 100,
-  gitUserName: 'Test User',
-  gitUserEmail: 'test@example.com',
-};
-
-const mockHistory: ChatMessage[] = [
-  { role: 'system', content: 'You are a helpful assistant.' },
-  { role: 'user', content: 'Hello, world!' },
-  { role: 'assistant', content: 'How can I help you?' },
-];
-
-beforeEach(() => {
-  // Clear all mock history and implementations before each test
-  jest.clearAllMocks();
-});
-
-describe('LLM Module with AI SDK', () => {
-  it('should call generateText with correct parameters', async () => {
-    // Arrange: Mock the successful response from the AI SDK
-    mockGenerateText.mockResolvedValue({
-      text: 'Test response from AI SDK',
-      toolCalls: [],
-      toolResults: [],
-      finishReason: 'stop',
-      usage: {
-        promptTokens: 10,
-        completionTokens: 20,
-        totalTokens: 30,
-      },
-      warnings: undefined,
-      request: {
-        body: '{}',
-      },
-      response: {
-        id: 'test-response-id',
-        timestamp: new Date(),
-        modelId: 'anthropic/claude-3-haiku-20240307',
-        headers: {},
-        messages: [],
-      },
-      logprobs: undefined,
-      experimental_providerMetadata: undefined,
-    });
-
-    // Act: Call our queryLLM function
-    const response = await queryLLM(mockHistory, mockConfig);
-
-    // Assert: Check the response and that our mocks were called correctly
-    expect(response).toBe('Test response from AI SDK');
-
-    // Verify openrouter was called with the correct model ID
-    expect(mockOpenRouter).toHaveBeenCalledTimes(1);
-    expect(mockOpenRouter).toHaveBeenCalledWith('anthropic/claude-3-haiku-20240307');
-
-    // Verify generateText was called correctly
-    expect(mockGenerateText).toHaveBeenCalledTimes(1);
-    expect(mockGenerateText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: {
-          modelId: 'anthropic/claude-3-haiku-20240307',
-          provider: 'mockOpenRouterProvider',
-        },
-        system: 'You are a helpful assistant.',
-        messages: [
-          { role: 'user', content: 'Hello, world!' },
-          { role: 'assistant', content: 'How can I help you?' },
-        ],
-        temperature: 0.7,
-        maxTokens: 4000,
-      })
-    );
-  });
-
-  it('should handle API errors from generateText', async () => {
-    // Arrange: Mock an error being thrown from the AI SDK
-    const apiError = new Error('API request failed');
-    mockGenerateText.mockRejectedValue(apiError);
-
-    // Act & Assert: Expect our queryLLM function to reject with a specific error message
-    await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-      'Failed to query OpenRouter API: API request failed'
-    );
-  });
-
-  it('should handle empty content in the AI SDK response', async () => {
-    // Arrange: Mock a response with an empty text field
-    mockGenerateText.mockResolvedValue({
-      text: '',
-      toolCalls: [],
-      toolResults: [],
-      finishReason: 'stop',
-      usage: {
-        promptTokens: 10,
-        completionTokens: 20,
-        totalTokens: 30,
-      },
-      warnings: undefined,
-      request: {
-        body: '{}',
-      },
-      response: {
-        id: 'test-response-id',
-        timestamp: new Date(),
-        modelId: 'anthropic/claude-3-haiku-20240307',
-        headers: {},
-        messages: [],
-      },
-      logprobs: undefined,
-      experimental_providerMetadata: undefined,
-    });
-
-    // Act & Assert: Expect an error for empty content
-    await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(
-      'Failed to query OpenRouter API: Empty content received from OpenRouter API'
-    );
-  });
-});
-````
-
-## File: tests/integration/workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  jest,
-} from '@jest/globals';
-import { handleUserQuery } from '../../src/core/loop';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  createMockLLMQueryWithSpy,
-  type TestHarnessState,
-} from '../lib/test-harness';
-
-describe('Agent Workflow Integration Tests', () => {
-  let harness: TestHarnessState;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should initialize a new project from scratch', async () => {
-    const sessionId = 'project-init';
-    const initMockLLMQuery = createMockLLMQueryWithSpy([
-      `<think>I'll initialize a new project with basic structure.</think>
-<typescript>
-await mem.writeFile('package.json', JSON.stringify({ name: 'test-project', version: '1.0.0' }, null, 2));
-await mem.writeFile('README.md', '- # Test Project');
-await mem.commitChanges('feat: initialize project');
-</typescript>
-<reply>Project initialized successfully.</reply>`,
-    ]);
-
-    const result = await handleUserQuery(
-      'Initialize a new Node.js project',
-      harness.mockConfig,
-      sessionId,
-      'run-1',
-      initMockLLMQuery,
-      async () => {}
-    );
-
-    expect(result).toBe('Project initialized successfully.');
-    expect(await harness.mem.fileExists('package.json')).toBe(true);
-    expect(await harness.mem.fileExists('README.md')).toBe(true);
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: initialize project');
-  });
-
-  it('should add features to an existing project', async () => {
-    // Setup: Create the initial project state
-    await harness.mem.writeFile(
-      'package.json',
-      JSON.stringify({ name: 'test-project' })
-    );
-    await harness.mem.writeFile('README.md', '- # Test Project');
-    await harness.mem.commitChanges('feat: initial project');
-
-    const sessionId = 'project-features';
-    const featureMockLLMQuery = createMockLLMQueryWithSpy([
-      `<think>I'll add features to the existing project.</think>
-<typescript>
-await mem.createDir('src');
-await mem.writeFile('src/utils.js', '// Utility functions');
-await mem.commitChanges('feat: add utilities');
-</typescript>
-<reply>Added utility functions.</reply>`,
-    ]);
-
-    const result = await handleUserQuery(
-      'Add utilities to the project',
-      harness.mockConfig,
-      sessionId,
-      'run-2',
-      featureMockLLMQuery,
-      async () => {}
-    );
-
-    expect(result).toBe('Added utility functions.');
-    expect(await harness.mem.fileExists('src/utils.js')).toBe(true);
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: add utilities');
-  });
-
-  it('should update existing files correctly', async () => {
-    // Setup: Create the initial project state
-    await harness.mem.writeFile('README.md', '- # Test Project');
-    await harness.mem.commitChanges('feat: initial project');
-
-    const sessionId = 'project-update';
-    const updateMockLLMQuery = createMockLLMQueryWithSpy([
-      `<think>I'll update the README.</think>
-<typescript>
-const content = await mem.readFile('README.md');
-const newContent = content + '\\n  - An update.';
-await mem.updateFile('README.md', content, newContent);
-await mem.commitChanges('docs: update README');
-</typescript>
-<reply>README updated.</reply>`,
-    ]);
-
-    const result = await handleUserQuery(
-      'Update the README',
-      harness.mockConfig,
-      sessionId,
-      'run-3',
-      updateMockLLMQuery,
-      async () => {}
-    );
-
-    expect(result).toBe('README updated.');
-    const readmeContent = await harness.mem.readFile('README.md');
-    expect(readmeContent).toContain('- An update.');
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('docs: update README');
-  });
-
-  it('should handle complex file operations like rename and delete', async () => {
-    const streamContentMock = jest.fn<(content: { type: 'text'; text: string }) => Promise<void>>();
-    await harness.mem.writeFile('docs/intro.md', '- # Introduction');
-    await harness.mem.commitChanges('docs: add intro');
-
-    const mockLLMQuery = createMockLLMQueryWithSpy([
-      `<think>I will rename a file, delete another, and update one.</think>
-<typescript>
-await mem.writeFile('docs/temp.md', '- # Temp');
-await mem.writeFile('docs/obsolete.md', '- # Obsolete');
-await mem.rename('docs/temp.md', 'docs/overview.md');
-await mem.deletePath('docs/obsolete.md');
-const intro = await mem.readFile('docs/intro.md');
-await mem.updateFile('docs/intro.md', intro, intro + '\\n  - Link to [[overview]]');
-await mem.commitChanges('feat: reorganize docs');
-</typescript>
-<reply>Docs reorganized.</reply>`,
-    ]);
-
-    const result = await handleUserQuery(
-      'Reorganize docs',
-      harness.mockConfig,
-      'complex-ops-session',
-      'run-complex',
-      mockLLMQuery,
-      streamContentMock
-    );
-
-    expect(result).toBe('Docs reorganized.');
-    expect(await harness.mem.fileExists('docs/overview.md')).toBe(true);
-    expect(await harness.mem.fileExists('docs/temp.md')).toBe(false);
-    expect(await harness.mem.fileExists('docs/obsolete.md')).toBe(false);
-    const introContent = await harness.mem.readFile('docs/intro.md');
-    expect(introContent).toContain('[[overview]]');
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: reorganize docs');
-  });
-
-  it('should recover from a file-not-found error', async () => {
-    const streamContentMock = jest.fn<
-      (content: { type: 'text'; text: string }) => Promise<void>
-    >();
-    const mockLLMQuery = createMockLLMQueryWithSpy([
-      `<think>I will try to read a file that does not exist.</think>
-<typescript>
-try {
-  await mem.readFile('non-existent.md');
-} catch (e) {
-  console.log('Caught expected error');
-  await mem.writeFile('non-existent.md', '- # Created After Error');
-}
-</typescript>`,
-      `<think>Committing the new file.</think>
-<typescript>
-await mem.commitChanges('fix: create missing file after read error');
-</typescript>
-<reply>Handled error and created file.</reply>`,
-    ]);
-
-    const result = await handleUserQuery(
-      'Test error recovery',
-      harness.mockConfig,
-      'error-test-session',
-      'run-error',
-      mockLLMQuery,
-      streamContentMock
-    );
-
-    expect(result).toBe('Handled error and created file.');
-    expect(await harness.mem.fileExists('non-existent.md')).toBe(true);
-    const content = await harness.mem.readFile('non-existent.md');
-    expect(content).toBe('- # Created After Error');
-  });
-});
-````
-
-## File: src/core/mem-api/file-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import { resolveSecurePath, validatePathBounds } from './secure-path.js';
-import platform from '../../lib/platform.js';
-import { validateLogseqContent } from '../../lib/logseq-validator.js';
-
-// Note: Each function here is a HOF that takes dependencies (like graphRoot)
-// and returns the actual function to be exposed on the mem API.
-
-/**
- * Cross-platform file operation utilities with enhanced error handling
- */
-
-/**
- * Atomic file write with temporary file and proper cleanup
- */
-const atomicWriteFile = async (filePath: string, content: string): Promise<void> => {
-  const tempPath = filePath + '.tmp.' + Math.random().toString(36).substr(2, 9);
-
-  try {
-    // Write to temporary file first
-    await fs.writeFile(tempPath, content, 'utf-8');
-
-    // On Windows, we need to handle file locking differently
-    if (platform.isWindows) {
-      // Try to rename, if it fails due to locking, wait and retry
-      let retries = 3;
-      let lastError: Error | null = null;
-
-      while (retries > 0) {
-        try {
-          await fs.rename(tempPath, filePath);
-          return; // Success
-        } catch (error: unknown) {
-          lastError = error as Error;
-          if (hasErrorCode(error) && (error.code === 'EBUSY' || error.code === 'EPERM')) {
-            retries--;
-            await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
-            continue;
-          }
-          throw error; // Re-throw non-locking errors
-        }
-      }
-      throw lastError;
-    } else {
-      // Unix-like systems can usually rename directly
-      await fs.rename(tempPath, filePath);
-    }
-  } catch (error) {
-    // Clean up temp file if something went wrong
-    try {
-      await fs.unlink(tempPath);
-    } catch {
-      // Ignore cleanup errors
-    }
-    throw error;
-  }
-};
-
-/**
- * Type guard to check if error has a code property
- */
-const hasErrorCode = (error: unknown): error is Error & { code?: string } => {
-  return error instanceof Error && 'code' in error;
-};
-
-/**
- * Enhanced error handler for file operations
- */
-const handleFileError = (error: unknown, operation: string, filePath: string): Error => {
-  const nodeError = error as NodeJS.ErrnoException;
-
-  // Handle platform-specific errors
-  if (nodeError.code === 'EACCES' || nodeError.code === 'EPERM') {
-    if (platform.isWindows) {
-      return new Error(`Permission denied for ${operation} on ${filePath}. The file may be in use or you may need administrator privileges.`);
-    }
-    if (platform.isTermux) {
-      return new Error(`Permission denied for ${operation} on ${filePath}. Check Termux storage permissions.`);
-    }
-    return new Error(`Permission denied for ${operation} on ${filePath}. Check file permissions.`);
-  }
-
-  if (nodeError.code === 'EMFILE' || nodeError.code === 'ENFILE') {
-    return new Error(`Too many files open for ${operation} on ${filePath}. Close some files and try again.`);
-  }
-
-  if (nodeError.code === 'ENOSPC') {
-    return new Error(`No space left on device for ${operation} on ${filePath}.`);
-  }
-
-  if (nodeError.code === 'EROFS') {
-    return new Error(`Read-only file system: Cannot perform ${operation} on ${filePath}.`);
-  }
-
-  if (nodeError.code === 'EBUSY') {
-    return new Error(`Resource busy: Cannot perform ${operation} on ${filePath} as it is in use.`);
-  }
-
-  return new Error(`Failed to ${operation.toLowerCase()} ${filePath}: ${nodeError.message}`);
-};
-
-/**
- * Ensure parent directories exist with proper error handling
- */
-const ensureParentDirectories = async (filePath: string): Promise<void> => {
-  const dir = path.dirname(filePath);
-
-  try {
-    await fs.mkdir(dir, { recursive: true });
-  } catch (error: unknown) {
-    if (hasErrorCode(error) && error.code !== 'EEXIST') {
-      throw handleFileError(error, 'create parent directories', dir);
-    }
-  }
-};
-
-export const readFile =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation for symlink safety
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      return await fs.readFile(fullPath, 'utf-8');
-    } catch (error) {
-      throw handleFileError(error, 'read file', filePath);
-    }
-  };
-
-export const writeFile =
-  (graphRoot: string) =>
-  async (filePath: string, content: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      if (filePath.endsWith('.md')) {
-        const validation = validateLogseqContent(content);
-        if (!validation.isValid) {
-          throw new Error(
-            `Invalid Logseq content for ${filePath}: ${validation.errors.join(
-              ', '
-            )}`
-          );
-        }
-      }
-
-      // Additional validation - allow non-existent files for write operations
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false, requireExistence: false })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      // Ensure parent directories exist
-      await ensureParentDirectories(fullPath);
-
-      // Use atomic write for data safety
-      await atomicWriteFile(fullPath, content);
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'write file', filePath);
-    }
-  };
-
-export const updateFile =
-  (graphRoot: string) =>
-  async (
-    filePath: string,
-    oldContent: string,
-    newContent: string
-  ): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      if (filePath.endsWith('.md')) {
-        const validation = validateLogseqContent(newContent);
-        if (!validation.isValid) {
-          throw new Error(
-            `Invalid Logseq content for ${filePath}: ${validation.errors.join(
-              ', '
-            )}`
-          );
-        }
-      }
-
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      // Atomically read and compare the file content.
-      const currentContent = await fs.readFile(fullPath, 'utf-8');
-
-      // This is a Compare-and-Swap (CAS) operation.
-      // If the content on disk is not what the agent *thinks* it is,
-      // another process (or agent turn) has modified it. We must abort.
-      if (currentContent !== oldContent) {
-        throw new Error(
-          `File content has changed since it was last read for ${filePath}. Update aborted to prevent data loss.`
-        );
-      }
-
-      // Write the new content back using atomic write.
-      await atomicWriteFile(fullPath, newContent);
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'update file', filePath);
-    }
-  };
-
-export const deletePath =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${filePath}`);
-      }
-
-      await fs.rm(fullPath, { recursive: true, force: true });
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'delete path', filePath);
-    }
-  };
-
-export const rename =
-  (graphRoot: string) =>
-  async (oldPath: string, newPath: string): Promise<boolean> => {
-    const fullOldPath = resolveSecurePath(graphRoot, oldPath);
-    const fullNewPath = resolveSecurePath(graphRoot, newPath);
-
-    try {
-      // Additional validation for both paths
-      if (!validatePathBounds(graphRoot, fullOldPath, { followSymlinks: false }) ||
-          !validatePathBounds(graphRoot, fullNewPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for rename operation`);
-      }
-
-      // Ensure parent directory of new path exists
-      await ensureParentDirectories(fullNewPath);
-
-      await fs.rename(fullOldPath, fullNewPath);
-      return true;
-    } catch (error) {
-      throw handleFileError(error, `rename ${oldPath} to ${newPath}`, oldPath);
-    }
-  };
-
-export const fileExists =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<boolean> => {
-    try {
-      // resolveSecurePath will throw a SecurityError on traversal attempts.
-      // fs.access will throw an error if the file doesn't exist.
-      // Both should result in `false`.
-      const fullPath = resolveSecurePath(graphRoot, filePath);
-      await fs.access(fullPath);
-      return true;
-    } catch {
-      // Any error (security, not found, permissions) results in false.
-      return false;
-    }
-  };
-
-export const createDir =
-  (graphRoot: string) =>
-  async (directoryPath: string): Promise<boolean> => {
-    const fullPath = resolveSecurePath(graphRoot, directoryPath);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: false })) {
-        throw new Error(`Security violation: Path validation failed for ${directoryPath}`);
-      }
-
-      await fs.mkdir(fullPath, { recursive: true });
-      return true;
-    } catch (error) {
-      throw handleFileError(error, 'create directory', directoryPath);
-    }
-  };
-
-export const listFiles =
-  (graphRoot: string) =>
-  async (directoryPath?: string): Promise<string[]> => {
-    const targetDir = directoryPath ? directoryPath : '.';
-    const fullPath = resolveSecurePath(graphRoot, targetDir);
-
-    try {
-      // Additional validation
-      if (!validatePathBounds(graphRoot, fullPath, { followSymlinks: true })) {
-        throw new Error(`Security violation: Path validation failed for directory ${directoryPath || 'root'}`);
-      }
-
-      const entries = await fs.readdir(fullPath, { withFileTypes: true });
-      return entries.map((entry) => entry.name).sort(); // Sort for consistent ordering
-    } catch (error) {
-      throw handleFileError(error, `list files in directory`, directoryPath || 'root');
-    }
-  };
-````
-
 ## File: package.json
 ````json
 {
@@ -4892,6 +3082,7 @@ import { queryLLMWithRetries as defaultQueryLLM } from './llm.js';
 import { parseLLMResponse } from './parser.js';
 import { runInSandbox } from './sandbox.js';
 import { createMemAPI } from './mem-api/index.js';
+import { sanitizeTenantId } from './mem-api/secure-path.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -4977,25 +3168,40 @@ export const handleUserQuery = async (
     history: ChatMessage[],
     config: AppConfig
   ) => Promise<string | unknown>) = defaultQueryLLM,
-  streamContent: (content: { type: 'text'; text: string }) => Promise<void>
+  streamContent: (content: { type: 'text'; text: string }) => Promise<void>,
+  tenantId?: string
 ): Promise<string> => {
   // 1. **Initialization**
   logger.info('Starting user query handling', {
     runId,
     sessionId: sessionId,
+    tenantId,
   });
 
-  const memAPI = createMemAPI(config);
+  // Determine the graph root for this request (tenant-specific or global)
+  let graphRoot: string;
+  if (tenantId) {
+    const sanitizedId = sanitizeTenantId(tenantId);
+    graphRoot = path.join(config.knowledgeGraphPath, sanitizedId);
+    // Ensure the tenant directory exists
+    await fs.mkdir(graphRoot, { recursive: true });
+  } else {
+    graphRoot = config.knowledgeGraphPath;
+  }
+
+  // The MemAPI is now created per-request with a tenant-aware config.
+  const memAPI = createMemAPI({ ...config, knowledgeGraphPath: graphRoot });
 
   // Initialize or retrieve session history
-  const loadedHistory = await loadSessionHistory(sessionId, config.knowledgeGraphPath);
+  const loadedHistory = await loadSessionHistory(sessionId, graphRoot);
   const history = loadedHistory || [await getSystemPrompt()];
   history.push({ role: 'user', content: query });
 
   const context: ExecutionContext = {
     history,
     memAPI,
-    config,
+    // Pass the potentially tenant-scoped config to the context
+    config: { ...config, knowledgeGraphPath: graphRoot },
     runId,
     streamContent,
   };
@@ -5073,7 +3279,7 @@ export const handleUserQuery = async (
     }
 
     // Persist history at the end of the turn
-    await saveSessionHistory(sessionId, config.knowledgeGraphPath, context.history);
+    await saveSessionHistory(sessionId, graphRoot, context.history);
 
     // **Reply**
     if (parsedResponse.reply) {
@@ -5088,365 +3294,90 @@ export const handleUserQuery = async (
 };
 ````
 
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt",
-      "scripts",
-      "docs",
-      "coverage"
-      //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
-````
-
-## File: src/core/mem-api/graph-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path.js';
-import { walk } from './fs-walker.js';
-import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
-
-type PropertyCondition = {
-  type: 'property';
-  key: string;
-  value: string;
-};
-
-type OutgoingLinkCondition = {
-  type: 'outgoing-link';
-  target: string;
-};
-
-type Condition = PropertyCondition | OutgoingLinkCondition;
-
-const parseCondition = (conditionStr: string): Condition | null => {
-  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-  let match = conditionStr.trim().match(propertyRegex);
-  if (match?.[1] && match[2]) {
-    return {
-      type: 'property',
-      key: match[1].trim(),
-      value: match[2].trim(),
-    };
-  }
-
-  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
-  match = conditionStr.trim().match(linkRegex);
-  if (match?.[1]) {
-    return {
-      type: 'outgoing-link',
-      target: match[1].trim(),
-    };
-  }
-
-  return null;
-};
-
-const checkCondition = (content: string, condition: Condition): string[] => {
-  const matches: string[] = [];
-  if (condition.type === 'property') {
-    const lines = content.split('\n');
-    for (const line of lines) {
-      // Handle indented properties by removing the leading list marker
-      const trimmedLine = line.trim().replace(/^- /, '');
-      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
-        matches.push(line);
-      }
-    }
-  } else if (condition.type === 'outgoing-link') {
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const outgoingLinks = new Set(
-      Array.from(content.matchAll(linkRegex), (m) => m[1])
-    );
-    if (outgoingLinks.has(condition.target)) {
-      // Return a generic match since we don't have a specific line
-      matches.push(`[[${condition.target}]]`);
-    }
-  }
-  return matches;
-};
-
-export const queryGraph =
-  (graphRoot: string) =>
-  async (query: string): Promise<GraphQueryResult[]> => {
-    const conditionStrings = query.split(/ AND /i);
-    const conditions = conditionStrings
-      .map(parseCondition)
-      .filter((c): c is Condition => c !== null);
-
-    if (conditions.length === 0) {
-      return [];
-    }
-
-    const results: GraphQueryResult[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      if (!filePath.endsWith('.md')) continue;
-
-      const content = await fs.readFile(filePath, 'utf-8');
-      const allMatchingLines: string[] = [];
-      let allConditionsMet = true;
-
-      for (const condition of conditions) {
-        const matchingLines = checkCondition(content, condition);
-        if (matchingLines.length > 0) {
-          allMatchingLines.push(...matchingLines);
-        } else {
-          allConditionsMet = false;
-          break;
-        }
-      }
-
-      if (allConditionsMet) {
-        results.push({
-          filePath: path.relative(graphRoot, filePath),
-          matches: allMatchingLines,
-        });
-      }
-    }
-    return results;
-  };
-
-export const getBacklinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const targetWithoutExt = path.basename(filePath, path.extname(filePath));
-    const targetWithExt = path.basename(filePath);
-
-    const backlinks: string[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
-      // Don't link to self
-      if (path.resolve(currentFilePath) === resolveSecurePath(graphRoot, filePath)) {
-        continue;
-      }
-
-      if (currentFilePath.endsWith('.md')) {
-        try {
-          const content = await fs.readFile(currentFilePath, 'utf-8');
-          // Extract all outgoing links from the current file
-          const linkRegex = /\[\[(.*?)\]\]/g;
-          const matches = content.matchAll(linkRegex);
-
-          for (const match of matches) {
-            if (match[1]) {
-              const linkTarget = match[1].trim();
-              // Check if this link points to our target file
-              // Try matching against various possible formats:
-              // - Exact basename without extension (e.g., "PageC")
-              // - Exact basename with extension (e.g., "PageC.md")
-              // - With spaces (e.g., "Page C" for "PageC")
-              if (linkTarget === targetWithoutExt ||
-                  linkTarget === targetWithExt ||
-                  linkTarget.replace(/\s+/g, '') === targetWithoutExt ||
-                  linkTarget.replace(/\s+/g, '') === targetWithExt) {
-                backlinks.push(path.relative(graphRoot, currentFilePath));
-                break; // Found a match, no need to check more links in this file
-              }
-            }
-          }
-        } catch {
-          // Ignore files that can't be read
-        }
-      }
-    }
-    return backlinks;
-  };
-
-export const getOutgoingLinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    const content = await fs.readFile(fullPath, 'utf-8');
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const matches = content.matchAll(linkRegex);
-    const uniqueLinks = new Set<string>();
-
-    for (const match of matches) {
-      if (match[1]) {
-        uniqueLinks.add(match[1]);
-      }
-    }
-    return Array.from(uniqueLinks);
-  };
-
-export const searchGlobal =
-  (graphRoot: string) =>
-  async (query: string): Promise<string[]> => {
-    const matchingFiles: string[] = [];
-    const lowerCaseQuery = query.toLowerCase();
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        if (content.toLowerCase().includes(lowerCaseQuery)) {
-          matchingFiles.push(path.relative(graphRoot, filePath));
-        }
-      } catch {
-        // Ignore binary files or files that can't be read
-      }
-    }
-    return matchingFiles;
-  };
-````
-
-## File: src/core/sandbox.ts
-````typescript
-import { createContext, runInContext } from 'node:vm';
-import type { MemAPI } from '../types/mem';
-import { logger } from '../lib/logger.js';
-
-/**
- * Executes LLM-generated TypeScript code in a secure, isolated sandbox.
- * @param code The TypeScript code snippet to execute.
- * @param memApi The MemAPI instance to expose to the sandboxed code.
- * @returns The result of the code execution.
- */
-export const runInSandbox = async (
-  code: string,
-  memApi: MemAPI,
-  timeout = 10000
-): Promise<unknown> => {
-  // Create a sandboxed context with the mem API and only essential globals
-  const context = createContext({
-    mem: memApi,
-    // Essential JavaScript globals
-    console: {
-      log: (...args: unknown[]) =>
-        logger.info('Sandbox console.log', { arguments: args }),
-      error: (...args: unknown[]) =>
-        logger.error('Sandbox console.error', undefined, {
-          arguments: args,
-        }),
-      warn: (...args: unknown[]) =>
-        logger.warn('Sandbox console.warn', { arguments: args }),
-    },
-    // Promise and async support
-    Promise,
-    setTimeout: (fn: () => void, delay: number) => {
-      if (delay > 1000) {
-        throw new Error('Timeout too long');
-      }
-      return setTimeout(fn, Math.min(delay, 10000));
-    },
-    clearTimeout,
-    // Basic types and constructors
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    Date,
-    Math,
-    JSON,
-    RegExp,
-    Error,
-  });
-
-  // Wrap the user code in an async IIFE to allow top-level await.
-  // Ensure the code is properly formatted and doesn't have syntax errors
-  const wrappedCode = `(async () => {
-${code}
-  })();`;
-
-  try {
-    logger.debug('Executing code in sandbox', { code, timeout });
-    const result = await runInContext(wrappedCode, context, {
-      timeout, // Use provided timeout
-      displayErrors: true,
-    });
-    logger.debug('Sandbox execution successful', {
-      result,
-      type: typeof result,
-    });
-    return result;
-  } catch (error) {
-    const errorMessage = (error as Error).message;
-    logger.error('Error executing sandboxed code', error as Error, { 
-      code,
-      wrappedCode: wrappedCode.substring(0, 800) + '...' // Log first 800 chars for debugging
-    });
-    
-    // Provide more specific error messages for common issues
-    if (errorMessage.includes('Invalid or unexpected token')) {
-      throw new Error(`Sandbox execution failed: Syntax error in code. This usually indicates unescaped quotes or malformed JavaScript. Original error: ${errorMessage}`);
-    } else if (errorMessage.includes('timeout')) {
-      throw new Error(`Sandbox execution failed: Code execution timed out after ${timeout}ms`);
-    } else {
-      throw new Error(`Sandbox execution failed: ${errorMessage}`);
-    }
-  }
-};
-````
-
 ## File: src/server.ts
 ````typescript
-import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
-import { loadAndValidateConfig } from './config.js';
+import { loadAndValidateConfig, type AppConfig } from './config.js';
 import { FastMCP, UserError, type Context } from 'fastmcp';
 import { z } from 'zod';
-import { queryLLMWithRetries } from './core/llm.js';
 import { IncomingMessage } from 'http';
+import { createMemAPI } from './core/mem-api/index.js';
+import { memApiSchemas } from './mcp-schemas.js';
+import { sanitizeTenantId } from './core/mem-api/secure-path.js';
+import path from 'path';
+import { promises as fs } from 'fs';
+import type { MemAPI } from './types/index.js';
 
 interface SessionContext extends Record<string, unknown> {
   sessionId: string;
   requestId: string;
+  tenantId: string;
   stream: {
     write: (content: { type: 'text'; text: string }) => Promise<void>;
   };
 }
+
+const registerMemAPITools = (
+  server: FastMCP<SessionContext>,
+  config: AppConfig
+) => {
+  const tempMemAPI = createMemAPI(config);
+  const toolNames = Object.keys(tempMemAPI) as Array<keyof MemAPI>;
+
+  for (const toolName of toolNames) {
+    const schema = memApiSchemas[toolName];
+    if (!schema) {
+      logger.warn(`No schema found for tool: ${toolName}. Skipping registration.`);
+      continue;
+    }
+
+    server.addTool({
+      name: `mem.${toolName}`,
+      description: `Knowledge graph operation: ${toolName}`,
+      parameters: schema,
+      execute: async (args, context: Context<SessionContext>) => {
+        const { log, session } = context;
+        const { tenantId } = session!;
+
+        if (!tenantId) {
+          throw new UserError(
+            'tenantId is missing. All operations must be tenant-scoped.'
+          );
+        }
+
+        try {
+          // Create a tenant-specific, request-scoped MemAPI instance
+          const tenantGraphRoot = path.join(
+            config.knowledgeGraphPath,
+            sanitizeTenantId(tenantId)
+          );
+
+          await fs.mkdir(tenantGraphRoot, { recursive: true });
+
+          const tenantConfig = { ...config, knowledgeGraphPath: tenantGraphRoot };
+          const mem = createMemAPI(tenantConfig);
+
+          // Dynamically call the corresponding MemAPI function
+          const fn = mem[toolName] as (...args: any[]) => Promise<any>;
+          const result = await fn(...Object.values(args));
+
+          // FastMCP handles serialization of common return types (string, boolean, array, object)
+          return result;
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          log.error(`Error in mem.${toolName}: ${errorMessage}`, {
+            tool: toolName,
+            args,
+            error,
+          });
+          throw new UserError(errorMessage);
+        }
+      },
+    });
+  }
+  logger.info(`Registered ${toolNames.length} MemAPI tools.`);
+};
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
@@ -5459,6 +3390,7 @@ const main = async () => {
     const server = new FastMCP<SessionContext>({
       name: 'recursa-server',
       version: '0.1.0',
+      logger, // Integrate structured logger
       authenticate: async (request: IncomingMessage) => {
         const authHeader = request.headers['authorization'];
         const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
@@ -5475,83 +3407,31 @@ const main = async () => {
           });
         }
 
-        // For simplicity, we'll create minimal session context
-        // In a real implementation, you might extract more session info from the request
-        return {
-          sessionId: 'default-session', // You'd typically generate or extract this
-          requestId: 'default-request', // You'd typically generate or extract this
-          stream: {
-            write: async () => {}, // Placeholder - actual stream will be provided by FastMCP
-          },
-        } as SessionContext;
-      },
-    });
+        const tenantIdHeader = request.headers['x-tenant-id'];
+        const tenantId = Array.isArray(tenantIdHeader)
+          ? tenantIdHeader[0]
+          : tenantIdHeader;
 
-    // 3. Add resources
-    server.addResource({
-      uri: `file://${config.knowledgeGraphPath}`,
-      name: 'Knowledge Graph Root',
-      mimeType: 'text/directory',
-      description: 'Root directory of the knowledge graph',
-      async load() {
+        if (!tenantId || !tenantId.trim()) {
+          logger.warn('Tenant ID missing', {
+            remoteAddress: request.socket?.remoteAddress,
+          });
+          throw new Response(null, {
+            status: 400,
+            statusText: 'Bad Request: x-tenant-id header is required.',
+          });
+        }
+
         return {
-          text: `This resource represents the root of the knowledge graph at ${config.knowledgeGraphPath}. It cannot be loaded directly.`,
+          sessionId: 'default-session', // FastMCP will manage real session IDs
+          requestId: 'default-request', // FastMCP will manage real request IDs
+          tenantId: tenantId.trim(),
+          stream: { write: async () => {} }, // Placeholder, FastMCP provides implementation
         };
       },
     });
 
-    // 4. Add tools
-    server.addTool({
-      name: 'process_query',
-      description:
-        'Processes a high-level user query by running the agent loop.',
-      parameters: z.object({
-        query: z.string().describe('The user query to process.'),
-      }),
-      execute: async (args, context: Context<SessionContext>) => {
-        const { log, session } = context;
-        const { sessionId, requestId, stream } = session!;
-        if (!sessionId) {
-          throw new UserError(
-            'Session ID is missing. This tool requires a session.'
-          );
-        }
-        if (!requestId) {
-          throw new UserError(
-            'Request ID is missing. This tool requires a request ID.'
-          );
-        }
-        if (!stream) {
-          throw new UserError('This tool requires a streaming connection.');
-        }
-
-        try {
-          const streamContent = (content: { type: 'text'; text: string }) => {
-            return stream.write(content);
-          };
-
-          const finalReply = await handleUserQuery(
-            args.query,
-            config,
-            sessionId,
-            requestId,
-            queryLLMWithRetries,
-            streamContent
-          );
-
-          return finalReply;
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          const errorContext =
-            error instanceof Error
-              ? { message: error.message, stack: error.stack }
-              : { message: errorMessage };
-          log.error(`Error in process_query: ${errorMessage}`, errorContext);
-          throw new UserError(errorMessage);
-        }
-      },
-    });
+    registerMemAPITools(server, config);
 
     // 5. Start the server
     await server.start({

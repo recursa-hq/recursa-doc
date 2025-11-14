@@ -7,6 +7,16 @@ discrepancy analysis
 
 programmatic API
 
+===
+
+let's create test cases as guardrails of real non interactive mcp inspector docs/mcp.inspector.md no mock spy . so we have ;
+
+1. production ready mcp server as per docs/fastmcp.doc.md
+2. all tools exposed as per docs/tools.md
+3. all transport works
+4. etc
+
+because ibelieve current mcp server implement is not even done.
 
 ===
 

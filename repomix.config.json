@@ -27,7 +27,19 @@
       "includeLogsCount": 50
     }
   },
-  "include": [],
+  "include": [
+  "tests/e2e/mcp-server.test.ts",
+  "src/server.ts",
+  "tests/lib/test-harness.ts",
+  "src/config.ts",
+  "docs/fastmcp.doc.md",
+  "package.json",
+  "src/mcp-schemas.ts",
+  "src/core/mem-api/secure-path.ts",
+  "tests/e2e/mcp-workflow.test.ts",
+  "src/core/loop.ts",
+  "docs/tools.md",
+  ],
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
@@ -39,7 +51,7 @@
       "repo",
       "prompt",
       "scripts",
-      "docs",
+    //  "docs",
       "coverage"
       //   "tests"
     ]
