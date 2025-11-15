@@ -4,6 +4,7 @@ import { generateText } from 'ai';
 import { openrouter } from '@openrouter/ai-sdk-provider';
 import type { AppConfig } from '../../src/config';
 import type { ChatMessage } from '../../src/types';
+import type { GenerateTextResult } from 'ai';
 
 // Mock the Vercel AI SDK and the OpenRouter provider
 jest.mock('ai', () => ({
@@ -51,6 +52,11 @@ describe('LLM Module with AI SDK', () => {
     // Arrange: Mock the successful response from the AI SDK
     mockGenerateText.mockResolvedValue({
       text: 'Test response from AI SDK',
+      reasoning: undefined,
+      files: [],
+      reasoningDetails: [],
+      sources: [],
+      experimental_output: undefined as never,
       toolCalls: [],
       toolResults: [],
       finishReason: 'stop',
@@ -60,6 +66,7 @@ describe('LLM Module with AI SDK', () => {
         totalTokens: 30,
       },
       warnings: undefined,
+      steps: [],
       request: {
         body: '{}',
       },
@@ -69,10 +76,11 @@ describe('LLM Module with AI SDK', () => {
         modelId: 'anthropic/claude-3-haiku-20240307',
         headers: {},
         messages: [],
+        body: undefined,
       },
       logprobs: undefined,
       experimental_providerMetadata: undefined,
-    });
+    } as unknown as GenerateTextResult<{}, never>);
 
     // Act: Call our queryLLM function
     const response = await queryLLM(mockHistory, mockConfig);
@@ -118,6 +126,11 @@ describe('LLM Module with AI SDK', () => {
     // Arrange: Mock a response with an empty text field
     mockGenerateText.mockResolvedValue({
       text: '',
+      reasoning: undefined,
+      files: [],
+      reasoningDetails: [],
+      sources: [],
+      experimental_output: undefined as never,
       toolCalls: [],
       toolResults: [],
       finishReason: 'stop',
@@ -127,6 +140,7 @@ describe('LLM Module with AI SDK', () => {
         totalTokens: 30,
       },
       warnings: undefined,
+      steps: [],
       request: {
         body: '{}',
       },
@@ -136,10 +150,11 @@ describe('LLM Module with AI SDK', () => {
         modelId: 'anthropic/claude-3-haiku-20240307',
         headers: {},
         messages: [],
+        body: undefined,
       },
       logprobs: undefined,
       experimental_providerMetadata: undefined,
-    });
+    } as unknown as GenerateTextResult<{}, never>);
 
     // Act & Assert: Expect an error for empty content
     await expect(queryLLM(mockHistory, mockConfig)).rejects.toThrow(

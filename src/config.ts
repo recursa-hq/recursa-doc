@@ -1,8 +1,19 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { z } from 'zod';
 import path from 'path';
 import { promises as fs } from 'fs';
 import platform from './lib/platform.js';
+
+// Load environment-specific .env file
+if (process.env.NODE_ENV === 'test') {
+  dotenv.config({ path: '.env.test' });
+} else if (process.env.NODE_ENV === 'development') {
+  dotenv.config({ path: '.env.development' });
+} else if (process.env.NODE_ENV === 'production') {
+  dotenv.config({ path: '.env.production' });
+} else {
+  dotenv.config(); // Default .env
+}
 
 // Platform-specific default values
 const getPlatformDefaults = () => {

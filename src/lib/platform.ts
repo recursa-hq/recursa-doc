@@ -2,6 +2,9 @@
  * Platform detection and utilities for cross-platform compatibility
  */
 
+import path from 'path';
+import { existsSync, readFileSync } from 'fs';
+
 export const platform = {
   /** Current operating system platform */
   isWindows: process.platform === 'win32',
@@ -22,8 +25,8 @@ export const platform = {
     return this.isLinux && (
       process.env.WSL_DISTRO_NAME !== undefined ||
       process.env.WSLENV !== undefined ||
-      require('fs').existsSync('/proc/version') &&
-      require('fs').readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
+      existsSync('/proc/version') &&
+      readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
     );
   },
 
@@ -66,7 +69,7 @@ export const platform = {
 
   /** Path normalization for cross-platform */
   normalizePath(p: string): string {
-    const normalized = require('path').normalize(p);
+    const normalized = path.normalize(p);
     if (this.isWindows) {
       return normalized.replace(/\//g, '\\');
     }
@@ -76,9 +79,9 @@ export const platform = {
   /** Check if path is absolute */
   isAbsolute(p: string): boolean {
     if (this.isWindows) {
-      return /^[A-Za-z]:\\|\\\\/.test(p) || require('path').isAbsolute(p);
+      return /^[A-Za-z]:\\|\\\\/.test(p) || path.isAbsolute(p);
     }
-    return require('path').isAbsolute(p);
+    return path.isAbsolute(p);
   },
 
   /** Get platform-specific resource limits */

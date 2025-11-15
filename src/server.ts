@@ -56,6 +56,27 @@ const registerMemAPITools = (
 
           await fs.mkdir(tenantGraphRoot, { recursive: true });
 
+          // Initialize git repository for tenant if it doesn't exist
+          const gitRepoPath = path.join(tenantGraphRoot, '.git');
+          try {
+            await fs.access(gitRepoPath);
+          } catch {
+            // Git repository doesn't exist, initialize it
+            const simpleGit = await import('simple-git');
+            const tenantGit = simpleGit.default(tenantGraphRoot);
+            await tenantGit.init();
+            await tenantGit.addConfig('user.name', config.gitUserName || 'Recursa Agent');
+            await tenantGit.addConfig('user.email', config.gitUserEmail || 'recursa@local');
+
+            // Create a basic .gitignore
+            await fs.writeFile(
+              path.join(tenantGraphRoot, '.gitignore'),
+              '*.log\nnode_modules/\n.env\n.DS_Store\n'
+            );
+            await tenantGit.add('.gitignore');
+            await tenantGit.commit('Initial commit');
+          }
+
           const tenantConfig = { ...config, knowledgeGraphPath: tenantGraphRoot };
           const mem = createMemAPI(tenantConfig);
 
@@ -63,7 +84,30 @@ const registerMemAPITools = (
           const fn = mem[toolName] as (...args: any[]) => Promise<any>;
           const result = await fn(...Object.values(args));
 
-          // FastMCP handles serialization of common return types (string, boolean, array, object)
+          // FastMCP handles serialization automatically for most types
+          // Convert various types to string representation for FastMCP compatibility
+          if (typeof result === 'string') {
+            return result; // FastMCP will wrap this properly
+          }
+
+          if (typeof result === 'boolean') {
+            return result ? 'true' : 'false';
+          }
+
+          if (typeof result === 'number') {
+            return result.toString();
+          }
+
+          // Ensure array responses are properly formatted for FastMCP
+          if (Array.isArray(result)) {
+            return JSON.stringify(result);
+          }
+
+          // Ensure object responses are properly formatted
+          if (typeof result === 'object' && result !== null) {
+            return JSON.stringify(result);
+          }
+
           return result;
         } catch (error) {
           const errorMessage =
@@ -99,35 +143,38 @@ const main = async () => {
           ? authHeader.slice(7)
           : null;
 
-        if (!token || token !== config.recursaApiKey) {
-          logger.warn('Authentication failed', {
+        if (!token) {
+          logger.warn('Authentication failed: No Bearer token provided', {
             remoteAddress: request.socket?.remoteAddress, // Best effort IP logging
           });
           throw new Response(null, {
             status: 401,
-            statusText: 'Unauthorized',
+            statusText: 'Unauthorized: Bearer token required',
           });
         }
 
-        const tenantIdHeader = request.headers['x-tenant-id'];
-        const tenantId = Array.isArray(tenantIdHeader)
-          ? tenantIdHeader[0]
-          : tenantIdHeader;
+        // Use the Bearer token as the tenant ID directly
+        const tenantId = token.trim();
 
-        if (!tenantId || !tenantId.trim()) {
-          logger.warn('Tenant ID missing', {
+        if (!tenantId) {
+          logger.warn('Tenant ID missing: Empty Bearer token', {
             remoteAddress: request.socket?.remoteAddress,
           });
           throw new Response(null, {
-            status: 400,
-            statusText: 'Bad Request: x-tenant-id header is required.',
+            status: 401,
+            statusText: 'Unauthorized: Bearer token cannot be empty',
           });
         }
 
+        logger.info('Authenticated request', {
+          tenantId,
+          remoteAddress: request.socket?.remoteAddress,
+        });
+
         return {
-          sessionId: 'default-session', // FastMCP will manage real session IDs
+          sessionId: `session-${tenantId}`, // FastMCP will manage real session IDs
           requestId: 'default-request', // FastMCP will manage real request IDs
-          tenantId: tenantId.trim(),
+          tenantId: tenantId,
           stream: { write: async () => {} }, // Placeholder, FastMCP provides implementation
         };
       },
@@ -135,15 +182,34 @@ const main = async () => {
 
     registerMemAPITools(server, config);
 
-    // 5. Start the server
-    await server.start({
-      transportType: 'httpStream',
-      httpStream: { port: config.httpPort, endpoint: '/mcp' },
-    });
+    // 5. Start the server with enhanced error handling
+    logger.info(`Attempting to start MCP server on port ${config.httpPort}...`);
 
-    logger.info(
-      `Recursa MCP Server is running and listening on http://localhost:${config.httpPort}`
-    );
+    try {
+      await server.start({
+        transportType: 'httpStream',
+        httpStream: { port: config.httpPort, endpoint: '/mcp', stateless: true },
+      });
+
+      logger.info(
+        `✅ Recursa MCP Server is running and listening on http://localhost:${config.httpPort}/mcp`
+      );
+      logger.info(`📋 Configuration: HTTP_PORT=${config.httpPort}, KNOWLEDGE_GRAPH_PATH=${config.knowledgeGraphPath}`);
+    } catch (startError) {
+      logger.error('❌ Failed to start MCP server', startError as Error);
+      logger.error(`💡 Port ${config.httpPort} may be in use or configuration is invalid`);
+      logger.error(`🔧 Check environment variables and port availability`);
+
+      if (startError instanceof Error) {
+        if (startError.message.includes('EADDRINUSE')) {
+          logger.error(`🚨 Port ${config.httpPort} is already in use. Please free the port or change HTTP_PORT environment variable.`);
+        } else if (startError.message.includes('EACCES')) {
+          logger.error(`🔒 Permission denied accessing port ${config.httpPort}. Try using a port > 1024 or run with elevated privileges.`);
+        }
+      }
+
+      throw startError;
+    }
   } catch (error) {
     logger.error('Failed to start server', error as Error);
     process.exit(1);

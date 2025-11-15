@@ -24,6 +24,8 @@ export interface TestHarnessOptions {
   model?: string;
   /** Whether to initialize with a .gitignore file, defaults to true */
   withGitignore?: boolean;
+  /** Whether to skip port validation, useful when using external MCP server */
+  skipPortValidation?: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export const createTestHarness = async (
     apiKey = 'test-api-key',
     model = 'test-model',
     withGitignore = true,
+    skipPortValidation = false,
   } = options;
 
   // Create temporary directory
@@ -70,6 +73,11 @@ export const createTestHarness = async (
     gitUserName: gitUserName,
     gitUserEmail: gitEmail,
   };
+
+  // Validate port availability before proceeding (unless skipped)
+  if (!skipPortValidation) {
+    await validatePortAvailability(mockConfig.httpPort);
+  }
 
   // Initialize git repository
   const git = simpleGit(tempDir);
@@ -104,6 +112,28 @@ export const createTestHarness = async (
 const hasErrorCode = (error: unknown): error is { code: string } => {
   return typeof error === 'object' && error !== null && 'code' in error;
 };
+
+/**
+ * Validates that a port is available for use.
+ * @param port - The port number to validate
+ * @throws Error if the port is not available
+ */
+const validatePortAvailability = async (port: number): Promise<void> => {
+  try {
+    const net = await import('net');
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.listen(port, () => {
+        server.close();
+        resolve();
+      });
+      server.on('error', reject);
+    });
+  } catch (error) {
+    throw new Error(`Port ${port} is not available for test harness. Another process may be using it.`);
+  }
+};
+
 
 /**
  * Cleans up a test harness by removing the temporary directory

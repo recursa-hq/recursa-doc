@@ -18,7 +18,8 @@ describe('MemAPI Graph Ops Integration Tests', () => {
 
   beforeEach(async () => {
     // Disable .gitignore for these tests so we can correctly search .log files
-    harness = await createTestHarness({ withGitignore: false });
+    harness = await createTestHarness({
+      skipPortValidation: true, withGitignore: false });
     mem = harness.mem;
   });
 
