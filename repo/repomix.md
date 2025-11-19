@@ -1,6 +1,9 @@
 # Directory Structure
 ```
+bin/
+  recursa-mcp
 docs/
+  inspector.mcp.md
   rules.md
   system-prompt.md
   tools.md
@@ -36,6 +39,7 @@ src/
 tests/
   e2e/
     agent-workflow.test.ts
+    inspector-coverage.test.ts
     mcp-tools.test.ts
     mcp-workflow.test.ts
   integration/
@@ -46,6 +50,7 @@ tests/
     mem-api-util-ops.test.ts
     workflow.test.ts
   lib/
+    inspector-harness.ts
     test-harness.ts
     test-util.ts
   unit/
@@ -61,537 +66,902 @@ Dockerfile
 eslint.config.js
 INSTALL_TERMUX.md
 jest.config.js
+LICENSE
 package.json
 README.md
 relay.config.json
 repomix.config.json
-tasks.md
 tsconfig.json
 tsconfig.tsbuildinfo
+tsup.config.ts
 ```
 
 # Files
 
-## File: src/lib/platform.ts
-````typescript
-/**
- * Platform detection and utilities for cross-platform compatibility
- */
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+## File: bin/recursa-mcp
+````
+#!/usr/bin/env node
 
-export const platform = {
-  /** Current operating system platform */
-  isWindows: process.platform === 'win32',
-  isMacOS: process.platform === 'darwin',
-  isLinux: process.platform === 'linux',
-  isAndroid: process.platform === 'android',
+// Handle import.meta for CommonJS compatibility
+if (typeof global.import_meta2 === 'undefined') {
+  global.import_meta2 = { url: import.meta ? import.meta.url : `file://${__filename}` };
+}
 
-  /** Termux environment detection */
-  get isTermux(): boolean {
-    return this.isAndroid ||
-           process.env.TERMUX === 'true' ||
-           process.env.PREFIX?.includes('/com.termux') ||
-           process.env.TERMUX_VERSION !== undefined;
-  },
-
-  /** WSL (Windows Subsystem for Linux) detection */
-  get isWSL(): boolean {
-    return this.isLinux && (
-      process.env.WSL_DISTRO_NAME !== undefined ||
-      process.env.WSLENV !== undefined ||
-      fs.existsSync('/proc/version') &&
-      fs.readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
-    );
-  },
-
-  /** File system capabilities */
-  get hasCaseInsensitiveFS(): boolean {
-    return this.isWindows || this.isMacOS;
-  },
-
-  get hasFilePermissions(): boolean {
-    return !this.isWindows;
-  },
-
-  get supportsSymlinks(): boolean {
-    return this.isLinux || this.isMacOS || this.isWSL;
-  },
-
-  get supportsHardLinks(): boolean {
-    return this.isLinux || this.isMacOS;
-  },
-
-  /** Path separator */
-  get pathSeparator(): string {
-    return this.isWindows ? '\\' : '/';
-  },
-
-  /** Line ending */
-  get lineEnding(): string {
-    return this.isWindows ? '\r\n' : '\n';
-  },
-
-  /** Executable file extensions */
-  get executableExtensions(): string[] {
-    return this.isWindows ? ['.exe', '.bat', '.cmd'] : [];
-  },
-
-  /** Environment variable normalization */
-  normalizeEnvVar(key: string): string {
-    return this.isWindows ? key.toUpperCase() : key;
-  },
-
-  /** Path normalization for cross-platform */
-  normalizePath(p: string): string {
-    const normalized = path.normalize(p);
-    if (this.isWindows) {
-      return normalized.replace(/\//g, '\\');
-    }
-    return normalized.replace(/\\/g, '/');
-  },
-
-  /** Check if path is absolute */
-  isAbsolute(p: string): boolean {
-    if (this.isWindows) {
-      return /^[A-Za-z]:\\|\\\\/.test(p) || path.isAbsolute(p);
-    }
-    return path.isAbsolute(p);
-  },
-
-  /** Get platform-specific resource limits */
-  getResourceLimits() {
-    const limits = {
-      maxMemory: 512 * 1024 * 1024, // 512MB default
-      maxCpuTime: 30000, // 30 seconds default
-      maxFileSize: 10 * 1024 * 1024, // 10MB default
-      maxProcesses: 10,
-    };
-
-    if (this.isTermux) {
-      // More conservative limits for mobile environments
-      return {
-        ...limits,
-        maxMemory: 256 * 1024 * 1024, // 256MB
-        maxCpuTime: 15000, // 15 seconds
-        maxFileSize: 5 * 1024 * 1024, // 5MB
-        maxProcesses: 5,
-      };
-    }
-
-    return limits;
-  },
-
-  /** Get platform-specific temp directory */
-  getTempDir(): string {
-    if (this.isWindows) {
-      return process.env.TEMP || process.env.TMP || path.join(os.tmpdir(), 'recursa');
-    }
-
-    return process.env.TMPDIR || os.tmpdir();
-  },
-
-  /** Get platform-specific user data directory */
-  getUserDataDir(appName: string = 'recursa'): string {
-    const homeDir = os.homedir();
-
-    if (this.isWindows) {
-      return process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming', appName);
-    }
-
-    if (this.isMacOS) {
-      return path.join(homeDir, 'Library', 'Application Support', appName);
-    }
-
-    // Linux, Android, etc.
-    return process.env.XDG_DATA_HOME || path.join(homeDir, '.local', 'share', appName);
-  },
-
-  /** Platform-specific error handling */
-  handleFileError(error: Error & { code?: string }, operation: string, filePath?: string): Error {
-    const message = filePath ? `${operation} failed for ${filePath}` : `${operation} failed`;
-
-    if (this.isWindows) {
-      // Windows-specific error codes and messages
-      if (error.code === 'EPERM') {
-        return new Error(`${message}: Permission denied. Try running as administrator.`);
-      }
-      if (error.code === 'EBUSY') {
-        return new Error(`${message}: File is in use by another process.`);
-      }
-    }
-
-    if (this.isTermux) {
-      // Termux/Android specific errors
-      if (error.code === 'EACCES') {
-        return new Error(`${message}: Permission denied. Check storage permissions.`);
-      }
-    }
-
-    return new Error(`${message}: ${error.message}`);
-  },
-
-  /** Platform detection string for logging */
-  get platformString(): string {
-    const parts: string[] = [process.platform, process.arch];
-
-    if (this.isTermux) parts.push('termux');
-    if (this.isWSL) parts.push('wsl');
-
-    return parts.join('-');
-  },
-
-  /** Feature detection */
-  async detectFeatures(): Promise<Record<string, boolean>> {
-    const fsp = fs.promises;
-    const features: Record<string, boolean> = {};
-
-    // Test symlink support
-    try {
-      const testFile = path.join(this.getTempDir(), 'symlink-test');
-      await fsp.writeFile(testFile, 'test');
-      const linkFile = testFile + '-link';
-      await fsp.symlink(testFile, linkFile);
-      await fsp.unlink(linkFile);
-      await fsp.unlink(testFile);
-      features.symlinks = true;
-    } catch {
-      features.symlinks = false;
-    }
-
-    // Test hard link support
-    try {
-      const testFile = path.join(this.getTempDir(), 'hardlink-test');
-      await fsp.writeFile(testFile, 'test');
-      const linkFile = testFile + '-hard';
-      await fsp.link(testFile, linkFile);
-      await fsp.unlink(linkFile);
-      await fsp.unlink(testFile);
-      features.hardLinks = true;
-    } catch {
-      features.hardLinks = false;
-    }
-
-    // Test file permissions
-    try {
-      const testFile = path.join(this.getTempDir(), 'perm-test');
-      await fsp.writeFile(testFile, 'test');
-      await fsp.chmod(testFile, 0o755);
-      await fsp.unlink(testFile);
-      features.filePermissions = true;
-    } catch {
-      features.filePermissions = false;
-    }
-
-    return features;
-  }
-};
-
-export default platform;
+// Import the server - use relative path from bin directory
+import('../dist/server.js').catch(err => {
+  console.error('Failed to start Recursa MCP server:', err);
+  process.exit(1);
+});
 ````
 
-## File: tests/e2e/mcp-tools.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  jest,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  createMockQueryLLM,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import { getFreePort } from '../lib/test-util';
-import { createMcpServer } from '../../src/server';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-// Polyfill EventSource for Node.js environment
-import EventSource from 'eventsource';
+## File: docs/inspector.mcp.md
+````markdown
+# MCP Inspector
 
-// @ts-ignore
-global.EventSource = EventSource;
+The MCP inspector is a developer tool for testing and debugging MCP servers.
 
-describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
-  let harness: TestHarnessState;
-  let server: any;
-  let client: Client;
-  let serverPort: number;
+![MCP Inspector Screenshot](https://raw.githubusercontent.com/modelcontextprotocol/inspector/main/mcp-inspector.png)
 
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
+## Architecture Overview
 
-  afterEach(async () => {
-    if (client) {
-      await client.close();
+The MCP Inspector consists of two main components that work together:
+
+- **MCP Inspector Client (MCPI)**: A React-based web UI that provides an interactive interface for testing and debugging MCP servers
+- **MCP Proxy (MCPP)**: A Node.js server that acts as a protocol bridge, connecting the web UI to MCP servers via various transport methods (stdio, SSE, streamable-http)
+
+Note that the proxy is not a network proxy for intercepting traffic. Instead, it functions as both an MCP client (connecting to your MCP server) and an HTTP server (serving the web UI), enabling browser-based interaction with MCP servers that use different transport protocols.
+
+## Running the Inspector
+
+### Requirements
+
+- Node.js: ^22.7.5
+
+### Quick Start (UI mode)
+
+To get up and running right away with the UI, just execute the following:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+The server will start up and the UI will be accessible at `http://localhost:6274`.
+
+### Docker Container
+
+You can also start it in a Docker container with the following command:
+
+```bash
+docker run --rm --network host -p 6274:6274 -p 6277:6277 ghcr.io/modelcontextprotocol/inspector:latest
+```
+
+### From an MCP server repository
+
+To inspect an MCP server implementation, there's no need to clone this repo. Instead, use `npx`. For example, if your server is built at `build/index.js`:
+
+```bash
+npx @modelcontextprotocol/inspector node build/index.js
+```
+
+You can pass both arguments and environment variables to your MCP server. Arguments are passed directly to your server, while environment variables can be set using the `-e` flag:
+
+```bash
+# Pass arguments only
+npx @modelcontextprotocol/inspector node build/index.js arg1 arg2
+
+# Pass environment variables only
+npx @modelcontextprotocol/inspector -e key=value -e key2=$VALUE2 node build/index.js
+
+# Pass both environment variables and arguments
+npx @modelcontextprotocol/inspector -e key=value -e key2=$VALUE2 node build/index.js arg1 arg2
+
+# Use -- to separate inspector flags from server arguments
+npx @modelcontextprotocol/inspector -e key=$VALUE -- node build/index.js -e server-flag
+```
+
+The inspector runs both an MCP Inspector (MCPI) client UI (default port 6274) and an MCP Proxy (MCPP) server (default port 6277). Open the MCPI client UI in your browser to use the inspector. (These ports are derived from the T9 dialpad mapping of MCPI and MCPP respectively, as a mnemonic). You can customize the ports if needed:
+
+```bash
+CLIENT_PORT=8080 SERVER_PORT=9000 npx @modelcontextprotocol/inspector node build/index.js
+```
+
+For more details on ways to use the inspector, see the [Inspector section of the MCP docs site](https://modelcontextprotocol.io/docs/tools/inspector). For help with debugging, see the [Debugging guide](https://modelcontextprotocol.io/docs/tools/debugging).
+
+### Servers File Export
+
+The MCP Inspector provides convenient buttons to export server launch configurations for use in clients such as Cursor, Claude Code, or the Inspector's CLI. The file is usually called `mcp.json`.
+
+- **Server Entry** - Copies a single server configuration entry to your clipboard. This can be added to your `mcp.json` file inside the `mcpServers` object with your preferred server name.
+
+  **STDIO transport example:**
+
+  ```json
+  {
+    "command": "node",
+    "args": ["build/index.js", "--debug"],
+    "env": {
+      "API_KEY": "your-api-key",
+      "DEBUG": "true"
     }
-    if (server) {
-      if (server.stop) await server.stop();
-    }
-    await cleanupTestHarness(harness);
-  });
+  }
+  ```
 
-  const startServerAndConnectClient = async (mockLLM: any) => {
-    // 1. Create Server with Mock LLM
-    server = await createMcpServer(harness.mockConfig, {
-      queryLLM: mockLLM,
-    });
+  **SSE transport example:**
 
-    // 2. Start Server on a free port using SSE
-    serverPort = await getFreePort();
-    
-    await server.start({
-      transportType: 'sse',
-      sse: { endpoint: '/sse', port: serverPort },
-    });
+  ```json
+  {
+    "type": "sse",
+    "url": "http://localhost:3000/events",
+    "note": "For SSE connections, add this URL directly in Client"
+  }
+  ```
 
-    // 3. Connect Client
-    const transport = new SSEClientTransport(
-      new URL(`http://localhost:${serverPort}/sse`)
-    );
-    client = new Client(
-      {
-        name: 'test-client',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {},
+  **Streamable HTTP transport example:**
+
+  ```json
+  {
+    "type": "streamable-http",
+    "url": "http://localhost:3000/mcp",
+    "note": "For Streamable HTTP connections, add this URL directly in your MCP Client"
+  }
+  ```
+
+- **Servers File** - Copies a complete MCP configuration file structure to your clipboard, with your current server configuration added as `default-server`. This can be saved directly as `mcp.json`.
+
+  **STDIO transport example:**
+
+  ```json
+  {
+    "mcpServers": {
+      "default-server": {
+        "command": "node",
+        "args": ["build/index.js", "--debug"],
+        "env": {
+          "API_KEY": "your-api-key",
+          "DEBUG": "true"
+        }
       }
+    }
+  }
+  ```
+
+  **SSE transport example:**
+
+  ```json
+  {
+    "mcpServers": {
+      "default-server": {
+        "type": "sse",
+        "url": "http://localhost:3000/events",
+        "note": "For SSE connections, add this URL directly in Client"
+      }
+    }
+  }
+  ```
+
+  **Streamable HTTP transport example:**
+
+  ```json
+  {
+    "mcpServers": {
+      "default-server": {
+        "type": "streamable-http",
+        "url": "http://localhost:3000/mcp",
+        "note": "For Streamable HTTP connections, add this URL directly in your MCP Client"
+      }
+    }
+  }
+  ```
+
+These buttons appear in the Inspector UI after you've configured your server settings, making it easy to save and reuse your configurations.
+
+For SSE and Streamable HTTP transport connections, the Inspector provides similar functionality for both buttons. The "Server Entry" button copies the configuration that can be added to your existing configuration file, while the "Servers File" button creates a complete configuration file containing the URL for direct use in clients.
+
+You can paste the Server Entry into your existing `mcp.json` file under your chosen server name, or use the complete Servers File payload to create a new configuration file.
+
+### Authentication
+
+The inspector supports bearer token authentication for SSE connections. Enter your token in the UI when connecting to an MCP server, and it will be sent in the Authorization header. You can override the header name using the input field in the sidebar.
+
+### Security Considerations
+
+The MCP Inspector includes a proxy server that can run and communicate with local MCP processes. The proxy server should not be exposed to untrusted networks as it has permissions to spawn local processes and can connect to any specified MCP server.
+
+#### Authentication
+
+The MCP Inspector proxy server requires authentication by default. When starting the server, a random session token is generated and printed to the console:
+
+```
+🔑 Session token: 3a1c267fad21f7150b7d624c160b7f09b0b8c4f623c7107bbf13378f051538d4
+
+🔗 Open inspector with token pre-filled:
+   http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=3a1c267fad21f7150b7d624c160b7f09b0b8c4f623c7107bbf13378f051538d4
+```
+
+This token must be included as a Bearer token in the Authorization header for all requests to the server. The inspector will automatically open your browser with the token pre-filled in the URL.
+
+**Automatic browser opening** - The inspector now automatically opens your browser with the token pre-filled in the URL when authentication is enabled.
+
+**Alternative: Manual configuration** - If you already have the inspector open:
+
+1. Click the "Configuration" button in the sidebar
+2. Find "Proxy Session Token" and enter the token displayed in the proxy console
+3. Click "Save" to apply the configuration
+
+The token will be saved in your browser's local storage for future use.
+
+If you need to disable authentication (NOT RECOMMENDED), you can set the `DANGEROUSLY_OMIT_AUTH` environment variable:
+
+```bash
+DANGEROUSLY_OMIT_AUTH=true npm start
+```
+
+---
+
+**🚨 WARNING 🚨**
+
+Disabling authentication with `DANGEROUSLY_OMIT_AUTH` is incredibly dangerous! Disabling auth leaves your machine open to attack not just when exposed to the public internet, but also **via your web browser**. Meaning, visiting a malicious website OR viewing a malicious advertizement could allow an attacker to remotely compromise your computer. Do not disable this feature unless you truly understand the risks.
+
+Read more about the risks of this vulnerability on Oligo's blog: [Critical RCE Vulnerability in Anthropic MCP Inspector - CVE-2025-49596](https://www.oligo.security/blog/critical-rce-vulnerability-in-anthropic-mcp-inspector-cve-2025-49596)
+
+---
+
+You can also set the token via the `MCP_PROXY_AUTH_TOKEN` environment variable when starting the server:
+
+```bash
+MCP_PROXY_AUTH_TOKEN=$(openssl rand -hex 32) npm start
+```
+
+#### Local-only Binding
+
+By default, both the MCP Inspector proxy server and client bind only to `localhost` to prevent network access. This ensures they are not accessible from other devices on the network. If you need to bind to all interfaces for development purposes, you can override this with the `HOST` environment variable:
+
+```bash
+HOST=0.0.0.0 npm start
+```
+
+**Warning:** Only bind to all interfaces in trusted network environments, as this exposes the proxy server's ability to execute local processes and both services to network access.
+
+#### DNS Rebinding Protection
+
+To prevent DNS rebinding attacks, the MCP Inspector validates the `Origin` header on incoming requests. By default, only requests from the client origin are allowed (respects `CLIENT_PORT` if set, defaulting to port 6274). You can configure additional allowed origins by setting the `ALLOWED_ORIGINS` environment variable (comma-separated list):
+
+```bash
+ALLOWED_ORIGINS=http://localhost:6274,http://localhost:8000 npm start
+```
+
+### Configuration
+
+The MCP Inspector supports the following configuration settings. To change them, click on the `Configuration` button in the MCP Inspector UI:
+
+| Setting                                 | Description                                                                                                                                         | Default |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `MCP_SERVER_REQUEST_TIMEOUT`            | Client-side timeout (ms) - Inspector will cancel the request if no response is received within this time. Note: servers may have their own timeouts | 300000  |
+| `MCP_REQUEST_TIMEOUT_RESET_ON_PROGRESS` | Reset timeout on progress notifications                                                                                                             | true    |
+| `MCP_REQUEST_MAX_TOTAL_TIMEOUT`         | Maximum total timeout for requests sent to the MCP server (ms) (Use with progress notifications)                                                    | 60000   |
+| `MCP_PROXY_FULL_ADDRESS`                | Set this if you are running the MCP Inspector Proxy on a non-default address. Example: http://10.1.1.22:5577                                        | ""      |
+| `MCP_AUTO_OPEN_ENABLED`                 | Enable automatic browser opening when inspector starts (works with authentication enabled). Only as environment var, not configurable in browser.   | true    |
+
+**Note on Timeouts:** The timeout settings above control when the Inspector (as an MCP client) will cancel requests. These are independent of any server-side timeouts. For example, if a server tool has a 10-minute timeout but the Inspector's timeout is set to 30 seconds, the Inspector will cancel the request after 30 seconds. Conversely, if the Inspector's timeout is 10 minutes but the server times out after 30 seconds, you'll receive the server's timeout error. For tools that require user interaction (like elicitation) or long-running operations, ensure the Inspector's timeout is set appropriately.
+
+These settings can be adjusted in real-time through the UI and will persist across sessions.
+
+The inspector also supports configuration files to store settings for different MCP servers. This is useful when working with multiple servers or complex configurations:
+
+```bash
+npx @modelcontextprotocol/inspector --config path/to/config.json --server everything
+```
+
+Example server configuration file:
+
+```json
+{
+  "mcpServers": {
+    "everything": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-everything"],
+      "env": {
+        "hello": "Hello MCP!"
+      }
+    },
+    "my-server": {
+      "command": "node",
+      "args": ["build/index.js", "arg1", "arg2"],
+      "env": {
+        "key": "value",
+        "key2": "value2"
+      }
+    }
+  }
+}
+```
+
+#### Transport Types in Config Files
+
+The inspector automatically detects the transport type from your config file. You can specify different transport types:
+
+**STDIO (default):**
+
+```json
+{
+  "mcpServers": {
+    "my-stdio-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-everything"]
+    }
+  }
+}
+```
+
+**SSE (Server-Sent Events):**
+
+```json
+{
+  "mcpServers": {
+    "my-sse-server": {
+      "type": "sse",
+      "url": "http://localhost:3000/sse"
+    }
+  }
+}
+```
+
+**Streamable HTTP:**
+
+```json
+{
+  "mcpServers": {
+    "my-http-server": {
+      "type": "streamable-http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+#### Default Server Selection
+
+You can launch the inspector without specifying a server name if your config has:
+
+1. **A single server** - automatically selected:
+
+```bash
+# Automatically uses "my-server" if it's the only one
+npx @modelcontextprotocol/inspector --config mcp.json
+```
+
+2. **A server named "default-server"** - automatically selected:
+
+```json
+{
+  "mcpServers": {
+    "default-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-everything"]
+    },
+    "other-server": {
+      "command": "node",
+      "args": ["other.js"]
+    }
+  }
+}
+```
+
+> **Tip:** You can easily generate this configuration format using the **Server Entry** and **Servers File** buttons in the Inspector UI, as described in the Servers File Export section above.
+
+You can also set the initial `transport` type, `serverUrl`, `serverCommand`, and `serverArgs` via query params, for example:
+
+```
+http://localhost:6274/?transport=sse&serverUrl=http://localhost:8787/sse
+http://localhost:6274/?transport=streamable-http&serverUrl=http://localhost:8787/mcp
+http://localhost:6274/?transport=stdio&serverCommand=npx&serverArgs=arg1%20arg2
+```
+
+You can also set initial config settings via query params, for example:
+
+```
+http://localhost:6274/?MCP_SERVER_REQUEST_TIMEOUT=60000&MCP_REQUEST_TIMEOUT_RESET_ON_PROGRESS=false&MCP_PROXY_FULL_ADDRESS=http://10.1.1.22:5577
+```
+
+Note that if both the query param and the corresponding localStorage item are set, the query param will take precedence.
+
+### From this repository
+
+If you're working on the inspector itself:
+
+Development mode:
+
+```bash
+npm run dev
+
+# To co-develop with the typescript-sdk package (assuming it's cloned in ../typescript-sdk; set MCP_SDK otherwise):
+npm run dev:sdk "cd sdk && npm run examples:simple-server:w"
+# then open http://localhost:3000/mcp as SHTTP in the inspector.
+# To go back to the deployed SDK version:
+#   npm run unlink:sdk && npm i
+```
+
+> **Note for Windows users:**
+> On Windows, use the following command instead:
+>
+> ```bash
+> npm run dev:windows
+> ```
+
+Production mode:
+
+```bash
+npm run build
+npm start
+```
+
+### CLI Mode
+
+CLI mode enables programmatic interaction with MCP servers from the command line, ideal for scripting, automation, and integration with coding assistants. This creates an efficient feedback loop for MCP server development.
+
+```bash
+npx @modelcontextprotocol/inspector --cli node build/index.js
+```
+
+The CLI mode supports most operations across tools, resources, and prompts. A few examples:
+
+```bash
+# Basic usage
+npx @modelcontextprotocol/inspector --cli node build/index.js
+
+# With config file
+npx @modelcontextprotocol/inspector --cli --config path/to/config.json --server myserver
+
+# List available tools
+npx @modelcontextprotocol/inspector --cli node build/index.js --method tools/list
+
+# Call a specific tool
+npx @modelcontextprotocol/inspector --cli node build/index.js --method tools/call --tool-name mytool --tool-arg key=value --tool-arg another=value2
+
+# Call a tool with JSON arguments
+npx @modelcontextprotocol/inspector --cli node build/index.js --method tools/call --tool-name mytool --tool-arg 'options={"format": "json", "max_tokens": 100}'
+
+# List available resources
+npx @modelcontextprotocol/inspector --cli node build/index.js --method resources/list
+
+# List available prompts
+npx @modelcontextprotocol/inspector --cli node build/index.js --method prompts/list
+
+# Connect to a remote MCP server (default is SSE transport)
+npx @modelcontextprotocol/inspector --cli https://my-mcp-server.example.com
+
+# Connect to a remote MCP server (with Streamable HTTP transport)
+npx @modelcontextprotocol/inspector --cli https://my-mcp-server.example.com --transport http --method tools/list
+
+# Connect to a remote MCP server (with custom headers)
+npx @modelcontextprotocol/inspector --cli https://my-mcp-server.example.com --transport http --method tools/list --header "X-API-Key: your-api-key"
+
+# Call a tool on a remote server
+npx @modelcontextprotocol/inspector --cli https://my-mcp-server.example.com --method tools/call --tool-name remotetool --tool-arg param=value
+
+# List resources from a remote server
+npx @modelcontextprotocol/inspector --cli https://my-mcp-server.example.com --method resources/list
+```
+
+### UI Mode vs CLI Mode: When to Use Each
+
+| Use Case                 | UI Mode                                                                   | CLI Mode                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Server Development**   | Visual interface for interactive testing and debugging during development | Scriptable commands for quick testing and continuous integration; creates feedback loops with AI coding assistants like Cursor for rapid development |
+| **Resource Exploration** | Interactive browser with hierarchical navigation and JSON visualization   | Programmatic listing and reading for automation and scripting                                                                                        |
+| **Tool Testing**         | Form-based parameter input with real-time response visualization          | Command-line tool execution with JSON output for scripting                                                                                           |
+| **Prompt Engineering**   | Interactive sampling with streaming responses and visual comparison       | Batch processing of prompts with machine-readable output                                                                                             |
+| **Debugging**            | Request history, visualized errors, and real-time notifications           | Direct JSON output for log analysis and integration with other tools                                                                                 |
+| **Automation**           | N/A                                                                       | Ideal for CI/CD pipelines, batch processing, and integration with coding assistants                                                                  |
+| **Learning MCP**         | Rich visual interface helps new users understand server capabilities      | Simplified commands for focused learning of specific endpoints                                                                                       |
+
+## Tool Input Validation Guidelines
+
+When implementing or modifying tool input parameter handling in the Inspector:
+
+- **Omit optional fields with empty values** - When processing form inputs, omit empty strings or null values for optional parameters, UNLESS the field has an explicit default value in the schema that matches the current value
+- **Preserve explicit default values** - If a field schema contains an explicit default (e.g., `default: null`), and the current value matches that default, include it in the request. This is a meaningful value the tool expects
+- **Always include required fields** - Preserve required field values even when empty, allowing the MCP server to validate and return appropriate error messages
+- **Defer deep validation to the server** - Implement basic field presence checking in the Inspector client, but rely on the MCP server for parameter validation according to its schema
+
+These guidelines maintain clean parameter passing and proper separation of concerns between the Inspector client and MCP servers.
+
+## License
+
+This project is licensed under the MIT License—see the [LICENSE](LICENSE) file for details.
+````
+
+## File: tests/e2e/inspector-coverage.test.ts
+````typescript
+import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
+import {
+  createInspectorHarness,
+  type InspectorHarnessContext,
+} from '../lib/inspector-harness';
+import fs from 'fs/promises';
+import path from 'path';
+
+// Increase timeout for E2E tests involving process spawning (npx is slow)
+jest.setTimeout(60000);
+
+describe('Inspector E2E Coverage', () => {
+  let harness: InspectorHarnessContext;
+
+  beforeAll(async () => {
+    harness = await createInspectorHarness();
+  });
+
+  afterAll(async () => {
+    await harness.cleanup();
+  });
+
+  it('should cover File Operations via STDIO transport', async () => {
+    // We inject a script that uses all File I/O tools
+    const mockResponses = [
+      `<think>Testing File Ops</think>
+       <typescript>
+         await mem.writeFile('test-file.txt', 'hello world');
+         const content = await mem.readFile('test-file.txt');
+         
+         // Atomic update
+         await mem.updateFile('test-file.txt', content, 'hello updated');
+         
+         // Directory and Rename
+         await mem.createDir('subdir');
+         await mem.rename('test-file.txt', 'subdir/moved.txt');
+         
+         // Listing
+         const list = await mem.listFiles('subdir');
+         
+         // Save verification data for test assertion
+         await mem.writeFile('file-ops-verify.json', JSON.stringify({
+            list,
+            exists: await mem.fileExists('subdir/moved.txt')
+         }));
+       </typescript>
+       <reply>File Ops Complete</reply>`,
+    ];
+
+    const result = await harness.runQuery(
+      'Test File Ops',
+      mockResponses,
+      'stdio'
     );
 
-    await client.connect(transport);
-  };
+    // Parse the inner JSON result from the tool
+    const toolOutput = JSON.parse(result.result.content[0].text);
+    expect(toolOutput.reply).toBe('File Ops Complete');
 
-  it('should perform file operations via MCP (Create & Read)', async () => {
-    // Arrange: Mock LLM to write a file
-    const mockLLM = createMockQueryLLM([
-      `<think>Creating a test file via MCP.</think>
-       <typescript>await mem.writeFile('mcp-test.txt', 'content from mcp');</typescript>
-       <reply>File created.</reply>`,
-    ]);
+    // Verify side effects on disk
+    const movedContent = await fs.readFile(
+      path.join(harness.graphPath, 'subdir/moved.txt'),
+      'utf-8'
+    );
+    expect(movedContent).toBe('hello updated');
 
-    await startServerAndConnectClient(mockLLM);
-
-    // Act: Call the tool via MCP Client
-    const result = await client.callTool({
-      name: 'process_query',
-      arguments: {
-        query: 'Create a file named mcp-test.txt',
-        runId: 'test-run-1',
-      },
-    });
-
-    // Assert: Check result content
-    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
-        throw new Error('Invalid result structure');
-    }
-    const firstItem = result.content[0];
-    if (firstItem.type !== 'text') {
-        throw new Error('Expected text content');
-    }
-    const content = firstItem.text;
-    const parsed = JSON.parse(content);
-    expect(parsed.reply).toBe('File created.');
-
-    // Assert: Check side-effects on filesystem
-    const fileExists = await harness.mem.fileExists('mcp-test.txt');
-    expect(fileExists).toBe(true);
-    const fileContent = await harness.mem.readFile('mcp-test.txt');
-    expect(fileContent).toBe('content from mcp');
+    const verifyData = JSON.parse(
+      await fs.readFile(
+        path.join(harness.graphPath, 'file-ops-verify.json'),
+        'utf-8'
+      )
+    );
+    expect(verifyData.list).toContain('moved.txt');
+    expect(verifyData.exists).toBe(true);
   });
 
-  it('should perform git operations via MCP (Commit & Log)', async () => {
-    // Arrange: Mock LLM to commit changes
-    const mockLLM = createMockQueryLLM([
-      `<think>Committing changes.</think>
-       <typescript>await mem.writeFile('git-test.txt', 'v1'); await mem.commitChanges('feat: mcp commit');</typescript>
-       <reply>Committed.</reply>`,
-    ]);
-
-    await startServerAndConnectClient(mockLLM);
-
-    // Act
-    const result = await client.callTool({
-      name: 'process_query',
-      arguments: {
-        query: 'Create and commit a file',
-        runId: 'test-run-2',
-      },
-    });
-
-    // Assert
-    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
-      throw new Error('Invalid result structure');
-    }
-    const firstItem = result.content[0];
-    if (firstItem.type !== 'text') {
-      throw new Error('Expected text content');
-    }
-    const parsed = JSON.parse(firstItem.text);
-    expect(parsed.reply).toBe('Committed.');
-
-    // Verify Git Log
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: mcp commit');
-  });
-
-  it('should perform graph operations via MCP (Query)', async () => {
-    // Arrange: Create some files in the graph first
-    await harness.mem.writeFile('Person.md', '- # Person\n  - type:: person\n  - name:: John Doe');
-    await harness.mem.writeFile('Project.md', '- # Project\n  - type:: project\n  - lead:: [[John Doe]]');
-
-    // Arrange: Mock LLM to query the graph
-    const mockLLM = createMockQueryLLM([
-      `<think>Querying the graph for persons.</think>
+  it('should cover Git Operations via SSE transport', async () => {
+    // Exercises Git tools and confirms SSE connectivity
+    const mockResponses = [
+      `<think>Testing Git Ops</think>
        <typescript>
-         const results = await mem.queryGraph('(property type:: person)');
-         const paths = results.map(r => r.filePath);
-         console.log(paths);
+         // Create some history
+         await mem.writeFile('git-test.txt', 'v1');
+         await mem.commitChanges('feat: v1');
+         await mem.writeFile('git-test.txt', 'v2');
+         
+         const diff = await mem.gitDiff('git-test.txt');
+         const changed = await mem.getChangedFiles();
+         const log = await mem.gitLog('git-test.txt', 1);
+         
+         // Save verification data
+         await mem.writeFile('git-verify.json', JSON.stringify({
+            hasDiff: diff.length > 0,
+            changedCount: changed.length,
+            lastCommitMsg: log[0].message
+         }));
        </typescript>
-       <reply>Found persons.</reply>`,
-    ]);
+       <reply>Git Ops Complete</reply>`,
+    ];
 
-    await startServerAndConnectClient(mockLLM);
+    const result = await harness.runQuery('Test Git Ops', mockResponses, 'sse');
+    const toolOutput = JSON.parse(result.result.content[0].text);
+    expect(toolOutput.reply).toBe('Git Ops Complete');
 
-    // Act
-    const result = await client.callTool({
-      name: 'process_query',
-      arguments: {
-        query: 'Find all people',
-        runId: 'test-run-graph',
-      },
-    });
-
-    // Assert
-    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
-      throw new Error('Invalid result structure');
-    }
-    const firstItem = result.content[0];
-    if (firstItem.type !== 'text') {
-      throw new Error('Expected text content');
-    }
-    const parsed = JSON.parse(firstItem.text);
-    expect(parsed.reply).toBe('Found persons.');
-    // We rely on the fact that the agent ran successfully. 
-    // In a real scenario, the agent would use the query results in its reply.
+    const verifyData = JSON.parse(
+      await fs.readFile(
+        path.join(harness.graphPath, 'git-verify.json'),
+        'utf-8'
+      )
+    );
+    expect(verifyData.hasDiff).toBe(true);
+    expect(verifyData.changedCount).toBeGreaterThan(0); // git-test.txt is modified
+    expect(verifyData.lastCommitMsg).toBe('feat: v1');
   });
 
-  it('should perform state operations via MCP (Checkpoints)', async () => {
-    // Arrange: Mock LLM to save and revert checkpoint
-    const mockLLM = createMockQueryLLM([
-      `<think>Testing checkpoints.</think>
-       <typescript>
-         await mem.writeFile('check.txt', 'initial');
-         await mem.saveCheckpoint();
-         await mem.writeFile('check.txt', 'modified');
-         await mem.revertToLastCheckpoint();
-       </typescript>
-       <reply>Reverted.</reply>`,
-    ]);
+  it('should cover Graph Operations via STDIO transport', async () => {
+    const mockResponses = [
+      `<think>Testing Graph Ops</think>
+         <typescript>
+           // Setup graph
+           await mem.writeFile('PageA.md', '- link to [[PageB]]');
+           await mem.writeFile('PageB.md', '- type:: concept');
+           
+           // Query Ops
+           const backlinks = await mem.getBacklinks('PageB.md');
+           const outgoing = await mem.getOutgoingLinks('PageA.md');
+           const search = await mem.searchGlobal('concept');
+           const query = await mem.queryGraph('(property type:: concept)');
+           
+           await mem.writeFile('graph-verify.json', JSON.stringify({
+             backlinks,
+             outgoing,
+             search,
+             queryCount: query.length
+           }));
+         </typescript>
+         <reply>Graph Ops Complete</reply>`,
+    ];
 
-    await startServerAndConnectClient(mockLLM);
+    const result = await harness.runQuery(
+      'Test Graph Ops',
+      mockResponses,
+      'stdio'
+    );
+    const toolOutput = JSON.parse(result.result.content[0].text);
+    expect(toolOutput.reply).toBe('Graph Ops Complete');
 
-    // Act
-    const result = await client.callTool({
-      name: 'process_query',
-      arguments: {
-        query: 'Test checkpoints',
-        runId: 'test-run-state',
-      },
-    });
+    const verifyData = JSON.parse(
+      await fs.readFile(
+        path.join(harness.graphPath, 'graph-verify.json'),
+        'utf-8'
+      )
+    );
+    expect(verifyData.backlinks).toContain('PageA.md');
+    expect(verifyData.outgoing).toContain('PageB');
+    expect(verifyData.search).toContain('PageB.md');
+    expect(verifyData.queryCount).toBe(1);
+  });
 
-    // Assert
-    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
-      throw new Error('Invalid result structure');
-    }
-    const firstItem = result.content[0];
-    if (firstItem.type !== 'text') {
-      throw new Error('Expected text content');
-    }
-    const parsed = JSON.parse(firstItem.text);
-    expect(parsed.reply).toBe('Reverted.');
+  it('should cover State and Utility Operations via STDIO transport', async () => {
+    const mockResponses = [
+      `<think>Testing State Ops</think>
+         <typescript>
+           await mem.writeFile('state.txt', 'initial');
+           await mem.saveCheckpoint();
+           
+           // Make changes to revert
+           await mem.writeFile('state.txt', 'modified');
+           await mem.revertToLastCheckpoint();
+           
+           // Utils
+           const root = await mem.getGraphRoot();
+           const tokenCount = await mem.getTokenCount('state.txt');
+           
+           await mem.writeFile('state-verify.json', JSON.stringify({
+             root,
+             tokenCount
+           }));
+         </typescript>
+         <reply>State Ops Complete</reply>`,
+    ];
 
-    // Verify file content was reverted
-    const content = await harness.mem.readFile('check.txt');
+    const result = await harness.runQuery(
+      'Test State Ops',
+      mockResponses,
+      'stdio'
+    );
+    const toolOutput = JSON.parse(result.result.content[0].text);
+    expect(toolOutput.reply).toBe('State Ops Complete');
+
+    // Verify content was reverted
+    const content = await fs.readFile(
+      path.join(harness.graphPath, 'state.txt'),
+      'utf-8'
+    );
     expect(content).toBe('initial');
-  });
 
-  it('should perform utility operations via MCP (Token Count)', async () => {
-    // Arrange: Mock LLM to count tokens
-    await harness.mem.writeFile('long.txt', 'word '.repeat(100));
-
-    const mockLLM = createMockQueryLLM([
-      `<think>Counting tokens.</think>
-       <typescript>
-         const count = await mem.getTokenCount('long.txt');
-       </typescript>
-       <reply>Counted tokens.</reply>`,
-    ]);
-
-    await startServerAndConnectClient(mockLLM);
-
-    // Act
-    const result = await client.callTool({
-      name: 'process_query',
-      arguments: {
-        query: 'Count tokens',
-        runId: 'test-run-util',
-      },
-    });
-
-    // Assert
-    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
-      throw new Error('Invalid result structure');
-    }
-    const firstItem = result.content[0];
-    if (firstItem.type !== 'text') {
-      throw new Error('Expected text content');
-    }
-    const parsed = JSON.parse(firstItem.text);
-    expect(parsed.reply).toBe('Counted tokens.');
-  });
-
-  it('should return error response via MCP when sandbox fails', async () => {
-    // Arrange: Mock LLM to throw error
-    const mockLLM = createMockQueryLLM([
-      `<think>This will fail.</think>
-       <typescript>throw new Error('Sandbox Explosion');</typescript>`,
-       // The loop catches the error and feeds it back to LLM. 
-       // The LLM normally tries to fix it. 
-       // Let's make the LLM give up or explain the error in next turn.
-       `<think>I see it failed.</think>
-       <reply>Operation failed due to Sandbox Explosion.</reply>`
-    ]);
-
-    await startServerAndConnectClient(mockLLM);
-
-    // Act
-    const result = await client.callTool({
-      name: 'process_query',
-      arguments: {
-        query: 'Make it crash',
-        runId: 'test-run-error',
-      },
-    });
-
-    // Assert
-    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
-      throw new Error('Invalid result structure');
-    }
-    const firstItem = result.content[0];
-    if (firstItem.type !== 'text') {
-      throw new Error('Expected text content');
-    }
-    const parsed = JSON.parse(firstItem.text);
-    expect(parsed.reply).toBe('Operation failed due to Sandbox Explosion.');
+    const verifyData = JSON.parse(
+      await fs.readFile(
+        path.join(harness.graphPath, 'state-verify.json'),
+        'utf-8'
+      )
+    );
+    // The root path inside the server should match the test harness path
+    // Note: In Windows/Mac there might be slight canonicalization diffs, but should match.
+    expect(verifyData.root).toContain(path.basename(harness.graphPath));
+    expect(verifyData.tokenCount).toBeGreaterThan(0);
   });
 });
+````
+
+## File: tests/lib/inspector-harness.ts
+````typescript
+import { spawn, type ChildProcess } from 'child_process';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import { getFreePort } from './test-util';
+import simpleGit from 'simple-git';
+
+export interface InspectorHarnessContext {
+  graphPath: string;
+  queuePath: string;
+  cleanup: () => Promise<void>;
+  runQuery: (
+    query: string,
+    mockResponses: string[],
+    transport?: 'stdio' | 'sse'
+  ) => Promise<any>;
+}
+
+/**
+ * Creates an isolated environment for running Inspector E2E tests.
+ * Sets up a temp Git repo and mock queue file.
+ */
+export const createInspectorHarness = async (): Promise<InspectorHarnessContext> => {
+  // 1. Create isolated temp directory
+  const tempPrefix = path.join(os.tmpdir(), 'recursa-inspector-test-');
+  const graphPath = await fs.mkdtemp(tempPrefix);
+  const queuePath = path.join(graphPath, 'mock-queue.json');
+
+  // 2. Initialize Git Repo (required for git ops to work)
+  const git = simpleGit(graphPath);
+  await git.init();
+  await git.addConfig('user.name', 'Test User');
+  await git.addConfig('user.email', 'test@example.com');
+
+  // Create initial commit so we have a HEAD
+  await fs.writeFile(path.join(graphPath, '.gitignore'), 'node_modules/\n');
+  await git.add('.');
+  await git.commit('Initial commit');
+
+  const cleanup = async () => {
+    try {
+      await fs.rm(graphPath, { recursive: true, force: true });
+    } catch (e) {
+      console.error(`Cleanup warning: ${e}`);
+    }
+  };
+
+  const runQuery = async (
+    query: string,
+    mockResponses: string[],
+    transport: 'stdio' | 'sse' = 'stdio'
+  ): Promise<any> => {
+    // 1. Write the sequence of mock LLM responses to the queue file
+    await fs.writeFile(queuePath, JSON.stringify(mockResponses));
+
+    let serverProcess: ChildProcess | null = null;
+    let inspectorUrl = '';
+
+    try {
+      // 2. Setup Transport
+      if (transport === 'sse') {
+        const port = await getFreePort();
+        
+        // Start the server as a background process
+        serverProcess = spawn('npx', ['tsx', 'src/server.ts'], {
+          env: {
+            ...process.env,
+            PORT: port.toString(),
+            TRANSPORT_TYPE: 'sse',
+            OPENROUTER_API_KEY: 'TEST_MOCK_KEY',
+            MOCK_QUEUE_FILE: queuePath,
+            KNOWLEDGE_GRAPH_PATH: graphPath,
+            CI: 'true', // Suppress interactive prompts
+          },
+          stdio: 'pipe',
+        });
+
+        // Wait for the "running on SSE" log message
+        await new Promise<void>((resolve, reject) => {
+          if (!serverProcess) return reject(new Error('Failed to spawn server'));
+
+          let started = false;
+          const onData = (data: Buffer) => {
+            if (data.toString().includes('running on SSE')) {
+              started = true;
+              resolve();
+            }
+          };
+
+          serverProcess.stdout?.on('data', onData);
+          serverProcess.stderr?.on('data', onData);
+
+          serverProcess.on('error', reject);
+          serverProcess.on('exit', (code) => {
+            if (!started)
+              reject(new Error(`Server exited early with code ${code}`));
+          });
+
+          // 10s timeout for startup
+          setTimeout(() => {
+            if (!started) reject(new Error('Timeout waiting for SSE server'));
+          }, 10000);
+        });
+
+        inspectorUrl = `http://localhost:${port}/sse`;
+      }
+
+      // 3. Build Inspector Command
+      // usage: npx @modelcontextprotocol/inspector --cli [server_command | url] --method ...
+      const args = ['-y', '@modelcontextprotocol/inspector', '--cli'];
+
+      if (transport === 'stdio') {
+        // Pass Env Vars via -e flags to the Inspector
+        args.push('-e', 'OPENROUTER_API_KEY=TEST_MOCK_KEY');
+        args.push('-e', `MOCK_QUEUE_FILE=${queuePath}`);
+        args.push('-e', `KNOWLEDGE_GRAPH_PATH=${graphPath}`);
+
+        // Server Command
+        args.push('npx', 'tsx', 'src/server.ts');
+      } else {
+        // SSE URL
+        args.push(inspectorUrl);
+      }
+
+      // 4. Add Method Arguments
+      args.push('--method', 'tools/call');
+      args.push('--tool-name', 'process_query');
+      // Tool arguments are passed as key=value pairs
+      args.push('--tool-arg', `query=${query}`);
+      args.push('--tool-arg', `runId=test-${Date.now()}`);
+
+      // 5. Execute Inspector
+      const resultJson = await new Promise<string>((resolve, reject) => {
+        const proc = spawn('npx', args, {
+          env: { ...process.env, CI: 'true', PATH: process.env.PATH },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        proc.stdout.on('data', (d) => (stdout += d));
+        proc.stderr.on('data', (d) => (stderr += d));
+
+        proc.on('close', (code) => {
+          if (code === 0) {
+            resolve(stdout);
+          } else {
+            reject(new Error(`Inspector failed (code ${code}): ${stderr}`));
+          }
+        });
+        proc.on('error', reject);
+      });
+
+      // 6. Parse and Return
+      try {
+        return JSON.parse(resultJson);
+      } catch (e) {
+        throw new Error(`Failed to parse inspector JSON output: ${resultJson}`);
+      }
+    } finally {
+      // Cleanup background process if needed
+      if (serverProcess) {
+        serverProcess.kill();
+      }
+    }
+  };
+
+  return {
+    graphPath,
+    queuePath,
+    cleanup,
+    runQuery,
+  };
+};
 ````
 
 ## File: tests/integration/mem-api-file-ops.test.ts
@@ -948,198 +1318,48 @@ npm run dev:termux
 - ESLint and Prettier dependencies removed for compatibility
 ````
 
-## File: README.md
-````markdown
-# Recursa: The Git-Native Memory Layer for Local-First LLMs
+## File: LICENSE
+````
+MIT License
 
-**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
+Copyright (c) 2024 Recursa MCP
 
-**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
----
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+````
 
-## The Problem: Agent Amnesia & The RAG Ceiling
+## File: tsup.config.ts
+````typescript
+import { defineConfig } from 'tsup';
 
-You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
-
-1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
-2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
-3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
-
-Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
-
-## The Recursa Philosophy: Core Features
-
-Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
-
-- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
-- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
-- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
-- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
-
-## How It Works: Architecture
-
-Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
-
-```mermaid
-graph TD
-    subgraph Your Local Machine
-        A[MCP Client <br> e.g., your script, or a compatible editor]
-        B[Recursa MCP Server <br> (This Project)]
-        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
-
-        A -- 1. User Query via Stdio --> B
-        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
-        B -- 3. Executes Sandboxed Code --> C
-        C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply & Notifications --> A
-    end
-
-    subgraph Cloud Service
-        D
-    end
-
-    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
-    style B fill:#fff2cc,stroke:#333,stroke-width:2px
-```
-
-1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
-3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
-4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
-5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
-
-## An Agent in Action: Example Workflow
-
-**Scenario:** An agent is asked to learn about a new person.
-
-**1. User Query:**
-"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
-
-**2. Turn 1: The agent communicates its intent and acts efficiently.**
-The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
-
-**LLM Response (Turn 1):**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    `- # AI Research Institute\n  - type:: organization\n`
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
-);
-</typescript>
-```
-
-_Recursa executes the code and confirms success to the LLM._
-
-**3. Turn 2: The agent saves its work and replies to the user.**
-Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
-
-**LLM Response (Turn 2):**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
-- An [OpenRouter.ai](https://openrouter.ai/) API Key
-
-### 1. Installation
-
-```bash
-git clone https://github.com/your-username/recursa.git
-cd recursa
-npm install
-```
-
-### 2. Configuration
-
-Create a `.env` file in the root of the project by copying the example:
-
-```bash
-cp .env.example .env
-```
-
-Now, edit your `.env` file with your details:
-
-```env
-# Your OpenRouter API Key
-OPENROUTER_API_KEY="sk-or-..."
-
-# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
-KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
-
-# The model you want to use from OpenRouter
-LLM_MODEL="anthropic/claude-3-sonnet-20240229"
-```
-
-### 3. Running the Server
-
-```bash
-bun run start
-```
-
-This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
-
-## 🗺️ Roadmap
-
-Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
-
-- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
-- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
-- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
-- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
-- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
-
-## 🧑‍💻 Contributing
-
-Recursa is designed to be hacked on. Contributions are welcome!
-
-### Adding New Tools
-
-To add a new tool (e.g., `mem.searchWeb(query)`):
-
-1.  Implement the function's logic in a file within `src/core/mem-api/`.
-2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
-3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
-4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
-5.  Open a Pull Request!
-
-## 📜 License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-**Stop building infrastructure. Start building intelligence.**
+export default defineConfig({
+  entry: ['src/server.ts'],
+  format: ['esm', 'cjs'],
+  target: 'es2022',
+  dts: true,
+  splitting: false,
+  sourcemap: true,
+  clean: true,
+  external: ['fastmcp', 'dotenv', 'simple-git', 'zod'],
+  platform: 'node',
+  outDir: 'dist',
+  onSuccess: 'echo "Build completed successfully!"',
+});
 ````
 
 ## File: src/lib/gitignore-parser.ts
@@ -1279,6 +1499,528 @@ export const combineIgnoreFilters = (
     return filters.some(filter => filter(filePath));
   };
 };
+````
+
+## File: src/lib/platform.ts
+````typescript
+/**
+ * Platform detection and utilities for cross-platform compatibility
+ */
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+export const platform = {
+  /** Current operating system platform */
+  isWindows: process.platform === 'win32',
+  isMacOS: process.platform === 'darwin',
+  isLinux: process.platform === 'linux',
+  isAndroid: process.platform === 'android',
+
+  /** Termux environment detection */
+  get isTermux(): boolean {
+    return this.isAndroid ||
+           process.env.TERMUX === 'true' ||
+           process.env.PREFIX?.includes('/com.termux') ||
+           process.env.TERMUX_VERSION !== undefined;
+  },
+
+  /** WSL (Windows Subsystem for Linux) detection */
+  get isWSL(): boolean {
+    return this.isLinux && (
+      process.env.WSL_DISTRO_NAME !== undefined ||
+      process.env.WSLENV !== undefined ||
+      fs.existsSync('/proc/version') &&
+      fs.readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
+    );
+  },
+
+  /** File system capabilities */
+  get hasCaseInsensitiveFS(): boolean {
+    return this.isWindows || this.isMacOS;
+  },
+
+  get hasFilePermissions(): boolean {
+    return !this.isWindows;
+  },
+
+  get supportsSymlinks(): boolean {
+    return this.isLinux || this.isMacOS || this.isWSL;
+  },
+
+  get supportsHardLinks(): boolean {
+    return this.isLinux || this.isMacOS;
+  },
+
+  /** Path separator */
+  get pathSeparator(): string {
+    return this.isWindows ? '\\' : '/';
+  },
+
+  /** Line ending */
+  get lineEnding(): string {
+    return this.isWindows ? '\r\n' : '\n';
+  },
+
+  /** Executable file extensions */
+  get executableExtensions(): string[] {
+    return this.isWindows ? ['.exe', '.bat', '.cmd'] : [];
+  },
+
+  /** Environment variable normalization */
+  normalizeEnvVar(key: string): string {
+    return this.isWindows ? key.toUpperCase() : key;
+  },
+
+  /** Path normalization for cross-platform */
+  normalizePath(p: string): string {
+    const normalized = path.normalize(p);
+    if (this.isWindows) {
+      return normalized.replace(/\//g, '\\');
+    }
+    return normalized.replace(/\\/g, '/');
+  },
+
+  /** Check if path is absolute */
+  isAbsolute(p: string): boolean {
+    if (this.isWindows) {
+      return /^[A-Za-z]:\\|\\\\/.test(p) || path.isAbsolute(p);
+    }
+    return path.isAbsolute(p);
+  },
+
+  /** Get platform-specific resource limits */
+  getResourceLimits() {
+    const limits = {
+      maxMemory: 512 * 1024 * 1024, // 512MB default
+      maxCpuTime: 30000, // 30 seconds default
+      maxFileSize: 10 * 1024 * 1024, // 10MB default
+      maxProcesses: 10,
+    };
+
+    if (this.isTermux) {
+      // More conservative limits for mobile environments
+      return {
+        ...limits,
+        maxMemory: 256 * 1024 * 1024, // 256MB
+        maxCpuTime: 15000, // 15 seconds
+        maxFileSize: 5 * 1024 * 1024, // 5MB
+        maxProcesses: 5,
+      };
+    }
+
+    return limits;
+  },
+
+  /** Get platform-specific temp directory */
+  getTempDir(): string {
+    if (this.isWindows) {
+      return process.env.TEMP || process.env.TMP || path.join(os.tmpdir(), 'recursa');
+    }
+
+    return process.env.TMPDIR || os.tmpdir();
+  },
+
+  /** Get platform-specific user data directory */
+  getUserDataDir(appName: string = 'recursa'): string {
+    const homeDir = os.homedir();
+
+    if (this.isWindows) {
+      return process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming', appName);
+    }
+
+    if (this.isMacOS) {
+      return path.join(homeDir, 'Library', 'Application Support', appName);
+    }
+
+    // Linux, Android, etc.
+    return process.env.XDG_DATA_HOME || path.join(homeDir, '.local', 'share', appName);
+  },
+
+  /** Platform-specific error handling */
+  handleFileError(error: Error & { code?: string }, operation: string, filePath?: string): Error {
+    const message = filePath ? `${operation} failed for ${filePath}` : `${operation} failed`;
+
+    if (this.isWindows) {
+      // Windows-specific error codes and messages
+      if (error.code === 'EPERM') {
+        return new Error(`${message}: Permission denied. Try running as administrator.`);
+      }
+      if (error.code === 'EBUSY') {
+        return new Error(`${message}: File is in use by another process.`);
+      }
+    }
+
+    if (this.isTermux) {
+      // Termux/Android specific errors
+      if (error.code === 'EACCES') {
+        return new Error(`${message}: Permission denied. Check storage permissions.`);
+      }
+    }
+
+    return new Error(`${message}: ${error.message}`);
+  },
+
+  /** Platform detection string for logging */
+  get platformString(): string {
+    const parts: string[] = [process.platform, process.arch];
+
+    if (this.isTermux) parts.push('termux');
+    if (this.isWSL) parts.push('wsl');
+
+    return parts.join('-');
+  },
+
+  /** Feature detection */
+  async detectFeatures(): Promise<Record<string, boolean>> {
+    const fsp = fs.promises;
+    const features: Record<string, boolean> = {};
+
+    // Test symlink support
+    try {
+      const testFile = path.join(this.getTempDir(), 'symlink-test');
+      await fsp.writeFile(testFile, 'test');
+      const linkFile = testFile + '-link';
+      await fsp.symlink(testFile, linkFile);
+      await fsp.unlink(linkFile);
+      await fsp.unlink(testFile);
+      features.symlinks = true;
+    } catch {
+      features.symlinks = false;
+    }
+
+    // Test hard link support
+    try {
+      const testFile = path.join(this.getTempDir(), 'hardlink-test');
+      await fsp.writeFile(testFile, 'test');
+      const linkFile = testFile + '-hard';
+      await fsp.link(testFile, linkFile);
+      await fsp.unlink(linkFile);
+      await fsp.unlink(testFile);
+      features.hardLinks = true;
+    } catch {
+      features.hardLinks = false;
+    }
+
+    // Test file permissions
+    try {
+      const testFile = path.join(this.getTempDir(), 'perm-test');
+      await fsp.writeFile(testFile, 'test');
+      await fsp.chmod(testFile, 0o755);
+      await fsp.unlink(testFile);
+      features.filePermissions = true;
+    } catch {
+      features.filePermissions = false;
+    }
+
+    return features;
+  }
+};
+
+export default platform;
+````
+
+## File: tests/e2e/mcp-tools.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import { FastMCP } from 'fastmcp';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockQueryLLM,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import { getFreePort } from '../lib/test-util';
+import { createMcpServer } from '../../src/server';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+// Polyfill EventSource for Node.js environment
+import EventSource from 'eventsource';
+
+// @ts-ignore
+global.EventSource = EventSource;
+
+describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
+  let harness: TestHarnessState;
+  let server: FastMCP;
+  let client: Client;
+  let serverPort: number;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+  });
+
+  afterEach(async () => {
+    if (client) {
+      await client.close();
+    }
+    if (server) {
+      if (server.stop) await server.stop();
+    }
+    await cleanupTestHarness(harness);
+  });
+
+  const startServerAndConnectClient = async (mockLLM: ReturnType<typeof createMockQueryLLM>) => {
+    // 1. Create Server with Mock LLM
+    server = await createMcpServer(harness.mockConfig, {
+      queryLLM: mockLLM,
+    });
+
+    // 2. Start Server on a free port using SSE
+    serverPort = await getFreePort();
+    
+    await server.start({
+      transportType: 'sse',
+      sse: { endpoint: '/sse', port: serverPort },
+    });
+
+    // 3. Connect Client
+    const transport = new SSEClientTransport(
+      new URL(`http://localhost:${serverPort}/sse`)
+    );
+    client = new Client(
+      {
+        name: 'test-client',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {},
+      }
+    );
+
+    await client.connect(transport);
+  };
+
+  it('should perform file operations via MCP (Create & Read)', async () => {
+    // Arrange: Mock LLM to write a file
+    const mockLLM = createMockQueryLLM([
+      `<think>Creating a test file via MCP.</think>
+       <typescript>await mem.writeFile('mcp-test.txt', 'content from mcp');</typescript>
+       <reply>File created.</reply>`,
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act: Call the tool via MCP Client
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Create a file named mcp-test.txt',
+        runId: 'test-run-1',
+      },
+    });
+
+    // Assert: Check result content
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+        throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+        throw new Error('Expected text content');
+    }
+    const content = firstItem.text;
+    const parsed = JSON.parse(content);
+    expect(parsed.reply).toBe('File created.');
+
+    // Assert: Check side-effects on filesystem
+    const fileExists = await harness.mem.fileExists('mcp-test.txt');
+    expect(fileExists).toBe(true);
+    const fileContent = await harness.mem.readFile('mcp-test.txt');
+    expect(fileContent).toBe('content from mcp');
+  });
+
+  it('should perform git operations via MCP (Commit & Log)', async () => {
+    // Arrange: Mock LLM to commit changes
+    const mockLLM = createMockQueryLLM([
+      `<think>Committing changes.</think>
+       <typescript>await mem.writeFile('git-test.txt', 'v1'); await mem.commitChanges('feat: mcp commit');</typescript>
+       <reply>Committed.</reply>`,
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Create and commit a file',
+        runId: 'test-run-2',
+      },
+    });
+
+    // Assert
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
+    expect(parsed.reply).toBe('Committed.');
+
+    // Verify Git Log
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: mcp commit');
+  });
+
+  it('should perform graph operations via MCP (Query)', async () => {
+    // Arrange: Create some files in the graph first
+    await harness.mem.writeFile('Person.md', '- # Person\n  - type:: person\n  - name:: John Doe');
+    await harness.mem.writeFile('Project.md', '- # Project\n  - type:: project\n  - lead:: [[John Doe]]');
+
+    // Arrange: Mock LLM to query the graph
+    const mockLLM = createMockQueryLLM([
+      `<think>Querying the graph for persons.</think>
+       <typescript>
+         const results = await mem.queryGraph('(property type:: person)');
+         const paths = results.map(r => r.filePath);
+         console.log(paths);
+       </typescript>
+       <reply>Found persons.</reply>`,
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Find all people',
+        runId: 'test-run-graph',
+      },
+    });
+
+    // Assert
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
+    expect(parsed.reply).toBe('Found persons.');
+    // We rely on the fact that the agent ran successfully. 
+    // In a real scenario, the agent would use the query results in its reply.
+  });
+
+  it('should perform state operations via MCP (Checkpoints)', async () => {
+    // Arrange: Mock LLM to save and revert checkpoint
+    const mockLLM = createMockQueryLLM([
+      `<think>Testing checkpoints.</think>
+       <typescript>
+         await mem.writeFile('check.txt', 'initial');
+         await mem.saveCheckpoint();
+         await mem.writeFile('check.txt', 'modified');
+         await mem.revertToLastCheckpoint();
+       </typescript>
+       <reply>Reverted.</reply>`,
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Test checkpoints',
+        runId: 'test-run-state',
+      },
+    });
+
+    // Assert
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
+    expect(parsed.reply).toBe('Reverted.');
+
+    // Verify file content was reverted
+    const content = await harness.mem.readFile('check.txt');
+    expect(content).toBe('initial');
+  });
+
+  it('should perform utility operations via MCP (Token Count)', async () => {
+    // Arrange: Mock LLM to count tokens
+    await harness.mem.writeFile('long.txt', 'word '.repeat(100));
+
+    const mockLLM = createMockQueryLLM([
+      `<think>Counting tokens.</think>
+       <typescript>
+         const count = await mem.getTokenCount('long.txt');
+       </typescript>
+       <reply>Counted tokens.</reply>`,
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Count tokens',
+        runId: 'test-run-util',
+      },
+    });
+
+    // Assert
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
+    expect(parsed.reply).toBe('Counted tokens.');
+  });
+
+  it('should return error response via MCP when sandbox fails', async () => {
+    // Arrange: Mock LLM to throw error
+    const mockLLM = createMockQueryLLM([
+      `<think>This will fail.</think>
+       <typescript>throw new Error('Sandbox Explosion');</typescript>`,
+       // The loop catches the error and feeds it back to LLM. 
+       // The LLM normally tries to fix it. 
+       // Let's make the LLM give up or explain the error in next turn.
+       `<think>I see it failed.</think>
+       <reply>Operation failed due to Sandbox Explosion.</reply>`
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Make it crash',
+        runId: 'test-run-error',
+      },
+    });
+
+    // Assert
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
+    expect(parsed.reply).toBe('Operation failed due to Sandbox Explosion.');
+  });
+});
 ````
 
 ## File: tests/integration/mem-api-graph-ops.test.ts
@@ -1593,6 +2335,203 @@ export default [
     },
   },
 ];
+````
+
+## File: README.md
+````markdown
+# Recursa MCP: The Git-Native Memory Layer for Local-First LLMs
+
+**[Project Status: Active Development]**
+
+**TL;DR:** Recursa MCP gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source Model Context Protocol (MCP) server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
+
+Forget wrestling with databases or opaque cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
+
+---
+
+## The Problem: Agent Amnesia & The RAG Ceiling
+
+You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
+
+1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions.
+2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers and databases instead of focusing on intelligence.
+3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit.
+
+Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
+
+## The Recursa Philosophy: Core Features
+
+Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
+
+- **Git-Native Memory:** Every change is a `git commit`. You get a perfect, auditable history. Branch memory, merge concepts, and revert to previous states.
+- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. Compatible with Obsidian and Logseq.
+- **Think-Act-Commit Loop:** The agent reasons, generates TypeScript code to modify memory, executes it in a secure sandbox, and commits the result.
+- **Safety Checkpoints:** Agents can `mem.saveCheckpoint()` before complex operations and `mem.revertToLastCheckpoint()` if they fail.
+- **Token-Aware:** Tools like `mem.getTokenCount()` help the agent manage context limits efficiently.
+- **Cross-Platform & Mobile Ready:** Runs on Linux, macOS, Windows, and **Android via Termux**.
+
+## How It Works: Architecture
+
+Recursa is a local, stateless server that acts as a bridge between your MCP client (e.g., Claude Desktop, custom tools), an LLM, and your local knowledge graph.
+
+```mermaid
+graph TD
+    subgraph Your Local Machine
+        A[MCP Client]
+        B[Recursa MCP Server]
+        C(Logseq/Obsidian Graph)
+
+        A -- 1. User Query via Stdio --> B
+        B -- 2. Think-Act-Commit Loop --> D{LLM API}
+        B -- 3. Executes Sandboxed Code --> C
+        C -- 4. Reads/Writes .md files --> C
+        B -- 5. Final Reply & Notifications --> A
+    end
+
+    subgraph Cloud Service
+        D[OpenRouter / LLM Provider]
+    end
+
+    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
+    style B fill:#fff2cc,stroke:#333,stroke-width:2px
+```
+
+1.  **Query via MCP:** Client sends a query.
+2.  **Think-Act Loop:** Recursa plans using the LLM.
+3.  **Generate & Execute:** The LLM generates TypeScript code; Recursa runs it in a Node.js VM sandbox.
+4.  **Interact with Files:** The code uses the `mem` API to read/write markdown files.
+5.  **Commit & Reply:** The agent commits changes to Git and replies to the user.
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v20+ recommended)
+- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
+- An [OpenRouter.ai](https://openrouter.ai/) API Key
+
+### 1. Installation
+
+**Option 1: Install via npm (Recommended)**
+
+```bash
+npm install -g recursa-mcp
+```
+
+**Option 2: Clone and build from source**
+
+```bash
+git clone https://github.com/recursa-hq/recursa-doc.git
+cd recursa-doc
+npm install
+```
+
+### 2. Configuration
+
+Create a `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```env
+# Your OpenRouter API Key
+OPENROUTER_API_KEY="sk-or-..."
+
+# The ABSOLUTE path to your graph's directory
+KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# Optional: Model selection
+LLM_MODEL="anthropic/claude-3-haiku-20240307"
+```
+
+### 3. Building and Running
+
+**Standard Development:**
+
+```bash
+# Build the project
+npm run build
+
+# Start the server (Stdio mode)
+npm start
+```
+
+**For Termux (Android):**
+
+Recursa is optimized for mobile devices running Termux.
+
+```bash
+# Install dependencies with Termux compatibility
+npm run install:termux
+
+# Build for Termux
+npm run build:termux
+
+# Start the server
+npm run start:termux
+```
+
+### 4. Connecting an MCP Client
+
+Recursa runs as an MCP server over Stdio. Configure your MCP client (like Claude Desktop) to run the startup command:
+
+**For npm-installed version:**
+
+```json
+{
+  "mcpServers": {
+    "recursa": {
+      "command": "recursa-mcp",
+      "env": {
+        "OPENROUTER_API_KEY": "your-key",
+        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph"
+      }
+    }
+  }
+}
+```
+
+**For source-built version:**
+
+```json
+{
+  "mcpServers": {
+    "recursa": {
+      "command": "node",
+      "args": ["/path/to/recursa-doc/dist/server.js"],
+      "env": {
+        "OPENROUTER_API_KEY": "your-key",
+        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph"
+      }
+    }
+  }
+}
+```
+
+## 🛠️ Implemented Tools
+
+The agent has access to the following capabilities via the `mem` object:
+
+- **File Operations:** `readFile`, `writeFile`, `updateFile` (atomic CAS), `deletePath`, `rename`, `fileExists`, `createDir`, `listFiles`.
+- **Git Operations:** `commitChanges`, `gitLog`, `gitDiff`, `getChangedFiles`.
+- **Graph Operations:** `queryGraph` (property & link queries), `getBacklinks`, `getOutgoingLinks`, `searchGlobal`.
+- **State Management:** `saveCheckpoint`, `revertToLastCheckpoint`, `discardChanges`.
+- **Utilities:** `getTokenCount`, `getGraphRoot`.
+
+## 🗺️ Roadmap
+
+- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution.
+- [ ] **Multi-modal Support:** Storing and referencing images.
+- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate via Git.
+
+## 📜 License
+
+MIT License.
+
+**Stop building infrastructure. Start building intelligence.**
 ````
 
 ## File: src/core/mem-api/fs-walker.ts
@@ -2016,11 +2955,6 @@ worktrees/*/.git/
     "gitBranchTemplate": "gitCommitMsg"
   }
 }
-````
-
-## File: tsconfig.tsbuildinfo
-````
-{"root":["./src/config.ts","./src/server.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/lib/platform.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
 ## File: docs/rules.md
@@ -2544,6 +3478,11 @@ export const getFreePort = (): Promise<number> => {
     });
   });
 };
+````
+
+## File: tsconfig.tsbuildinfo
+````
+{"root":["./src/config.ts","./src/server.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/lib/platform.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
 ## File: src/core/mem-api/secure-path.ts
@@ -3643,6 +4582,7 @@ export const getTokenCountForPaths =
 import type { AppConfig } from '../config';
 import { logger } from '../lib/logger.js';
 import type { ChatMessage } from '../types';
+import { promises as fs } from 'fs';
 
 // Custom error class for HTTP errors with status code
 class HttpError extends Error {
@@ -3702,6 +4642,34 @@ export const queryLLM = async (
   history: ChatMessage[],
   config: AppConfig
 ): Promise<string> => {
+  // Mock Engine: If using the special test key, bypass OpenRouter and read from the file queue.
+  if (config.openRouterApiKey === 'TEST_MOCK_KEY') {
+    const queueFile = config.mockQueueFile || process.env.MOCK_QUEUE_FILE;
+    
+    if (!queueFile) {
+      throw new Error('TEST_MOCK_KEY is set, but MOCK_QUEUE_FILE is missing.');
+    }
+
+    try {
+      const content = await fs.readFile(queueFile, 'utf-8');
+      const queue = JSON.parse(content);
+
+      if (!Array.isArray(queue) || queue.length === 0) {
+        throw new Error('Mock response queue is empty.');
+      }
+
+      const response = queue.shift();
+      
+      // Write back updated queue for stateful multi-turn testing
+      await fs.writeFile(queueFile, JSON.stringify(queue, null, 2));
+      
+      logger.info('Mock LLM: Using response from queue', { remaining: queue.length });
+      return response;
+    } catch (error) {
+      throw new Error(`Mock LLM Engine failed: ${(error as Error).message}`);
+    }
+  }
+
   // OpenRouter API endpoint
   const openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -3882,6 +4850,9 @@ const configSchema = z.object({
   SANDBOX_MEMORY_LIMIT: z.coerce.number().default(getPlatformDefaults().SANDBOX_MEMORY_LIMIT).optional(),
   GIT_USER_NAME: z.string().default(getPlatformDefaults().GIT_USER_NAME).optional(),
   GIT_USER_EMAIL: z.string().default(getPlatformDefaults().GIT_USER_EMAIL).optional(),
+  TRANSPORT_TYPE: z.enum(['stdio', 'sse']).default('stdio').optional(),
+  PORT: z.coerce.number().default(3000).optional(),
+  MOCK_QUEUE_FILE: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -3894,6 +4865,9 @@ export type AppConfig = {
   sandboxMemoryLimit: number;
   gitUserName: string;
   gitUserEmail: string;
+  transportType: 'stdio' | 'sse';
+  port: number;
+  mockQueueFile?: string;
 };
 
 /**
@@ -4013,6 +4987,9 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     SANDBOX_MEMORY_LIMIT,
     GIT_USER_NAME,
     GIT_USER_EMAIL,
+    TRANSPORT_TYPE,
+    PORT,
+    MOCK_QUEUE_FILE,
   } = parseResult.data;
 
   // Resolve and validate the knowledge graph path
@@ -4036,6 +5013,9 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     sandboxMemoryLimit: SANDBOX_MEMORY_LIMIT!,
     gitUserName: GIT_USER_NAME!,
     gitUserEmail: GIT_USER_EMAIL!,
+    transportType: TRANSPORT_TYPE!,
+    port: PORT!,
+    mockQueueFile: MOCK_QUEUE_FILE,
   });
 };
 ````
@@ -4600,83 +5580,6 @@ describe('LLM Module', () => {
     });
   });
 });
-````
-
-## File: tasks.md
-````markdown
-# Tasks
-
-Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
-
-## Part 1: Purge `any` Types to Enforce Strict Type Safety
-
-### Task 1.1: Harden Emitter with `unknown`
-
-- **uuid**: b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: In `createEmitter`, change the type of the `listeners` map value from `Listener<any>[]` to `Array<Listener<unknown>>`. In the `emit` function, apply a type assertion to the listener before invoking it. Change `listener(data)` to `(listener as Listener<Events[K]>)(data)`.
-- **files**: src/lib/events.ts
-
-### Task 1.2: Add Strict Types to MCP E2E Test
-
-- **uuid**: a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d
-- **status**: done
-- **job-id**: job-44fc2242
-- **depends-on**: []
-- **description**: Import the `MCPResponse` and `MCPTool` types from `src/types/index.ts`. Change the signature of `readMessages` to return `AsyncGenerator<MCPResponse>` instead of `AsyncGenerator<any>`. In `readMessages`, cast the parsed JSON: `yield JSON.parse(line) as MCPResponse;`. In the test case `it("should initialize and list tools correctly")`, find the `process_query` tool with proper typing: `(listToolsResponse.value.result.tools as MCPTool[]).find((t: MCPTool) => t.name === "process_query")`.
-- **files**: tests/e2e/mcp-protocol.test.ts
-
-## Part 2: Abstract Test Environment Setup (DRY)
-
-### Task 2.1: Create a `TestHarness` for Environment Management
-
-- **uuid**: f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: []
-- **description**: Create a new directory `tests/lib` and file `tests/lib/test-harness.ts`. Implement and export an async function `setupTestEnvironment()` that creates a temp directory, initializes a git repo, and returns `{ testGraphPath, cleanup, reset }`. The `cleanup` function should delete the temp directory (`for afterAll`). The `reset` function should clean the directory contents and re-initialize git (`for beforeEach`).
-- **files**: tests/lib/test-harness.ts (new)
-
-### Task 2.2: Refactor Integration and E2E Tests to Use the Harness
-
-- **uuid**: e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f
-- **status**: done
-- **job-id**: job-b2ec7d18
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: In each test file, import `setupTestEnvironment` from `../lib/test-harness.ts`. Replace the manual `beforeAll`, `afterAll`, and `beforeEach` logic for directory and git management with calls to `setupTestEnvironment`, `cleanup`, and `reset`. Ensure variables like `tempDir`, `testGraphPath`, and `mockConfig` are updated to use the values returned from the harness.
-- **files**: tests/integration/mem-api.test.ts, tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Part 3: Consolidate Mock LLM Utility (DRY)
-
-### Task 3.1: Add Shared `createMockQueryLLM` to Test Harness
-
-- **uuid**: b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f]
-- **description**: Open `tests/lib/test-harness.ts`. Add and export a new function `createMockQueryLLM(responses: string[])`. This function should accept an array of strings and return a mock function compatible with the `queryLLM` parameter in `handleUserQuery`. The returned mock should cycle through the `responses` array on each call and throw an error if called more times than responses are available.
-- **files**: tests/lib/test-harness.ts
-
-### Task 3.2: Refactor Tests to Use Shared LLM Mock
-
-- **uuid**: a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d
-- **status**: done
-- **job-id**: job-11bd80d6
-- **depends-on**: [b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d]
-- **description**: In `tests/integration/workflow.test.ts`, remove the local `createMockLLMQuery` function. In `tests/e2e/agent-workflow.test.ts`, remove the local `createMockQueryLLM` function. In both files, import the new `createMockQueryLLM` from `../lib/test-harness.ts`. Update all call sites to use the imported mock generator.
-- **files**: tests/integration/workflow.test.ts, tests/e2e/agent-workflow.test.ts
-
-## Audit Task
-
-### Task A.1: Final Audit and Merge
-
-- **uuid**: audit-001
-- **status**: todo
-- **job-id**:
-- **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
-- **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
 ````
 
 ## File: src/core/mem-api/file-ops.ts
@@ -5361,15 +6264,41 @@ export const handleUserQuery = async (
 ## File: package.json
 ````json
 {
-  "name": "recursa-server",
-  "version": "0.1.0",
+  "name": "recursa-mcp",
+  "version": "0.1.1",
   "description": "Git-Native AI agent with MCP protocol support",
   "type": "module",
+  "main": "dist/server.cjs",
+  "module": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "recursa-mcp": "./bin/recursa-mcp"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "start:termux": "npm run start",
     "start:standard": "npm run start",
-    "build": "tsc",
+    "build": "tsup",
+    "build:cjs": "tsup --format cjs",
+    "build:esm": "tsup --format esm",
     "build:auto": "node scripts/build.js",
     "build:termux": "node scripts/build.js termux",
     "build:standard": "node scripts/build.js standard",
@@ -5392,23 +6321,40 @@ export const handleUserQuery = async (
   "devDependencies": {
     "@jest/globals": "^29.7.0",
     "@modelcontextprotocol/sdk": "^1.0.1",
-    "eventsource": "^2.0.2",
     "@types/expect": "^1.20.4",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.10.0",
     "@typescript-eslint/eslint-plugin": "^8.46.4",
     "@typescript-eslint/parser": "^8.46.4",
     "eslint": "^9.39.1",
+    "eventsource": "^2.0.2",
     "jest": "^29.7.0",
     "jest-extended": "^4.0.2",
     "ts-jest": "^29.1.2",
+    "tsup": "^8.5.1",
     "tsx": "^4.7.2",
     "typescript": "^5.3.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "ai-agent",
+    "mcp",
+    "model-context-protocol",
+    "git-native",
+    "local-llm",
+    "memory"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/recursa-hq/recursa-doc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/recursa-hq/recursa-doc/issues"
+  },
+  "homepage": "https://github.com/recursa-hq/recursa-doc#readme"
 }
 ````
 
@@ -5526,7 +6472,6 @@ export const queryGraph =
 export const getBacklinks =
   (graphRoot: string) =>
   async (filePath: string): Promise<string[]> => {
-    const targetBaseName = path.basename(filePath, path.extname(filePath));
     const targetWithoutExt = path.basename(filePath, path.extname(filePath));
     const targetWithExt = path.basename(filePath);
 
@@ -5710,6 +6655,16 @@ import type { ChatMessage } from './types/llm.js';
 import { fileURLToPath } from 'url';
 import simpleGit from 'simple-git';
 import { promises as fs } from 'fs';
+
+// Serializable value type for FastMCP logger
+type SerializableValue =
+  | boolean
+  | null
+  | number
+  | string
+  | undefined
+  | SerializableValue[]
+  | { [key: string]: SerializableValue };
 import path from 'path';
 
 /**
@@ -5771,13 +6726,13 @@ export const createMcpServer = async (
             log.info(content || 'Thinking...');
             break;
           case 'act':
-            log.info(message, data as any);
+            log.info(message, data as SerializableValue);
             break;
           case 'error':
-            log.error(message, data as any);
+            log.error(message, data as SerializableValue);
             break;
           default:
-            log.debug(message, data as any);
+            log.debug(message, data as SerializableValue);
         }
       };
 
@@ -5801,7 +6756,7 @@ export const createMcpServer = async (
             : {
                 message: errorMessage,
                 original: error,
-              }) as any
+              }) as SerializableValue
         );
         return JSON.stringify({
           error: errorMessage,
@@ -5897,9 +6852,19 @@ const main = async () => {
     const server = await createMcpServer(config);
 
     // 4. Start the server
-    await server.start({ transportType: 'stdio' });
-
-    logger.info('Recursa MCP Server is running and listening on stdio.');
+    if (config.transportType === 'sse') {
+      await server.start({
+        transportType: 'sse',
+        sse: {
+          endpoint: '/sse',
+          port: config.port,
+        },
+      });
+      logger.info(`Recursa MCP Server is running on SSE at http://localhost:${config.port}/sse`);
+    } else {
+      await server.start({ transportType: 'stdio' });
+      logger.info('Recursa MCP Server is running on stdio.');
+    }
   } catch (error) {
     logger.error('Failed to start server', error as Error);
     process.exit(1);
@@ -5907,7 +6872,7 @@ const main = async () => {
 };
 
 // Only run main if this file is the entry point
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (typeof import.meta !== 'undefined' && process.argv[1] === fileURLToPath(import.meta.url)) {
   main();
 }
 ````

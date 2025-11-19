@@ -205,9 +205,19 @@ const main = async () => {
     const server = await createMcpServer(config);
 
     // 4. Start the server
-    await server.start({ transportType: 'stdio' });
-
-    logger.info('Recursa MCP Server is running and listening on stdio.');
+    if (config.transportType === 'sse') {
+      await server.start({
+        transportType: 'sse',
+        sse: {
+          endpoint: '/sse',
+          port: config.port,
+        },
+      });
+      logger.info(`Recursa MCP Server is running on SSE at http://localhost:${config.port}/sse`);
+    } else {
+      await server.start({ transportType: 'stdio' });
+      logger.info('Recursa MCP Server is running on stdio.');
+    }
   } catch (error) {
     logger.error('Failed to start server', error as Error);
     process.exit(1);

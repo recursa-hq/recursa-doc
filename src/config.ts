@@ -30,6 +30,9 @@ const configSchema = z.object({
   SANDBOX_MEMORY_LIMIT: z.coerce.number().default(getPlatformDefaults().SANDBOX_MEMORY_LIMIT).optional(),
   GIT_USER_NAME: z.string().default(getPlatformDefaults().GIT_USER_NAME).optional(),
   GIT_USER_EMAIL: z.string().default(getPlatformDefaults().GIT_USER_EMAIL).optional(),
+  TRANSPORT_TYPE: z.enum(['stdio', 'sse']).default('stdio').optional(),
+  PORT: z.coerce.number().default(3000).optional(),
+  MOCK_QUEUE_FILE: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -42,6 +45,9 @@ export type AppConfig = {
   sandboxMemoryLimit: number;
   gitUserName: string;
   gitUserEmail: string;
+  transportType: 'stdio' | 'sse';
+  port: number;
+  mockQueueFile?: string;
 };
 
 /**
@@ -114,7 +120,7 @@ const ensureKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => 
   } catch (error) {
     if ((error as Error & { code?: string }).code === 'ENOENT') {
       // Directory doesn't exist, create it
-      console.log(`Creating knowledge graph directory at: ${resolvedPath}`);
+      console.error(`Creating knowledge graph directory at: ${resolvedPath}`);
       await fs.mkdir(resolvedPath, { recursive: true });
       return; // Created successfully
     }
@@ -161,6 +167,9 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     SANDBOX_MEMORY_LIMIT,
     GIT_USER_NAME,
     GIT_USER_EMAIL,
+    TRANSPORT_TYPE,
+    PORT,
+    MOCK_QUEUE_FILE,
   } = parseResult.data;
 
   // Resolve and validate the knowledge graph path
@@ -168,10 +177,10 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
   await ensureKnowledgeGraphPath(resolvedPath);
 
   // Log platform-specific information
-  console.log(`🔧 Platform: ${platform.platformString}`);
+  console.error(`🔧 Platform: ${platform.platformString}`);
   if (platform.isTermux) {
-    console.log('📱 Running in Termux/Android environment');
-    console.log(`⚡ Memory limit: ${SANDBOX_MEMORY_LIMIT}MB, Timeout: ${SANDBOX_TIMEOUT}ms`);
+    console.error('📱 Running in Termux/Android environment');
+    console.error(`⚡ Memory limit: ${SANDBOX_MEMORY_LIMIT}MB, Timeout: ${SANDBOX_TIMEOUT}ms`);
   }
 
   return Object.freeze({
@@ -184,5 +193,8 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
     sandboxMemoryLimit: SANDBOX_MEMORY_LIMIT!,
     gitUserName: GIT_USER_NAME!,
     gitUserEmail: GIT_USER_EMAIL!,
+    transportType: TRANSPORT_TYPE!,
+    port: PORT!,
+    mockQueueFile: MOCK_QUEUE_FILE,
   });
 };

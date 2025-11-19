@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+
+// Handle import.meta for CommonJS compatibility
+if (typeof global.import_meta2 === 'undefined') {
+  global.import_meta2 = { url: import.meta ? import.meta.url : `file://${__filename}` };
+}
+
+// Import the server - use relative path from bin directory
+import('../dist/server.js').catch(err => {
+  console.error('Failed to start Recursa MCP server:', err);
+  process.exit(1);
+});

@@ -71,9 +71,17 @@ graph TD
 
 ### 1. Installation
 
+**Option 1: Install via npm (Recommended)**
+
 ```bash
-git clone https://github.com/your-username/recursa-mcp.git
-cd recursa-mcp
+npm install -g recursa-mcp
+```
+
+**Option 2: Clone and build from source**
+
+```bash
+git clone https://github.com/recursa-hq/recursa-doc.git
+cd recursa-doc
 npm install
 ```
 
@@ -129,12 +137,30 @@ npm run start:termux
 
 Recursa runs as an MCP server over Stdio. Configure your MCP client (like Claude Desktop) to run the startup command:
 
+**For npm-installed version:**
+
+```json
+{
+  "mcpServers": {
+    "recursa": {
+      "command": "recursa-mcp",
+      "env": {
+        "OPENROUTER_API_KEY": "your-key",
+        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph"
+      }
+    }
+  }
+}
+```
+
+**For source-built version:**
+
 ```json
 {
   "mcpServers": {
     "recursa": {
       "command": "node",
-      "args": ["/path/to/recursa-mcp/dist/server.js"],
+      "args": ["/path/to/recursa-doc/dist/server.js"],
       "env": {
         "OPENROUTER_API_KEY": "your-key",
         "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph"

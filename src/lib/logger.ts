@@ -55,8 +55,9 @@ const createLoggerInternal = (baseContext: LogContext = {}): Logger => {
       message,
       ...finalContext,
     };
-     
-    console.log(JSON.stringify(logEntry));
+
+    // Write to stderr to avoid interfering with stdout-based protocols (like MCP stdio)
+    console.error(JSON.stringify(logEntry));
   };
 
   const error = (message: string, err?: Error, context?: LogContext) => {

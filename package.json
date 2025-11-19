@@ -1,6 +1,6 @@
 {
   "name": "recursa-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Git-Native AI agent with MCP protocol support",
   "type": "module",
   "main": "dist/server.cjs",
@@ -20,11 +20,12 @@
   },
   "files": [
     "dist/",
+    "bin/",
     "README.md",
     "LICENSE"
   ],
   "bin": {
-    "recursa-mcp": "./dist/server.cjs"
+    "recursa-mcp": "./bin/recursa-mcp"
   },
   "scripts": {
     "start": "node dist/server.js",
@@ -83,10 +84,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/recursa-mcp.git"
+    "url": "https://github.com/recursa-hq/recursa-doc.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/recursa-mcp/issues"
+    "url": "https://github.com/recursa-hq/recursa-doc/issues"
   },
-  "homepage": "https://github.com/your-username/recursa-mcp#readme"
+  "homepage": "https://github.com/recursa-hq/recursa-doc#readme"
 }

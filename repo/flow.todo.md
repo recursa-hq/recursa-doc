@@ -1,3 +1,9 @@
+====
+
+I want all important test cases should be real mcp client using inspector docs/inspector.mcp.md cli mode with all transport coverage
+
+=== DONE
+
 learn openmemory on how to monetize mcp tool
 
 === DONE 
