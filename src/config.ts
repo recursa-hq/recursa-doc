@@ -22,7 +22,7 @@ const getPlatformDefaults = () => {
 
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
-  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  KNOWLEDGE_GRAPH_PATH: z.string().optional(),
   LLM_MODEL: z.string().default(getPlatformDefaults().LLM_MODEL).optional(),
   LLM_TEMPERATURE: z.coerce.number().default(getPlatformDefaults().LLM_TEMPERATURE).optional(),
   LLM_MAX_TOKENS: z.coerce.number().default(getPlatformDefaults().LLM_MAX_TOKENS).optional(),
@@ -63,7 +63,12 @@ const normalizeEnvVars = () => {
 /**
  * Resolve and validate the knowledge graph path with platform awareness
  */
-const resolveKnowledgeGraphPath = (basePath: string): string => {
+const resolveKnowledgeGraphPath = (basePath?: string): string => {
+  // Default to .recursa in CWD if not provided
+  if (!basePath) {
+    return path.join(process.cwd(), '.recursa');
+  }
+
   // Normalize path separators for the current platform
   let resolvedPath = platform.normalizePath(basePath);
 
@@ -91,11 +96,13 @@ const resolveKnowledgeGraphPath = (basePath: string): string => {
 };
 
 /**
- * Validate that the knowledge graph directory exists and is accessible
+ * Ensure that the knowledge graph directory exists and is accessible
  */
-const validateKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => {
+const ensureKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => {
   // Skip validation in test environments
   if (process.env.NODE_ENV === 'test') {
+    // In tests, we might want to ensure it exists or let the harness handle it.
+    // The harness handles creation, so we skip here.
     return;
   }
 
@@ -104,41 +111,29 @@ const validateKnowledgeGraphPath = async (resolvedPath: string): Promise<void> =
     if (!stats.isDirectory()) {
       throw new Error('Path exists but is not a directory.');
     }
-
-    // Test write permissions in a cross-platform way
-    const testFile = path.join(resolvedPath, '.recursa-write-test');
-    try {
-      await fs.writeFile(testFile, 'test');
-      await fs.unlink(testFile);
-    } catch {
-      if (platform.isWindows) {
-        throw new Error('Directory is not writable. Check folder permissions.');
-      } else if (platform.isTermux) {
-        throw new Error('Directory is not writable. Check Termux storage permissions.');
-      } else {
-        throw new Error('Directory is not writable. Check file permissions.');
-      }
-    }
-
-    // Check available disk space (Unix-like systems only)
-    if (!platform.isWindows) {
-      try {
-        const stats = await fs.statfs(resolvedPath);
-        const availableSpace = stats.bavail * stats.bsize;
-        const minSpace = 100 * 1024 * 1024; // 100MB minimum
-        if (availableSpace < minSpace) {
-          console.warn(`⚠️  Low disk space: ${Math.floor(availableSpace / 1024 / 1024)}MB available`);
-        }
-      } catch {
-        // Ignore filesystem stats errors
-      }
-    }
-
   } catch (error) {
     if ((error as Error & { code?: string }).code === 'ENOENT') {
-      throw new Error('Directory does not exist. Please create it before continuing.');
+      // Directory doesn't exist, create it
+      console.log(`Creating knowledge graph directory at: ${resolvedPath}`);
+      await fs.mkdir(resolvedPath, { recursive: true });
+      return; // Created successfully
     }
     throw error;
+  }
+
+  // Test write permissions in a cross-platform way
+  const testFile = path.join(resolvedPath, '.recursa-write-test');
+  try {
+    await fs.writeFile(testFile, 'test');
+    await fs.unlink(testFile);
+  } catch {
+    if (platform.isWindows) {
+      throw new Error('Directory is not writable. Check folder permissions.');
+    } else if (platform.isTermux) {
+      throw new Error('Directory is not writable. Check Termux storage permissions.');
+    } else {
+      throw new Error('Directory is not writable. Check file permissions.');
+    }
   }
 };
 
@@ -170,7 +165,7 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
 
   // Resolve and validate the knowledge graph path
   const resolvedPath = resolveKnowledgeGraphPath(KNOWLEDGE_GRAPH_PATH);
-  await validateKnowledgeGraphPath(resolvedPath);
+  await ensureKnowledgeGraphPath(resolvedPath);
 
   // Log platform-specific information
   console.log(`🔧 Platform: ${platform.platformString}`);

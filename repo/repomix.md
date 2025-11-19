@@ -1,7 +1,6 @@
 # Directory Structure
 ```
 docs/
-  readme.md
   rules.md
   system-prompt.md
   tools.md
@@ -72,6 +71,225 @@ tsconfig.tsbuildinfo
 ```
 
 # Files
+
+## File: src/lib/platform.ts
+````typescript
+/**
+ * Platform detection and utilities for cross-platform compatibility
+ */
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+export const platform = {
+  /** Current operating system platform */
+  isWindows: process.platform === 'win32',
+  isMacOS: process.platform === 'darwin',
+  isLinux: process.platform === 'linux',
+  isAndroid: process.platform === 'android',
+
+  /** Termux environment detection */
+  get isTermux(): boolean {
+    return this.isAndroid ||
+           process.env.TERMUX === 'true' ||
+           process.env.PREFIX?.includes('/com.termux') ||
+           process.env.TERMUX_VERSION !== undefined;
+  },
+
+  /** WSL (Windows Subsystem for Linux) detection */
+  get isWSL(): boolean {
+    return this.isLinux && (
+      process.env.WSL_DISTRO_NAME !== undefined ||
+      process.env.WSLENV !== undefined ||
+      fs.existsSync('/proc/version') &&
+      fs.readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
+    );
+  },
+
+  /** File system capabilities */
+  get hasCaseInsensitiveFS(): boolean {
+    return this.isWindows || this.isMacOS;
+  },
+
+  get hasFilePermissions(): boolean {
+    return !this.isWindows;
+  },
+
+  get supportsSymlinks(): boolean {
+    return this.isLinux || this.isMacOS || this.isWSL;
+  },
+
+  get supportsHardLinks(): boolean {
+    return this.isLinux || this.isMacOS;
+  },
+
+  /** Path separator */
+  get pathSeparator(): string {
+    return this.isWindows ? '\\' : '/';
+  },
+
+  /** Line ending */
+  get lineEnding(): string {
+    return this.isWindows ? '\r\n' : '\n';
+  },
+
+  /** Executable file extensions */
+  get executableExtensions(): string[] {
+    return this.isWindows ? ['.exe', '.bat', '.cmd'] : [];
+  },
+
+  /** Environment variable normalization */
+  normalizeEnvVar(key: string): string {
+    return this.isWindows ? key.toUpperCase() : key;
+  },
+
+  /** Path normalization for cross-platform */
+  normalizePath(p: string): string {
+    const normalized = path.normalize(p);
+    if (this.isWindows) {
+      return normalized.replace(/\//g, '\\');
+    }
+    return normalized.replace(/\\/g, '/');
+  },
+
+  /** Check if path is absolute */
+  isAbsolute(p: string): boolean {
+    if (this.isWindows) {
+      return /^[A-Za-z]:\\|\\\\/.test(p) || path.isAbsolute(p);
+    }
+    return path.isAbsolute(p);
+  },
+
+  /** Get platform-specific resource limits */
+  getResourceLimits() {
+    const limits = {
+      maxMemory: 512 * 1024 * 1024, // 512MB default
+      maxCpuTime: 30000, // 30 seconds default
+      maxFileSize: 10 * 1024 * 1024, // 10MB default
+      maxProcesses: 10,
+    };
+
+    if (this.isTermux) {
+      // More conservative limits for mobile environments
+      return {
+        ...limits,
+        maxMemory: 256 * 1024 * 1024, // 256MB
+        maxCpuTime: 15000, // 15 seconds
+        maxFileSize: 5 * 1024 * 1024, // 5MB
+        maxProcesses: 5,
+      };
+    }
+
+    return limits;
+  },
+
+  /** Get platform-specific temp directory */
+  getTempDir(): string {
+    if (this.isWindows) {
+      return process.env.TEMP || process.env.TMP || path.join(os.tmpdir(), 'recursa');
+    }
+
+    return process.env.TMPDIR || os.tmpdir();
+  },
+
+  /** Get platform-specific user data directory */
+  getUserDataDir(appName: string = 'recursa'): string {
+    const homeDir = os.homedir();
+
+    if (this.isWindows) {
+      return process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming', appName);
+    }
+
+    if (this.isMacOS) {
+      return path.join(homeDir, 'Library', 'Application Support', appName);
+    }
+
+    // Linux, Android, etc.
+    return process.env.XDG_DATA_HOME || path.join(homeDir, '.local', 'share', appName);
+  },
+
+  /** Platform-specific error handling */
+  handleFileError(error: Error & { code?: string }, operation: string, filePath?: string): Error {
+    const message = filePath ? `${operation} failed for ${filePath}` : `${operation} failed`;
+
+    if (this.isWindows) {
+      // Windows-specific error codes and messages
+      if (error.code === 'EPERM') {
+        return new Error(`${message}: Permission denied. Try running as administrator.`);
+      }
+      if (error.code === 'EBUSY') {
+        return new Error(`${message}: File is in use by another process.`);
+      }
+    }
+
+    if (this.isTermux) {
+      // Termux/Android specific errors
+      if (error.code === 'EACCES') {
+        return new Error(`${message}: Permission denied. Check storage permissions.`);
+      }
+    }
+
+    return new Error(`${message}: ${error.message}`);
+  },
+
+  /** Platform detection string for logging */
+  get platformString(): string {
+    const parts: string[] = [process.platform, process.arch];
+
+    if (this.isTermux) parts.push('termux');
+    if (this.isWSL) parts.push('wsl');
+
+    return parts.join('-');
+  },
+
+  /** Feature detection */
+  async detectFeatures(): Promise<Record<string, boolean>> {
+    const fsp = fs.promises;
+    const features: Record<string, boolean> = {};
+
+    // Test symlink support
+    try {
+      const testFile = path.join(this.getTempDir(), 'symlink-test');
+      await fsp.writeFile(testFile, 'test');
+      const linkFile = testFile + '-link';
+      await fsp.symlink(testFile, linkFile);
+      await fsp.unlink(linkFile);
+      await fsp.unlink(testFile);
+      features.symlinks = true;
+    } catch {
+      features.symlinks = false;
+    }
+
+    // Test hard link support
+    try {
+      const testFile = path.join(this.getTempDir(), 'hardlink-test');
+      await fsp.writeFile(testFile, 'test');
+      const linkFile = testFile + '-hard';
+      await fsp.link(testFile, linkFile);
+      await fsp.unlink(linkFile);
+      await fsp.unlink(testFile);
+      features.hardLinks = true;
+    } catch {
+      features.hardLinks = false;
+    }
+
+    // Test file permissions
+    try {
+      const testFile = path.join(this.getTempDir(), 'perm-test');
+      await fsp.writeFile(testFile, 'test');
+      await fsp.chmod(testFile, 0o755);
+      await fsp.unlink(testFile);
+      features.filePermissions = true;
+    } catch {
+      features.filePermissions = false;
+    }
+
+    return features;
+  }
+};
+
+export default platform;
+````
 
 ## File: tests/e2e/mcp-tools.test.ts
 ````typescript
@@ -170,7 +388,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert: Check result content
-    const content = (result as any).content[0].text;
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+        throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+        throw new Error('Expected text content');
+    }
+    const content = firstItem.text;
     const parsed = JSON.parse(content);
     expect(parsed.reply).toBe('File created.');
 
@@ -201,7 +426,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Committed.');
 
     // Verify Git Log
@@ -237,7 +469,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Found persons.');
     // We rely on the fact that the agent ran successfully. 
     // In a real scenario, the agent would use the query results in its reply.
@@ -268,7 +507,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Reverted.');
 
     // Verify file content was reverted
@@ -300,7 +546,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Counted tokens.');
   });
 
@@ -328,231 +581,17 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Operation failed due to Sandbox Explosion.');
   });
 });
-````
-
-## File: src/lib/platform.ts
-````typescript
-/**
- * Platform detection and utilities for cross-platform compatibility
- */
-
-export const platform = {
-  /** Current operating system platform */
-  isWindows: process.platform === 'win32',
-  isMacOS: process.platform === 'darwin',
-  isLinux: process.platform === 'linux',
-  isAndroid: process.platform === 'android',
-
-  /** Termux environment detection */
-  get isTermux(): boolean {
-    return this.isAndroid ||
-           process.env.TERMUX === 'true' ||
-           process.env.PREFIX?.includes('/com.termux') ||
-           process.env.TERMUX_VERSION !== undefined;
-  },
-
-  /** WSL (Windows Subsystem for Linux) detection */
-  get isWSL(): boolean {
-    return this.isLinux && (
-      process.env.WSL_DISTRO_NAME !== undefined ||
-      process.env.WSLENV !== undefined ||
-      require('fs').existsSync('/proc/version') &&
-      require('fs').readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
-    );
-  },
-
-  /** File system capabilities */
-  get hasCaseInsensitiveFS(): boolean {
-    return this.isWindows || this.isMacOS;
-  },
-
-  get hasFilePermissions(): boolean {
-    return !this.isWindows;
-  },
-
-  get supportsSymlinks(): boolean {
-    return this.isLinux || this.isMacOS || this.isWSL;
-  },
-
-  get supportsHardLinks(): boolean {
-    return this.isLinux || this.isMacOS;
-  },
-
-  /** Path separator */
-  get pathSeparator(): string {
-    return this.isWindows ? '\\' : '/';
-  },
-
-  /** Line ending */
-  get lineEnding(): string {
-    return this.isWindows ? '\r\n' : '\n';
-  },
-
-  /** Executable file extensions */
-  get executableExtensions(): string[] {
-    return this.isWindows ? ['.exe', '.bat', '.cmd'] : [];
-  },
-
-  /** Environment variable normalization */
-  normalizeEnvVar(key: string): string {
-    return this.isWindows ? key.toUpperCase() : key;
-  },
-
-  /** Path normalization for cross-platform */
-  normalizePath(p: string): string {
-    const normalized = require('path').normalize(p);
-    if (this.isWindows) {
-      return normalized.replace(/\//g, '\\');
-    }
-    return normalized.replace(/\\/g, '/');
-  },
-
-  /** Check if path is absolute */
-  isAbsolute(p: string): boolean {
-    if (this.isWindows) {
-      return /^[A-Za-z]:\\|\\\\/.test(p) || require('path').isAbsolute(p);
-    }
-    return require('path').isAbsolute(p);
-  },
-
-  /** Get platform-specific resource limits */
-  getResourceLimits() {
-    const limits = {
-      maxMemory: 512 * 1024 * 1024, // 512MB default
-      maxCpuTime: 30000, // 30 seconds default
-      maxFileSize: 10 * 1024 * 1024, // 10MB default
-      maxProcesses: 10,
-    };
-
-    if (this.isTermux) {
-      // More conservative limits for mobile environments
-      return {
-        ...limits,
-        maxMemory: 256 * 1024 * 1024, // 256MB
-        maxCpuTime: 15000, // 15 seconds
-        maxFileSize: 5 * 1024 * 1024, // 5MB
-        maxProcesses: 5,
-      };
-    }
-
-    return limits;
-  },
-
-  /** Get platform-specific temp directory */
-  getTempDir(): string {
-    const os = require('os');
-    const path = require('path');
-
-    if (this.isWindows) {
-      return process.env.TEMP || process.env.TMP || path.join(os.tmpdir(), 'recursa');
-    }
-
-    return process.env.TMPDIR || os.tmpdir();
-  },
-
-  /** Get platform-specific user data directory */
-  getUserDataDir(appName: string = 'recursa'): string {
-    const os = require('os');
-    const path = require('path');
-    const homeDir = os.homedir();
-
-    if (this.isWindows) {
-      return process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming', appName);
-    }
-
-    if (this.isMacOS) {
-      return path.join(homeDir, 'Library', 'Application Support', appName);
-    }
-
-    // Linux, Android, etc.
-    return process.env.XDG_DATA_HOME || path.join(homeDir, '.local', 'share', appName);
-  },
-
-  /** Platform-specific error handling */
-  handleFileError(error: Error & { code?: string }, operation: string, filePath?: string): Error {
-    const message = filePath ? `${operation} failed for ${filePath}` : `${operation} failed`;
-
-    if (this.isWindows) {
-      // Windows-specific error codes and messages
-      if (error.code === 'EPERM') {
-        return new Error(`${message}: Permission denied. Try running as administrator.`);
-      }
-      if (error.code === 'EBUSY') {
-        return new Error(`${message}: File is in use by another process.`);
-      }
-    }
-
-    if (this.isTermux) {
-      // Termux/Android specific errors
-      if (error.code === 'EACCES') {
-        return new Error(`${message}: Permission denied. Check storage permissions.`);
-      }
-    }
-
-    return new Error(`${message}: ${error.message}`);
-  },
-
-  /** Platform detection string for logging */
-  get platformString(): string {
-    const parts: string[] = [process.platform, process.arch];
-
-    if (this.isTermux) parts.push('termux');
-    if (this.isWSL) parts.push('wsl');
-
-    return parts.join('-');
-  },
-
-  /** Feature detection */
-  async detectFeatures(): Promise<Record<string, boolean>> {
-    const fs = require('fs').promises;
-    const features: Record<string, boolean> = {};
-
-    // Test symlink support
-    try {
-      const testFile = require('path').join(this.getTempDir(), 'symlink-test');
-      await fs.writeFile(testFile, 'test');
-      const linkFile = testFile + '-link';
-      await fs.symlink(testFile, linkFile);
-      await fs.unlink(linkFile);
-      await fs.unlink(testFile);
-      features.symlinks = true;
-    } catch {
-      features.symlinks = false;
-    }
-
-    // Test hard link support
-    try {
-      const testFile = require('path').join(this.getTempDir(), 'hardlink-test');
-      await fs.writeFile(testFile, 'test');
-      const linkFile = testFile + '-hard';
-      await fs.link(testFile, linkFile);
-      await fs.unlink(linkFile);
-      await fs.unlink(testFile);
-      features.hardLinks = true;
-    } catch {
-      features.hardLinks = false;
-    }
-
-    // Test file permissions
-    try {
-      const testFile = require('path').join(this.getTempDir(), 'perm-test');
-      await fs.writeFile(testFile, 'test');
-      await fs.chmod(testFile, 0o755);
-      await fs.unlink(testFile);
-      features.filePermissions = true;
-    } catch {
-      features.filePermissions = false;
-    }
-
-    return features;
-  }
-};
-
-export default platform;
 ````
 
 ## File: tests/integration/mem-api-file-ops.test.ts
@@ -911,275 +950,196 @@ npm run dev:termux
 
 ## File: README.md
 ````markdown
-# Recursa MCP Server
+# Recursa: The Git-Native Memory Layer for Local-First LLMs
 
-A Git-Native AI agent with MCP (Model Context Protocol) support that works across multiple platforms.
+**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
 
-## 🌟 Cross-Platform Support
+**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
 
-✅ **Linux, macOS, Windows (WSL2), Termux/Android**
-📱 **Mobile-optimized** with conservative resource limits
-🔒 **Enhanced security** with cross-platform path protection
-⚡ **Auto-detecting** platform detection and optimization
-
-## 🚀 Quick Start
-
-### Automatic Installation (Recommended)
-```bash
-# Clone and install with automatic platform detection
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-npm run install:auto
-npm run build:auto
-npm run dev
-```
-
-### Platform-Specific Installation
-
-#### Linux, macOS, Windows (WSL2)
-```bash
-npm run install:standard
-npm run build:standard
-npm run dev:standard
-```
-
-#### Termux/Android
-```bash
-# Install Termux from F-Droid, then:
-pkg update && pkg install nodejs npm git
-npm run install:termux
-npm run build:termux
-npm run dev:termux
-```
-
-## 📋 Prerequisites
-
-### Minimum Requirements
-- **Node.js 18+**
-- **Git** for version control
-- **512MB RAM** (1GB+ recommended)
-
-### Platform-Specific
-
-#### Termux/Android
-- Android 7.0+ with Termux app
-- Storage permissions (`termux-setup-storage`)
-
-#### Windows
-- Windows 10/11 (WSL2 recommended)
-- PowerShell or Git Bash
-- Developer mode enabled (for symlink support)
-
-#### Linux
-- Build tools for native modules:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install build-essential
-
-  # Fedora
-  sudo dnf groupinstall "Development Tools"
-  ```
-
-## ⚙️ Configuration
-
-Create a `.env` file with your configuration:
-
-```bash
-# Required
-OPENROUTER_API_KEY=your_api_key_here
-KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
-
-# Optional (platform-specific defaults apply)
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4000
-SANDBOX_TIMEOUT=10000
-SANDBOX_MEMORY_LIMIT=100
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-```
-
-### Platform-Specific Defaults
-
-| Platform | Memory Limit | Max Tokens | Timeout |
-|----------|--------------|------------|---------|
-| Desktop (Linux/macOS/Windows) | 512MB | 4000 | 10s |
-| Termux/Android | 256MB | 2000 | 15s |
-
-## 🏗️ Build & Development
-
-### Available Scripts
-```bash
-# Installation
-npm run install:auto     # Auto-detect platform and install
-npm run install:termux   # Termux/Android specific
-npm run install:standard # Standard platforms
-
-# Building
-npm run build:auto       # Auto-detect platform and build
-npm run build:termux     # Termux/Android specific
-npm run build:standard   # Standard platforms
-
-# Development
-npm run dev              # Standard development
-npm run dev:termux       # Termux development
-npm run dev:standard     # Standard development
-
-# Production
-npm run start            # Start production server
-npm run start:termux     # Termux production
-npm run start:standard   # Standard production
-
-# Utilities
-npm run typecheck        # TypeScript type checking
-npm run test             # Run tests
-```
-
-## 📁 Project Structure
-
-```
-recursa-doc/
-├── src/
-│   ├── lib/
-│   │   └── platform.ts          # Cross-platform utilities
-│   ├── core/
-│   │   ├── mem-api/
-│   │   │   ├── secure-path.ts   # Enhanced path security
-│   │   │   └── file-ops.ts      # Cross-platform file operations
-│   │   └── sandbox.ts           # Platform-aware sandbox
-│   ├── config.ts                # Platform-aware configuration
-│   └── server.ts                # Main server
-├── scripts/
-│   ├── install.js               # Cross-platform installer
-│   └── build.js                 # Cross-platform builder
-├── docs/
-│   ├── PLATFORM_SUPPORT.md      # Detailed platform info
-│   └── TROUBLESHOOTING.md       # Troubleshooting guide
-└── tests/                       # Cross-platform tests
-```
-
-## 🔧 Features
-
-### Cross-Platform Capabilities
-- **Automatic platform detection** (Linux, macOS, Windows, Termux/Android)
-- **Adaptive resource limits** based on platform capabilities
-- **Cross-platform path security** with symlink protection
-- **Atomic file operations** with platform-specific error handling
-- **Platform-aware build system** with automatic fallbacks
-
-### Core Functionality
-- **MCP Protocol Support** for model context integration
-- **Git-Native Operations** with full repository management
-- **Secure File Operations** with path traversal protection
-- **Sandboxed Execution** with resource limits
-- **TypeScript Support** with full type safety
-
-### Security Features
-- **Path Traversal Protection** with cross-platform validation
-- **Symlink Attack Prevention** with configurable policies
-- **Resource Limiting** (memory, CPU, file size)
-- **Sandbox Isolation** with platform-specific constraints
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Installation Fails
-```bash
-# Try platform-specific installation
-npm run install:termux    # For Termux/Android
-npm run install:standard  # For desktop platforms
-
-# Or manual installation
-npm install --ignore-scripts --no-bin-links
-```
-
-#### Permission Errors
-```bash
-# Termux: Setup storage access
-termux-setup-storage
-
-# Linux/macOS: Fix npm permissions
-sudo chown -R $(whoami) ~/.npm
-
-# Windows: Run as administrator or enable Developer Mode
-```
-
-#### Build Fails
-```bash
-# Clean and rebuild
-rm -rf node_modules dist
-npm run install:auto
-npm run build:auto
-
-# Check platform detection
-node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-```
-
-For detailed troubleshooting, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-
-## 📚 Documentation
-
-- [Platform Support](docs/PLATFORM_SUPPORT.md) - Detailed platform information
-- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [API Documentation](docs/API.md) - API reference (coming soon)
-- [Development Guide](docs/DEVELOPMENT.md) - Contributing guidelines (coming soon)
-
-## 🔍 Platform Detection
-
-The server automatically detects and optimizes for your platform:
-
-```typescript
-import platform from './src/lib/platform.js';
-
-console.log(`Platform: ${platform.platformString}`);
-console.log(`Is Termux: ${platform.isTermux}`);
-console.log(`Resource limits:`, platform.getResourceLimits());
-console.log(`Temp directory: ${platform.getTempDir()}`);
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please ensure:
-1. Test on all supported platforms
-2. Use platform detection utilities
-3. Update documentation
-4. Include cross-platform tests
-
-### Development Setup
-```bash
-# Clone and install for development
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-npm run install:auto
-npm run dev
-
-# Run tests across platforms
-npm run test
-```
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- 📖 Check [documentation](docs/)
-- 🐛 [Report issues](https://github.com/your-repo/recursa-doc/issues)
-- 💬 [Discussions](https://github.com/your-repo/recursa-doc/discussions)
-
-## 🔮 Roadmap
-
-- [ ] Additional platform support (FreeBSD, iOS)
-- [ ] Docker multi-platform builds
-- [ ] Performance optimizations
-- [ ] Enhanced monitoring and logging
-- [ ] Plugin system for extensions
-- [ ] Web UI for configuration
+Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
 
 ---
 
-**Built with ❤️ for cross-platform AI agent development**
+## The Problem: Agent Amnesia & The RAG Ceiling
+
+You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
+
+1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
+2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
+3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
+
+Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
+
+## The Recursa Philosophy: Core Features
+
+Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
+
+- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
+- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
+- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
+- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
+- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
+
+## How It Works: Architecture
+
+Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
+
+```mermaid
+graph TD
+    subgraph Your Local Machine
+        A[MCP Client <br> e.g., your script, or a compatible editor]
+        B[Recursa MCP Server <br> (This Project)]
+        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
+
+        A -- 1. User Query via Stdio --> B
+        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
+        B -- 3. Executes Sandboxed Code --> C
+        C -- 4. Reads/Writes .md files --> C
+        B -- 5. Final Reply & Notifications --> A
+    end
+
+    subgraph Cloud Service
+        D
+    end
+
+    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
+    style B fill:#fff2cc,stroke:#333,stroke-width:2px
+```
+
+1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
+2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
+3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
+4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
+5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
+
+## An Agent in Action: Example Workflow
+
+**Scenario:** An agent is asked to learn about a new person.
+
+**1. User Query:**
+"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
+
+**2. Turn 1: The agent communicates its intent and acts efficiently.**
+The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
+
+**LLM Response (Turn 1):**
+
+```xml
+<think>
+Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
+</think>
+<typescript>
+// Perform all logic in one block for maximum efficiency.
+const orgPath = 'AI Research Institute.md';
+const orgExists = await mem.fileExists(orgPath);
+
+if (!orgExists) {
+  await mem.writeFile(
+    orgPath,
+    `- # AI Research Institute\n  - type:: organization\n`
+  );
+}
+
+await mem.writeFile(
+  'Dr. Aris Thorne.md',
+  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
+);
+</typescript>
+```
+
+_Recursa executes the code and confirms success to the LLM._
+
+**3. Turn 2: The agent saves its work and replies to the user.**
+Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
+
+**LLM Response (Turn 2):**
+
+```xml
+<think>
+Okay, I'm saving those changes to your permanent knowledge base.
+</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>
+Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
+</reply>
+```
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
+- An [OpenRouter.ai](https://openrouter.ai/) API Key
+
+### 1. Installation
+
+```bash
+git clone https://github.com/your-username/recursa.git
+cd recursa
+npm install
+```
+
+### 2. Configuration
+
+Create a `.env` file in the root of the project by copying the example:
+
+```bash
+cp .env.example .env
+```
+
+Now, edit your `.env` file with your details:
+
+```env
+# Your OpenRouter API Key
+OPENROUTER_API_KEY="sk-or-..."
+
+# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
+KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# The model you want to use from OpenRouter
+LLM_MODEL="anthropic/claude-3-sonnet-20240229"
+```
+
+### 3. Running the Server
+
+```bash
+bun run start
+```
+
+This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
+
+## 🗺️ Roadmap
+
+Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
+
+- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
+- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
+- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
+- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
+- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
+
+## 🧑‍💻 Contributing
+
+Recursa is designed to be hacked on. Contributions are welcome!
+
+### Adding New Tools
+
+To add a new tool (e.g., `mem.searchWeb(query)`):
+
+1.  Implement the function's logic in a file within `src/core/mem-api/`.
+2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
+3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
+4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
+5.  Open a Pull Request!
+
+## 📜 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+**Stop building infrastructure. Start building intelligence.**
 ````
 
 ## File: src/lib/gitignore-parser.ts
@@ -1434,95 +1394,6 @@ describe('MemAPI Graph Ops Integration Tests', () => {
     // Search for a non-existent term
     const noResults = await mem.searchGlobal('non-existent-term');
     expect(noResults).toEqual([]);
-  });
-});
-````
-
-## File: tests/integration/mem-api-state-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI State Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should save and revert to a checkpoint', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'version a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes and save checkpoint
-    await mem.writeFile('b.txt', 'version b');
-    const successSave = await mem.saveCheckpoint();
-    expect(successSave).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
-
-    // 3. Make more changes
-    await mem.writeFile('c.txt', 'version c');
-    expect(await mem.fileExists('c.txt')).toBe(true);
-
-    // 4. Revert by applying the stashed changes
-    const successRevert = await mem.revertToLastCheckpoint();
-    expect(successRevert).toBe(true);
-
-    // 5. Assert state
-    expect(await mem.fileExists('a.txt')).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
-    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
-  });
-
-  it('should discard all staged and unstaged changes', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'original a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes
-    await mem.writeFile('a.txt', 'modified a'); // unstaged
-    await mem.writeFile('b.txt', 'new b'); // unstaged
-    await mem.writeFile('c.txt', 'new c'); // will be staged
-    await harness.git.add('c.txt');
-
-    // 3. Discard
-    const successDiscard = await mem.discardChanges();
-    expect(successDiscard).toBe(true);
-
-    // 4. Assert state
-    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
-    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
-    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
-
-    const status = await harness.git.status();
-    expect(status.isClean()).toBe(true);
-  });
-
-  it('should handle reverting when no checkpoint exists', async () => {
-    await mem.writeFile('a.txt', 'content');
-    const success = await mem.revertToLastCheckpoint();
-
-    // It should not throw an error and return false to indicate nothing was reverted.
-    expect(success).toBe(false);
-    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
   });
 });
 ````
@@ -1817,6 +1688,96 @@ export interface ExecutionConstraints {
 }
 ````
 
+## File: tests/integration/mem-api-state-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI State Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should save and revert to a checkpoint', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'version a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes and save checkpoint
+    await mem.writeFile('b.txt', 'version b');
+    const successSave = await mem.saveCheckpoint();
+    expect(successSave).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
+
+    // 3. Make more changes (post-checkpoint garbage)
+    await mem.writeFile('c.txt', 'version c');
+    expect(await mem.fileExists('c.txt')).toBe(true);
+
+    // 4. Revert to checkpoint
+    // This should discard 'c.txt' and restore 'b.txt'
+    const successRevert = await mem.revertToLastCheckpoint();
+    expect(successRevert).toBe(true);
+
+    // 5. Assert state
+    expect(await mem.fileExists('a.txt')).toBe(true); // Committed
+    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
+    expect(await mem.fileExists('c.txt')).toBe(false); // Discarded by revert
+  });
+
+  it('should discard all staged and unstaged changes', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'original a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes
+    await mem.writeFile('a.txt', 'modified a'); // unstaged
+    await mem.writeFile('b.txt', 'new b'); // unstaged
+    await mem.writeFile('c.txt', 'new c'); // will be staged
+    await harness.git.add('c.txt');
+
+    // 3. Discard
+    const successDiscard = await mem.discardChanges();
+    expect(successDiscard).toBe(true);
+
+    // 4. Assert state
+    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
+    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
+    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
+
+    const status = await harness.git.status();
+    expect(status.isClean()).toBe(true);
+  });
+
+  it('should handle reverting when no checkpoint exists', async () => {
+    await mem.writeFile('a.txt', 'content');
+    const success = await mem.revertToLastCheckpoint();
+
+    // It should not throw an error and return false to indicate nothing was reverted.
+    expect(success).toBe(false);
+    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
+  });
+});
+````
+
 ## File: .env.test
 ````
 # Test Environment Configuration
@@ -1897,216 +1858,6 @@ export interface LLMProvider {
 }
 
 export type StreamingCallback = (chunk: string) => void;
-````
-
-## File: tests/e2e/mcp-workflow.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-  createMockLLMQueryWithSpy,
-} from '../lib/test-harness';
-import { handleUserQuery } from '../../src/core/loop';
-
-describe('Agent Workflow E2E Tests (In-Process)', () => {
-  let harness: TestHarnessState;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should execute a simple file creation and commit query', async () => {
-    // 1. Arrange
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>Okay, creating the file.</think>
-         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`,
-      `<think>Committing the file.</think>
-         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
-         <reply>File created and committed.</reply>`,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'create file',
-      harness.mockConfig,
-      'simple-query-session',
-      mockQueryLLM
-    );
-
-    // 3. Assert
-    expect(finalReply).toBe('File created and committed.');
-
-    // Verify side-effects
-    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: create hello.txt');
-  });
-
-  it('should correctly handle the Dr. Aris Thorne example', async () => {
-    // 1. Arrange
-    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
-<typescript>
-const orgPath = 'AI Research Institute.md';
-if (!await mem.fileExists(orgPath)) {
-  await mem.writeFile(orgPath, \`- # AI Research Institute
-  - type:: organization\`);
-}
-await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
-  - type:: person
-  - affiliation:: [[AI Research Institute]]
-  - field:: [[Symbolic Reasoning]]\`);
-</typescript>`;
-    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
-
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      turn1Response,
-      turn2Response,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'Create Dr. Aris Thorne',
-      harness.mockConfig,
-      'thorne-session',
-      mockQueryLLM
-    );
-
-    // 3. Assert
-    expect(finalReply).toBe(
-      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
-    );
-
-    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
-    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
-
-    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe(
-      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
-    );
-  });
-
-  it('should save a checkpoint and successfully revert to it', async () => {
-    // 1. Arrange
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>Writing file 1.</think>
-         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`,
-      `<think>Saving checkpoint.</think>
-         <typescript>await mem.saveCheckpoint();</typescript>`,
-      `<think>Writing file 2.</think>
-         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`,
-      `<think>Reverting to checkpoint.</think>
-         <typescript>await mem.revertToLastCheckpoint();</typescript>`,
-      `<think>Committing.</think>
-         <typescript>await mem.commitChanges('feat: add file1 and file2');</typescript>
-         <reply>Reverted and committed.</reply>`,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'test checkpoints',
-      harness.mockConfig,
-      'checkpoint-session',
-      mockQueryLLM
-    );
-
-    // 3. Assert
-    expect(finalReply).toBe('Reverted and committed.');
-
-    // After `saveCheckpoint`, `file1.md` is stashed.
-    // After `writeFile('file2.md')`, `file2.md` is in the working directory.
-    // After `revertToLastCheckpoint` (`git stash pop`), stashed changes (`file1.md`) are
-    // applied, merging with working directory changes (`file2.md`).
-    expect(await harness.mem.fileExists('file1.md')).toBe(true);
-    expect(await harness.mem.fileExists('file2.md')).toBe(true);
-
-    const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: add file1 and file2');
-
-    expect(log.latest).not.toBeNull();
-
-    // Verify both files were part of the commit
-    const commitContent = await harness.git.show([
-      '--name-only',
-      log.latest!.hash,
-    ]);
-    expect(commitContent).toContain('file1.md');
-    expect(commitContent).toContain('file2.md');
-  });
-
-  it('should block and gracefully handle path traversal attempts', async () => {
-    // 1. Arrange
-    const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>I will try to read a sensitive file.</think>
-         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`,
-      `<think>The previous action failed as expected due to security. I will inform the user.</think>
-         <reply>I was unable to access that file due to security restrictions.</reply>`,
-    ]);
-
-    // 2. Act
-    const finalReply = await handleUserQuery(
-      'read sensitive file',
-      harness.mockConfig,
-      'security-session',
-      mockQueryLLM
-    );
-
-    // 3. Assert
-    // The loop catches the security error, feeds it back to the LLM,
-    // and the LLM then generates the final reply.
-    expect(finalReply).toBe(
-      'I was unable to access that file due to security restrictions.'
-    );
-
-    // Verify the agent was given a chance to recover.
-    expect(mockQueryLLM).toHaveBeenCalledTimes(2);
-  });
-});
-````
-
-## File: tests/lib/test-util.ts
-````typescript
-import { createServer } from 'net';
-
-/**
- * Finds a free port on the local machine.
- * Useful for starting servers in tests without port conflicts.
- */
-export const getFreePort = (): Promise<number> => {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, () => {
-      const address = server.address();
-      const port = typeof address === 'string' ? 0 : address?.port;
-      server.close(() => {
-        if (port) {
-          resolve(port);
-        } else {
-          reject(new Error('Could not determine free port'));
-        }
-      });
-    });
-  });
-};
 ````
 
 ## File: tests/unit/parser.test.ts
@@ -2269,201 +2020,7 @@ worktrees/*/.git/
 
 ## File: tsconfig.tsbuildinfo
 ````
-{"root":["./src/config.ts","./src/server.ts","./src/api/mcp.handler.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/events.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
-````
-
-## File: docs/readme.md
-````markdown
-# Recursa: The Git-Native Memory Layer for Local-First LLMs
-
-**[Project Status: Active Development] [View System Prompt] [Report an Issue]**
-
-**TL;DR:** Recursa gives your AI a perfect, auditable memory that lives and grows in your local filesystem. It's an open-source MCP server that uses your **Logseq/Obsidian graph** as a dynamic, version-controlled knowledge base. Your AI's brain becomes a plaintext repository you can `grep`, `edit`, and `commit`.
-
-Forget wrestling with databases or opaquWe cloud APIs. This is infrastructure-free, plaintext-first memory for agents that _create_.
-
----
-
-## The Problem: Agent Amnesia & The RAG Ceiling
-
-You're building an intelligent agent and have hit the memory wall. The industry's current solutions are fundamentally flawed, leading to agents that can't truly learn or evolve:
-
-1.  **Vector DBs (RAG):** A read-only librarian. It's excellent for retrieving existing facts but is structurally incapable of _creating new knowledge_, _forming novel connections_, or _evolving its understanding_ based on new interactions. It hits the "RAG ceiling," where agents can only answer, not synthesize.
-2.  **Opaque Self-Hosted Engines:** You're lured by "open source" but are now a part-time DevOps engineer, managing Docker containers, configuring databases, and debugging opaque states instead of focusing on your agent's core intelligence.
-3.  **Black-Box APIs:** You trade infrastructure pain for a vendor's prison. Your AI's memory is locked away, inaccessible to your tools, and impossible to truly audit or understand.
-
-Recursa is built on a different philosophy: **Your AI's memory should be a dynamic, transparent, and versionable extension of its own thought process, running entirely on your machine.**
-
-## The Recursa Philosophy: Core Features
-
-Recursa isn't a database; it's a reasoning engine. It treats a local directory of plaintext files—ideally a Git repository—as the agent's primary memory.
-
-- **Git-Native Memory:** Every change, every new idea, every retracted thought is a `git commit`. You get a perfect, auditable history of your agent's learning process. You can branch its memory, merge concepts, and revert to previous states.
-- **Plaintext Supremacy:** The AI's brain is a folder of markdown files. It's human-readable, universally compatible with tools like Obsidian and Logseq, and free from vendor lock-in.
-- **Think-Act-Commit Loop:** The agent reasons internally, generates code to modify its memory, executes it in a sandbox, and commits the result with a descriptive message. This is a transparent, auditable cognitive cycle.
-- **Safety Checkpoints:** For complex, multi-turn operations (like a large-scale refactor), the agent can use `mem.saveCheckpoint()` to save its progress. If it makes a mistake, it can instantly roll back with `mem.revertToLastCheckpoint()`, providing a safety net for ambitious tasks.
-- **Token-Aware Context:** With tools like `mem.getTokenCount()`, the agent can intelligently manage its own context window, ensuring it can read and reason about large files without exceeding API limits.
-
-## How It Works: Architecture
-
-Recursa is a local, stateless server that acts as a bridge between your chat client, an LLM, and your local knowledge graph.
-
-```mermaid
-graph TD
-    subgraph Your Local Machine
-        A[MCP Client <br> e.g., your script, or a compatible editor]
-        B[Recursa MCP Server <br> (This Project)]
-        C(Logseq/Obsidian Graph <br> /path/to/your/notes/)
-
-        A -- 1. User Query via Stdio --> B
-        B -- 2. Think-Act-Commit Loop --> D{LLM API <br> (OpenRouter)}
-        B -- 3. Executes Sandboxed Code --> C
-        C -- 4. Reads/Writes .md files --> C
-        B -- 5. Final Reply & Notifications --> A
-    end
-
-    subgraph Cloud Service
-        D
-    end
-
-    style C fill:#e6f3ff,stroke:#333,stroke-width:2px
-    style B fill:#fff2cc,stroke:#333,stroke-width:2px
-```
-
-1.  **Query via MCP:** Your client application sends a message to the local Recursa server process over standard I/O.
-2.  **Think-Act Loop:** Recursa begins its reasoning cycle. It sends the query and relevant file contents to your chosen LLM, sending real-time status updates back to the client.
-3.  **Generate & Execute Code:** The LLM responds not with a simple answer, but with a **TypeScript snippet** and a user-facing status update. Recursa executes this code in a secure sandbox.
-4.  **Interact with Files:** The sandboxed code uses a safe `mem` API to read, create, and modify markdown files directly in your knowledge graph.
-5.  **Commit & Reply:** Once the task is complete, the agent commits its changes with a meaningful message and generates a final reply for the user.
-
-## An Agent in Action: Example Workflow
-
-**Scenario:** An agent is asked to learn about a new person.
-
-**1. User Query:**
-"I just had a call with a Dr. Aris Thorne from the AI Research Institute. He works on symbolic reasoning. Create a new entry for him and link it to his affiliation."
-
-**2. Turn 1: The agent communicates its intent and acts efficiently.**
-The LLM receives the query, formulates an efficient plan, and generates a simple status message for the user alongside the code to execute its plan.
-
-**LLM Response (Turn 1):**
-
-```xml
-<think>
-Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.
-</think>
-<typescript>
-// Perform all logic in one block for maximum efficiency.
-const orgPath = 'AI Research Institute.md';
-const orgExists = await mem.fileExists(orgPath);
-
-if (!orgExists) {
-  await mem.writeFile(
-    orgPath,
-    `- # AI Research Institute\n  - type:: organization\n`
-  );
-}
-
-await mem.writeFile(
-  'Dr. Aris Thorne.md',
-  `- # Dr. Aris Thorne\n  - type:: person\n  - affiliation:: [[AI Research Institute]]\n  - field:: [[Symbolic Reasoning]]`
-);
-</typescript>
-```
-
-_Recursa executes the code and confirms success to the LLM._
-
-**3. Turn 2: The agent saves its work and replies to the user.**
-Seeing the action was successful, the LLM generates its final response to commit the changes and inform the user that the task is complete.
-
-**LLM Response (Turn 2):**
-
-```xml
-<think>
-Okay, I'm saving those changes to your permanent knowledge base.
-</think>
-<typescript>
-await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
-</typescript>
-<reply>
-Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.
-</reply>
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- A local [Logseq](https://logseq.com/) or [Obsidian](https://obsidian.md/) graph (a folder of `.md` files)
-- An [OpenRouter.ai](https://openrouter.ai/) API Key
-
-### 1. Installation
-
-```bash
-git clone https://github.com/your-username/recursa.git
-cd recursa
-npm install
-```
-
-### 2. Configuration
-
-Create a `.env` file in the root of the project by copying the example:
-
-```bash
-cp .env.example .env
-```
-
-Now, edit your `.env` file with your details:
-
-```env
-# Your OpenRouter API Key
-OPENROUTER_API_KEY="sk-or-..."
-
-# The ABSOLUTE path to your graph's directory (e.g., the "pages" folder for Logseq)
-KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
-
-# The model you want to use from OpenRouter
-LLM_MODEL="anthropic/claude-3-sonnet-20240229"
-```
-
-### 3. Running the Server
-
-```bash
-bun run start
-```
-
-This starts the Recursa server as a process that listens for MCP messages on its standard input/output. You can now connect any MCP-compatible client to it.
-
-## 🗺️ Roadmap
-
-Recursa is in active development. Our goal is to build the most transparent, powerful, and developer-friendly memory layer for AI agents.
-
-- [ ] **Enhanced Graph Queries:** Adding more powerful filtering and traversal operators to `mem.queryGraph`.
-- [ ] **Visualizer:** A simple web UI to visualize the agent's actions and the knowledge graph's evolution over time (`git log` visualized).
-- [ ] **Multi-modal Support:** Allowing the agent to store and reference images and other file types within the graph.
-- [ ] **Agent-to-Agent Collaboration:** Enabling two Recursa agents to collaborate on a single knowledge graph via Git (forks, pull requests).
-- [ ] **Expanded Tooling:** Integrating web search, terminal access, and other essential agent capabilities into the `mem` object.
-
-## 🧑‍💻 Contributing
-
-Recursa is designed to be hacked on. Contributions are welcome!
-
-### Adding New Tools
-
-To add a new tool (e.g., `mem.searchWeb(query)`):
-
-1.  Implement the function's logic in a file within `src/core/mem-api/`.
-2.  Expose the new function in the `createMemAPI` factory in `src/core/mem-api/index.ts`.
-3.  Add the function signature to the `MemAPI` type in `src/types/mem.ts`.
-4.  Update `tools.md` and `system-prompt.md` to document the new tool and provide examples of how the LLM should use it.
-5.  Open a Pull Request!
-
-## 📜 License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-**Stop building infrastructure. Start building intelligence.**
+{"root":["./src/config.ts","./src/server.ts","./src/core/llm.ts","./src/core/loop.ts","./src/core/parser.ts","./src/core/sandbox.ts","./src/core/mem-api/file-ops.ts","./src/core/mem-api/fs-walker.ts","./src/core/mem-api/git-ops.ts","./src/core/mem-api/graph-ops.ts","./src/core/mem-api/index.ts","./src/core/mem-api/secure-path.ts","./src/core/mem-api/state-ops.ts","./src/core/mem-api/util-ops.ts","./src/lib/gitignore-parser.ts","./src/lib/logger.ts","./src/lib/platform.ts","./src/types/git.ts","./src/types/index.ts","./src/types/llm.ts","./src/types/loop.ts","./src/types/mcp.ts","./src/types/mem.ts","./src/types/sandbox.ts"],"version":"5.9.3"}
 ````
 
 ## File: docs/rules.md
@@ -2777,6 +2334,216 @@ export type GitCommand =
   | 'log'
   | 'diff'
   | 'branch';
+````
+
+## File: tests/e2e/mcp-workflow.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+  createMockLLMQueryWithSpy,
+} from '../lib/test-harness';
+import { handleUserQuery } from '../../src/core/loop';
+
+describe('Agent Workflow E2E Tests (In-Process)', () => {
+  let harness: TestHarnessState;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should execute a simple file creation and commit query', async () => {
+    // 1. Arrange
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      `<think>Okay, creating the file.</think>
+         <typescript>await mem.writeFile('hello.txt', 'world');</typescript>`,
+      `<think>Committing the file.</think>
+         <typescript>await mem.commitChanges('feat: create hello.txt');</typescript>
+         <reply>File created and committed.</reply>`,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'create file',
+      harness.mockConfig,
+      'simple-query-session',
+      mockQueryLLM
+    );
+
+    // 3. Assert
+    expect(finalReply).toBe('File created and committed.');
+
+    // Verify side-effects
+    expect(await harness.mem.fileExists('hello.txt')).toBe(true);
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: create hello.txt');
+  });
+
+  it('should correctly handle the Dr. Aris Thorne example', async () => {
+    // 1. Arrange
+    const turn1Response = `<think>Got it. I'll create pages for Dr. Aris Thorne and the AI Research Institute, and link them together.</think>
+<typescript>
+const orgPath = 'AI Research Institute.md';
+if (!await mem.fileExists(orgPath)) {
+  await mem.writeFile(orgPath, \`- # AI Research Institute
+  - type:: organization\`);
+}
+await mem.writeFile('Dr. Aris Thorne.md', \`- # Dr. Aris Thorne
+  - type:: person
+  - affiliation:: [[AI Research Institute]]
+  - field:: [[Symbolic Reasoning]]\`);
+</typescript>`;
+    const turn2Response = `<think>Okay, I'm saving those changes to your permanent knowledge base.</think>
+<typescript>
+await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute entities');
+</typescript>
+<reply>Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them.</reply>`;
+
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      turn1Response,
+      turn2Response,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'Create Dr. Aris Thorne',
+      harness.mockConfig,
+      'thorne-session',
+      mockQueryLLM
+    );
+
+    // 3. Assert
+    expect(finalReply).toBe(
+      "Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute and linked them."
+    );
+
+    const thorneContent = await harness.mem.readFile('Dr. Aris Thorne.md');
+    expect(thorneContent).toContain('affiliation:: [[AI Research Institute]]');
+
+    expect(await harness.mem.fileExists('AI Research Institute.md')).toBe(true);
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe(
+      'feat: Add Dr. Aris Thorne and AI Research Institute entities'
+    );
+  });
+
+  it('should save a checkpoint and successfully revert to it', async () => {
+    // 1. Arrange
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      `<think>Writing good file.</think>
+         <typescript>await mem.writeFile('good.md', 'content-good');</typescript>`,
+      `<think>Saving checkpoint.</think>
+         <typescript>await mem.saveCheckpoint();</typescript>`,
+      `<think>Writing bad file.</think>
+         <typescript>await mem.writeFile('bad.md', 'content-bad');</typescript>`,
+      `<think>Reverting to checkpoint.</think>
+         <typescript>await mem.revertToLastCheckpoint();</typescript>`,
+      `<think>Committing.</think>
+         <typescript>await mem.commitChanges('feat: add good file only');</typescript>
+         <reply>Reverted and committed.</reply>`,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'test checkpoints',
+      harness.mockConfig,
+      'checkpoint-session',
+      mockQueryLLM
+    );
+
+    // 3. Assert
+    expect(finalReply).toBe('Reverted and committed.');
+
+    // After `saveCheckpoint`, `good.md` is stashed.
+    // After `writeFile('bad.md')`, `bad.md` is in the working directory.
+    // After `revertToLastCheckpoint`, `bad.md` should be discarded and `good.md` restored.
+    
+    expect(await harness.mem.fileExists('good.md')).toBe(true);
+    expect(await harness.mem.fileExists('bad.md')).toBe(false); // Discarded by hard revert
+
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: add good file only');
+
+    expect(log.latest).not.toBeNull();
+
+    // Verify commit content
+    const commitContent = await harness.git.show([
+      '--name-only',
+      log.latest!.hash,
+    ]);
+    expect(commitContent).toContain('good.md');
+    expect(commitContent).not.toContain('bad.md');
+  });
+
+  it('should block and gracefully handle path traversal attempts', async () => {
+    // 1. Arrange
+    const mockQueryLLM = createMockLLMQueryWithSpy([
+      `<think>I will try to read a sensitive file.</think>
+         <typescript>await mem.readFile('../../../../etc/hosts');</typescript>`,
+      `<think>The previous action failed as expected due to security. I will inform the user.</think>
+         <reply>I was unable to access that file due to security restrictions.</reply>`,
+    ]);
+
+    // 2. Act
+    const finalReply = await handleUserQuery(
+      'read sensitive file',
+      harness.mockConfig,
+      'security-session',
+      mockQueryLLM
+    );
+
+    // 3. Assert
+    // The loop catches the security error, feeds it back to the LLM,
+    // and the LLM then generates the final reply.
+    expect(finalReply).toBe(
+      'I was unable to access that file due to security restrictions.'
+    );
+
+    // Verify the agent was given a chance to recover.
+    expect(mockQueryLLM).toHaveBeenCalledTimes(2);
+  });
+});
+````
+
+## File: tests/lib/test-util.ts
+````typescript
+import { createServer } from 'net';
+
+/**
+ * Finds a free port on the local machine.
+ * Useful for starting servers in tests without port conflicts.
+ */
+export const getFreePort = (): Promise<number> => {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, () => {
+      const address = server.address();
+      const port = typeof address === 'string' ? 0 : address?.port;
+      server.close(() => {
+        if (port) {
+          resolve(port);
+        } else {
+          reject(new Error('Could not determine free port'));
+        }
+      });
+    });
+  });
+};
 ````
 
 ## File: src/core/mem-api/secure-path.ts
@@ -3388,50 +3155,6 @@ export const createMemAPI = (config: AppConfig): MemAPI => {
 };
 ````
 
-## File: src/core/mem-api/state-ops.ts
-````typescript
-import type { SimpleGit } from 'simple-git';
-
-// Note: These functions map to specific git commands for state management.
-
-export const saveCheckpoint =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    // 1. Stage all changes: `await git.add('.')`.
-    await git.add('.');
-    // 2. Save to stash with a message: `await git.stash(['push', '-m', 'recursa-checkpoint'])`.
-    await git.stash(['push', '-m', 'recursa-checkpoint']);
-    // 3. Return true on success.
-    return true;
-  };
-
-export const revertToLastCheckpoint =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    try {
-      // 1. Apply the most recent stash: `await git.stash(['pop'])`.
-      // This can fail if the stash is empty, so wrap in a try/catch.
-      await git.stash(['pop']);
-      return true;
-    } catch {
-      // If stash is empty, simple-git throws. We can consider this a "success"
-      // in that there's nothing to revert to. Or we can re-throw.
-      // For now, let's log and return false.
-       
-      console.warn('Could not revert to checkpoint, stash may be empty.');
-      return false;
-    }
-  };
-
-export const discardChanges =
-  (git: SimpleGit) => async (): Promise<boolean> => {
-    // 1. Reset all tracked files: `await git.reset(['--hard', 'HEAD'])`.
-    await git.reset(['--hard', 'HEAD']);
-    // 2. Remove all untracked files and directories: `await git.clean('f', ['-d'])`.
-    await git.clean('f', ['-d']);
-    // 3. Return true on success.
-    return true;
-  };
-````
-
 ## File: tests/lib/test-harness.ts
 ````typescript
 import { jest } from '@jest/globals';
@@ -3812,6 +3535,59 @@ GIT_USER_EMAIL=recursa@local
 }
 ````
 
+## File: src/core/mem-api/state-ops.ts
+````typescript
+import type { SimpleGit } from 'simple-git';
+
+// Note: These functions map to specific git commands for state management.
+
+export const saveCheckpoint =
+  (git: SimpleGit) => async (): Promise<boolean> => {
+    // 1. Stage all changes: `await git.add('.')`.
+    await git.add('.');
+    // 2. Save to stash with a message: `await git.stash(['push', '-m', 'recursa-checkpoint'])`.
+    await git.stash(['push', '-m', 'recursa-checkpoint']);
+    // 3. Return true on success.
+    return true;
+  };
+
+export const revertToLastCheckpoint =
+  (git: SimpleGit) => async (): Promise<boolean> => {
+    try {
+      // 0. Check if there is a checkpoint to revert to
+      const stash = await git.stashList();
+      if (stash.total === 0) {
+        console.warn('Could not revert to checkpoint, stash is empty.');
+        return false;
+      }
+
+      // 1. Discard all current changes (staged, unstaged, and untracked)
+      // This prevents conflicts when popping the stash.
+      await git.reset(['--hard', 'HEAD']);
+      await git.clean('f', ['-d']);
+
+      // 2. Apply the most recent stash: `await git.stash(['pop'])`.
+      await git.stash(['pop']);
+      return true;
+    } catch (error) {
+      // If stash pop fails for some other reason (e.g. merge conflict despite clean wd),
+      // log it and return false.
+      console.warn('Could not revert to checkpoint:', error);
+      return false;
+    }
+  };
+
+export const discardChanges =
+  (git: SimpleGit) => async (): Promise<boolean> => {
+    // 1. Reset all tracked files: `await git.reset(['--hard', 'HEAD'])`.
+    await git.reset(['--hard', 'HEAD']);
+    // 2. Remove all untracked files and directories: `await git.clean('f', ['-d'])`.
+    await git.clean('f', ['-d']);
+    // 3. Return true on success.
+    return true;
+  };
+````
+
 ## File: src/core/mem-api/util-ops.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -4098,7 +3874,7 @@ const getPlatformDefaults = () => {
 
 const configSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required.'),
-  KNOWLEDGE_GRAPH_PATH: z.string().min(1, 'KNOWLEDGE_GRAPH_PATH is required.'),
+  KNOWLEDGE_GRAPH_PATH: z.string().optional(),
   LLM_MODEL: z.string().default(getPlatformDefaults().LLM_MODEL).optional(),
   LLM_TEMPERATURE: z.coerce.number().default(getPlatformDefaults().LLM_TEMPERATURE).optional(),
   LLM_MAX_TOKENS: z.coerce.number().default(getPlatformDefaults().LLM_MAX_TOKENS).optional(),
@@ -4139,7 +3915,12 @@ const normalizeEnvVars = () => {
 /**
  * Resolve and validate the knowledge graph path with platform awareness
  */
-const resolveKnowledgeGraphPath = (basePath: string): string => {
+const resolveKnowledgeGraphPath = (basePath?: string): string => {
+  // Default to .recursa in CWD if not provided
+  if (!basePath) {
+    return path.join(process.cwd(), '.recursa');
+  }
+
   // Normalize path separators for the current platform
   let resolvedPath = platform.normalizePath(basePath);
 
@@ -4167,11 +3948,13 @@ const resolveKnowledgeGraphPath = (basePath: string): string => {
 };
 
 /**
- * Validate that the knowledge graph directory exists and is accessible
+ * Ensure that the knowledge graph directory exists and is accessible
  */
-const validateKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => {
+const ensureKnowledgeGraphPath = async (resolvedPath: string): Promise<void> => {
   // Skip validation in test environments
   if (process.env.NODE_ENV === 'test') {
+    // In tests, we might want to ensure it exists or let the harness handle it.
+    // The harness handles creation, so we skip here.
     return;
   }
 
@@ -4180,41 +3963,29 @@ const validateKnowledgeGraphPath = async (resolvedPath: string): Promise<void> =
     if (!stats.isDirectory()) {
       throw new Error('Path exists but is not a directory.');
     }
-
-    // Test write permissions in a cross-platform way
-    const testFile = path.join(resolvedPath, '.recursa-write-test');
-    try {
-      await fs.writeFile(testFile, 'test');
-      await fs.unlink(testFile);
-    } catch {
-      if (platform.isWindows) {
-        throw new Error('Directory is not writable. Check folder permissions.');
-      } else if (platform.isTermux) {
-        throw new Error('Directory is not writable. Check Termux storage permissions.');
-      } else {
-        throw new Error('Directory is not writable. Check file permissions.');
-      }
-    }
-
-    // Check available disk space (Unix-like systems only)
-    if (!platform.isWindows) {
-      try {
-        const stats = await fs.statfs(resolvedPath);
-        const availableSpace = stats.bavail * stats.bsize;
-        const minSpace = 100 * 1024 * 1024; // 100MB minimum
-        if (availableSpace < minSpace) {
-          console.warn(`⚠️  Low disk space: ${Math.floor(availableSpace / 1024 / 1024)}MB available`);
-        }
-      } catch {
-        // Ignore filesystem stats errors
-      }
-    }
-
   } catch (error) {
     if ((error as Error & { code?: string }).code === 'ENOENT') {
-      throw new Error('Directory does not exist. Please create it before continuing.');
+      // Directory doesn't exist, create it
+      console.log(`Creating knowledge graph directory at: ${resolvedPath}`);
+      await fs.mkdir(resolvedPath, { recursive: true });
+      return; // Created successfully
     }
     throw error;
+  }
+
+  // Test write permissions in a cross-platform way
+  const testFile = path.join(resolvedPath, '.recursa-write-test');
+  try {
+    await fs.writeFile(testFile, 'test');
+    await fs.unlink(testFile);
+  } catch {
+    if (platform.isWindows) {
+      throw new Error('Directory is not writable. Check folder permissions.');
+    } else if (platform.isTermux) {
+      throw new Error('Directory is not writable. Check Termux storage permissions.');
+    } else {
+      throw new Error('Directory is not writable. Check file permissions.');
+    }
   }
 };
 
@@ -4246,7 +4017,7 @@ export const loadAndValidateConfig = async (): Promise<AppConfig> => {
 
   // Resolve and validate the knowledge graph path
   const resolvedPath = resolveKnowledgeGraphPath(KNOWLEDGE_GRAPH_PATH);
-  await validateKnowledgeGraphPath(resolvedPath);
+  await ensureKnowledgeGraphPath(resolvedPath);
 
   // Log platform-specific information
   console.log(`🔧 Platform: ${platform.platformString}`);
@@ -4908,63 +4679,6 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 - **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
 ````
 
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt",
-      "scripts",
-      "docs/TROUBLESHOOTING.md",
-      "docs/PLATFORM_SUPPORT.md"
-      //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
-````
-
 ## File: src/core/mem-api/file-ops.ts
 ````typescript
 import { promises as fs } from 'fs';
@@ -5365,57 +5079,60 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
 });
 ````
 
-## File: package.json
+## File: repomix.config.json
 ````json
 {
-  "name": "recursa-server",
-  "version": "0.1.0",
-  "description": "Git-Native AI agent with MCP protocol support",
-  "type": "module",
-  "scripts": {
-    "start": "node dist/server.js",
-    "start:termux": "npm run start",
-    "start:standard": "npm run start",
-    "build": "tsc",
-    "build:auto": "node scripts/build.js",
-    "build:termux": "node scripts/build.js termux",
-    "build:standard": "node scripts/build.js standard",
-    "dev": "tsx watch src/server.ts",
-    "dev:termux": "npm run dev",
-    "dev:standard": "npm run dev",
-    "test": "jest",
-    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
-    "install:auto": "node scripts/install.js",
-    "install:termux": "node scripts/install.js termux",
-    "install:standard": "node scripts/install.js standard",
-    "typecheck": "tsc --noEmit"
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
   },
-  "dependencies": {
-    "fastmcp": "^1.21.0",
-    "dotenv": "^16.4.5",
-    "simple-git": "^3.20.0",
-    "zod": "^3.23.8"
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
   },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@modelcontextprotocol/sdk": "^1.0.1",
-    "eventsource": "^2.0.2",
-    "@types/expect": "^1.20.4",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.10.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "eslint": "^9.39.1",
-    "jest": "^29.7.0",
-    "jest-extended": "^4.0.2",
-    "ts-jest": "^29.1.2",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.0"
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt",
+      "scripts",
+      "docs/TROUBLESHOOTING.md",
+      "docs/PLATFORM_SUPPORT.md"
+      //   "tests"
+    ]
   },
-  "engines": {
-    "node": ">=18.0.0"
+  "security": {
+    "enableSecurityCheck": true
   },
-  "license": "MIT"
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
 }
 ````
 
@@ -5431,6 +5148,7 @@ import { createMemAPI } from './mem-api/index.js';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 // A mock in-memory session store. In a real app, this might be Redis, a DB, or a file store.
 const sessionHistories: Record<string, ChatMessage[]> = {};
@@ -5445,8 +5163,11 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
   }
 
   try {
+    // Get the directory of the current module (src/core or dist/core)
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    
     // Resolve the path to 'docs/system-prompt.md' from the project root.
-    const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
+    const promptPath = path.resolve(__dirname, '../../docs/system-prompt.md');
 
     // Read the file content asynchronously.
     const systemPromptContent = await fs.readFile(promptPath, 'utf-8');
@@ -5463,7 +5184,7 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
     // If file read fails, log a critical error and exit, as the agent cannot run without it.
     const errorMessage = 'Failed to load system prompt file';
     logger.error(errorMessage, error as Error, {
-      path: path.resolve(process.cwd(), 'docs/system-prompt.md'),
+      path: 'docs/system-prompt.md',
     });
 
     // Throw an error to be caught by the server's main function
@@ -5635,6 +5356,60 @@ export const handleUserQuery = async (
   logger.warn('Loop finished without a reply', { runId, turns: MAX_TURNS });
   return 'The agent finished its work without providing a final response.';
 };
+````
+
+## File: package.json
+````json
+{
+  "name": "recursa-server",
+  "version": "0.1.0",
+  "description": "Git-Native AI agent with MCP protocol support",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "start:termux": "npm run start",
+    "start:standard": "npm run start",
+    "build": "tsc",
+    "build:auto": "node scripts/build.js",
+    "build:termux": "node scripts/build.js termux",
+    "build:standard": "node scripts/build.js standard",
+    "dev": "tsx watch src/server.ts",
+    "dev:termux": "npm run dev",
+    "dev:standard": "npm run dev",
+    "test": "jest",
+    "lint": "eslint 'src/**/*.ts' 'scripts/**/*.js' 'tests/**/*.ts'",
+    "install:auto": "node scripts/install.js",
+    "install:termux": "node scripts/install.js termux",
+    "install:standard": "node scripts/install.js standard",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastmcp": "^1.21.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.20.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "eventsource": "^2.0.2",
+    "@types/expect": "^1.20.4",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "jest": "^29.7.0",
+    "jest-extended": "^4.0.2",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
 ````
 
 ## File: src/core/mem-api/graph-ops.ts
@@ -5930,8 +5705,12 @@ import { logger } from './lib/logger.js';
 import { loadAndValidateConfig, type AppConfig } from './config.js';
 import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
-import type { StatusUpdate, ChatMessage } from './types/loop.js';
+import type { StatusUpdate } from './types/loop.js';
+import type { ChatMessage } from './types/llm.js';
 import { fileURLToPath } from 'url';
+import simpleGit from 'simple-git';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 /**
  * Factory function to create the MCP server instance.
@@ -5992,13 +5771,13 @@ export const createMcpServer = async (
             log.info(content || 'Thinking...');
             break;
           case 'act':
-            log.info(message, data);
+            log.info(message, data as any);
             break;
           case 'error':
-            log.error(message, undefined, data);
+            log.error(message, data as any);
             break;
           default:
-            log.debug(message, data);
+            log.debug(message, data as any);
         }
       };
 
@@ -6017,7 +5796,12 @@ export const createMcpServer = async (
           error instanceof Error ? error.message : String(error);
         log.error(
           `Error in process_query: ${errorMessage}`,
-          error instanceof Error ? error : new Error(errorMessage)
+          (error instanceof Error
+            ? { message: error.message, stack: error.stack, name: error.name }
+            : {
+                message: errorMessage,
+                original: error,
+              }) as any
         );
         return JSON.stringify({
           error: errorMessage,
@@ -6030,6 +5814,75 @@ export const createMcpServer = async (
   return server;
 };
 
+/**
+ * Ensures the knowledge graph is a valid git repository.
+ */
+const ensureGitRepo = async (config: AppConfig) => {
+  const git = simpleGit(config.knowledgeGraphPath);
+  
+  // 1. Check Git Binary
+  try {
+    await git.version();
+  } catch (e) {
+    logger.error('Git binary not found. Please install Git.', e as Error);
+    throw new Error('Git binary not found. Please install Git to use Recursa.');
+  }
+
+  // 2. Detect Stale Lock Files
+  const lockFile = path.join(config.knowledgeGraphPath, '.git', 'index.lock');
+  try {
+    await fs.access(lockFile);
+    logger.warn('⚠️  Found .git/index.lock file. This indicates a previous crash or running process.');
+    logger.warn('If no other git process is running, you may need to delete this file manually.');
+  } catch {
+    // File doesn't exist, which is normal
+  }
+
+  try {
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      logger.info('Initializing new Git repository...', { path: config.knowledgeGraphPath });
+      await git.init();
+      // Set local config for this repo to ensure commits work
+      await git.addConfig('user.name', config.gitUserName);
+      await git.addConfig('user.email', config.gitUserEmail);
+      logger.info('Git repository initialized successfully.');
+    }
+
+    // 3. Force Initial Commit (Fix Headless state)
+    try {
+      // Check if HEAD exists by trying to get the log
+      await git.log({ maxCount: 1 });
+    } catch (error) {
+      const msg = (error as Error).message;
+      // If HEAD is invalid, this is a fresh repo. Error messages vary by git version.
+      if (msg.includes("HEAD") || msg.includes("bad default revision") || msg.includes("does not have any commits")) {
+         logger.info('Creating initial commit to establish HEAD...');
+         const gitignorePath = path.join(config.knowledgeGraphPath, '.gitignore');
+         try {
+           await fs.access(gitignorePath);
+         } catch {
+            // Create a default .gitignore if it doesn't exist
+            await fs.writeFile(gitignorePath, 'node_modules/\n.env\n.DS_Store\n*.log\n');
+         }
+         await git.add('.gitignore');
+         await git.commit('root: initialize knowledge graph');
+         logger.info('Initial commit created.');
+      }
+    }
+
+    // 4. Warn on Dirty State
+    const status = await git.status();
+    if (!status.isClean()) {
+        logger.warn('⚠️  Repository has uncommitted changes. The agent may commit these changes automatically.');
+        logger.warn(`Dirty files: ${status.files.map(f => f.path).join(', ')}`);
+    }
+  } catch (error) {
+    logger.error('Failed to initialize git repository', error as Error);
+    throw error;
+  }
+};
+
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
 
@@ -6037,10 +5890,13 @@ const main = async () => {
     // 1. Load configuration
     const config = await loadAndValidateConfig();
 
-    // 2. Create server instance
+    // 2. Ensure Git repository exists
+    await ensureGitRepo(config);
+
+    // 3. Create server instance
     const server = await createMcpServer(config);
 
-    // 3. Start the server
+    // 4. Start the server
     await server.start({ transportType: 'stdio' });
 
     logger.info('Recursa MCP Server is running and listening on stdio.');

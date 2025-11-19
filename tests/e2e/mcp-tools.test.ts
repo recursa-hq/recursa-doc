@@ -4,8 +4,8 @@ import {
   expect,
   beforeEach,
   afterEach,
-  jest,
 } from '@jest/globals';
+import { FastMCP } from 'fastmcp';
 import {
   createTestHarness,
   cleanupTestHarness,
@@ -24,7 +24,7 @@ global.EventSource = EventSource;
 
 describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
   let harness: TestHarnessState;
-  let server: any;
+  let server: FastMCP;
   let client: Client;
   let serverPort: number;
 
@@ -42,7 +42,7 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     await cleanupTestHarness(harness);
   });
 
-  const startServerAndConnectClient = async (mockLLM: any) => {
+  const startServerAndConnectClient = async (mockLLM: ReturnType<typeof createMockQueryLLM>) => {
     // 1. Create Server with Mock LLM
     server = await createMcpServer(harness.mockConfig, {
       queryLLM: mockLLM,
@@ -93,7 +93,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert: Check result content
-    const content = (result as any).content[0].text;
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+        throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+        throw new Error('Expected text content');
+    }
+    const content = firstItem.text;
     const parsed = JSON.parse(content);
     expect(parsed.reply).toBe('File created.');
 
@@ -124,7 +131,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Committed.');
 
     // Verify Git Log
@@ -160,7 +174,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Found persons.');
     // We rely on the fact that the agent ran successfully. 
     // In a real scenario, the agent would use the query results in its reply.
@@ -191,7 +212,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Reverted.');
 
     // Verify file content was reverted
@@ -223,7 +251,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Counted tokens.');
   });
 
@@ -251,7 +286,14 @@ describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
     });
 
     // Assert
-    const parsed = JSON.parse((result as any).content[0].text);
+    if (!result || !result.content || !Array.isArray(result.content) || result.content.length === 0) {
+      throw new Error('Invalid result structure');
+    }
+    const firstItem = result.content[0];
+    if (firstItem.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    const parsed = JSON.parse(firstItem.text);
     expect(parsed.reply).toBe('Operation failed due to Sandbox Explosion.');
   });
 });

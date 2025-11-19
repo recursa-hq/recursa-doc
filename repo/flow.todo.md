@@ -1,6 +1,12 @@
-===
+learn openmemory on how to monetize mcp tool
 
-discrepancy analysis
+=== DONE 
+
+just ask: is the mcp client, cannot know what is exactly recursa thinking and doing , like it only sees : agent is thinking, starting this, starting that: like its only show the hardcoded system state?
+
+=== DONE
+
+do discrepancy analysis. I want Implementation met readme.md and tools.md
 
 ===
 

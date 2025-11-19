@@ -1,6 +1,9 @@
 /**
  * Platform detection and utilities for cross-platform compatibility
  */
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 export const platform = {
   /** Current operating system platform */
@@ -22,8 +25,8 @@ export const platform = {
     return this.isLinux && (
       process.env.WSL_DISTRO_NAME !== undefined ||
       process.env.WSLENV !== undefined ||
-      require('fs').existsSync('/proc/version') &&
-      require('fs').readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
+      fs.existsSync('/proc/version') &&
+      fs.readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')
     );
   },
 
@@ -66,7 +69,7 @@ export const platform = {
 
   /** Path normalization for cross-platform */
   normalizePath(p: string): string {
-    const normalized = require('path').normalize(p);
+    const normalized = path.normalize(p);
     if (this.isWindows) {
       return normalized.replace(/\//g, '\\');
     }
@@ -76,9 +79,9 @@ export const platform = {
   /** Check if path is absolute */
   isAbsolute(p: string): boolean {
     if (this.isWindows) {
-      return /^[A-Za-z]:\\|\\\\/.test(p) || require('path').isAbsolute(p);
+      return /^[A-Za-z]:\\|\\\\/.test(p) || path.isAbsolute(p);
     }
-    return require('path').isAbsolute(p);
+    return path.isAbsolute(p);
   },
 
   /** Get platform-specific resource limits */
@@ -106,9 +109,6 @@ export const platform = {
 
   /** Get platform-specific temp directory */
   getTempDir(): string {
-    const os = require('os');
-    const path = require('path');
-
     if (this.isWindows) {
       return process.env.TEMP || process.env.TMP || path.join(os.tmpdir(), 'recursa');
     }
@@ -118,8 +118,6 @@ export const platform = {
 
   /** Get platform-specific user data directory */
   getUserDataDir(appName: string = 'recursa'): string {
-    const os = require('os');
-    const path = require('path');
     const homeDir = os.homedir();
 
     if (this.isWindows) {
@@ -170,17 +168,17 @@ export const platform = {
 
   /** Feature detection */
   async detectFeatures(): Promise<Record<string, boolean>> {
-    const fs = require('fs').promises;
+    const fsp = fs.promises;
     const features: Record<string, boolean> = {};
 
     // Test symlink support
     try {
-      const testFile = require('path').join(this.getTempDir(), 'symlink-test');
-      await fs.writeFile(testFile, 'test');
+      const testFile = path.join(this.getTempDir(), 'symlink-test');
+      await fsp.writeFile(testFile, 'test');
       const linkFile = testFile + '-link';
-      await fs.symlink(testFile, linkFile);
-      await fs.unlink(linkFile);
-      await fs.unlink(testFile);
+      await fsp.symlink(testFile, linkFile);
+      await fsp.unlink(linkFile);
+      await fsp.unlink(testFile);
       features.symlinks = true;
     } catch {
       features.symlinks = false;
@@ -188,12 +186,12 @@ export const platform = {
 
     // Test hard link support
     try {
-      const testFile = require('path').join(this.getTempDir(), 'hardlink-test');
-      await fs.writeFile(testFile, 'test');
+      const testFile = path.join(this.getTempDir(), 'hardlink-test');
+      await fsp.writeFile(testFile, 'test');
       const linkFile = testFile + '-hard';
-      await fs.link(testFile, linkFile);
-      await fs.unlink(linkFile);
-      await fs.unlink(testFile);
+      await fsp.link(testFile, linkFile);
+      await fsp.unlink(linkFile);
+      await fsp.unlink(testFile);
       features.hardLinks = true;
     } catch {
       features.hardLinks = false;
@@ -201,10 +199,10 @@ export const platform = {
 
     // Test file permissions
     try {
-      const testFile = require('path').join(this.getTempDir(), 'perm-test');
-      await fs.writeFile(testFile, 'test');
-      await fs.chmod(testFile, 0o755);
-      await fs.unlink(testFile);
+      const testFile = path.join(this.getTempDir(), 'perm-test');
+      await fsp.writeFile(testFile, 'test');
+      await fsp.chmod(testFile, 0o755);
+      await fsp.unlink(testFile);
       features.filePermissions = true;
     } catch {
       features.filePermissions = false;

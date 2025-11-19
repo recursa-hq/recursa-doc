@@ -8,6 +8,7 @@ import { createMemAPI } from './mem-api/index.js';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 // A mock in-memory session store. In a real app, this might be Redis, a DB, or a file store.
 const sessionHistories: Record<string, ChatMessage[]> = {};
@@ -22,8 +23,11 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
   }
 
   try {
+    // Get the directory of the current module (src/core or dist/core)
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    
     // Resolve the path to 'docs/system-prompt.md' from the project root.
-    const promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
+    const promptPath = path.resolve(__dirname, '../../docs/system-prompt.md');
 
     // Read the file content asynchronously.
     const systemPromptContent = await fs.readFile(promptPath, 'utf-8');
@@ -40,7 +44,7 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
     // If file read fails, log a critical error and exit, as the agent cannot run without it.
     const errorMessage = 'Failed to load system prompt file';
     logger.error(errorMessage, error as Error, {
-      path: path.resolve(process.cwd(), 'docs/system-prompt.md'),
+      path: 'docs/system-prompt.md',
     });
 
     // Throw an error to be caught by the server's main function
