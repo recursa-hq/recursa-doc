@@ -36,18 +36,19 @@ describe('MemAPI State Ops Integration Tests', () => {
     expect(successSave).toBe(true);
     expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
 
-    // 3. Make more changes
+    // 3. Make more changes (post-checkpoint garbage)
     await mem.writeFile('c.txt', 'version c');
     expect(await mem.fileExists('c.txt')).toBe(true);
 
-    // 4. Revert by applying the stashed changes
+    // 4. Revert to checkpoint
+    // This should discard 'c.txt' and restore 'b.txt'
     const successRevert = await mem.revertToLastCheckpoint();
     expect(successRevert).toBe(true);
 
     // 5. Assert state
-    expect(await mem.fileExists('a.txt')).toBe(true);
+    expect(await mem.fileExists('a.txt')).toBe(true); // Committed
     expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
-    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
+    expect(await mem.fileExists('c.txt')).toBe(false); // Discarded by revert
   });
 
   it('should discard all staged and unstaged changes', async () => {

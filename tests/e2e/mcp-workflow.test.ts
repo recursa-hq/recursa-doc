@@ -103,16 +103,16 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
   it('should save a checkpoint and successfully revert to it', async () => {
     // 1. Arrange
     const mockQueryLLM = createMockLLMQueryWithSpy([
-      `<think>Writing file 1.</think>
-         <typescript>await mem.writeFile('file1.md', 'content1');</typescript>`,
+      `<think>Writing good file.</think>
+         <typescript>await mem.writeFile('good.md', 'content-good');</typescript>`,
       `<think>Saving checkpoint.</think>
          <typescript>await mem.saveCheckpoint();</typescript>`,
-      `<think>Writing file 2.</think>
-         <typescript>await mem.writeFile('file2.md', 'content2');</typescript>`,
+      `<think>Writing bad file.</think>
+         <typescript>await mem.writeFile('bad.md', 'content-bad');</typescript>`,
       `<think>Reverting to checkpoint.</think>
          <typescript>await mem.revertToLastCheckpoint();</typescript>`,
       `<think>Committing.</think>
-         <typescript>await mem.commitChanges('feat: add file1 and file2');</typescript>
+         <typescript>await mem.commitChanges('feat: add good file only');</typescript>
          <reply>Reverted and committed.</reply>`,
     ]);
 
@@ -127,25 +127,25 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
     // 3. Assert
     expect(finalReply).toBe('Reverted and committed.');
 
-    // After `saveCheckpoint`, `file1.md` is stashed.
-    // After `writeFile('file2.md')`, `file2.md` is in the working directory.
-    // After `revertToLastCheckpoint` (`git stash pop`), stashed changes (`file1.md`) are
-    // applied, merging with working directory changes (`file2.md`).
-    expect(await harness.mem.fileExists('file1.md')).toBe(true);
-    expect(await harness.mem.fileExists('file2.md')).toBe(true);
+    // After `saveCheckpoint`, `good.md` is stashed.
+    // After `writeFile('bad.md')`, `bad.md` is in the working directory.
+    // After `revertToLastCheckpoint`, `bad.md` should be discarded and `good.md` restored.
+    
+    expect(await harness.mem.fileExists('good.md')).toBe(true);
+    expect(await harness.mem.fileExists('bad.md')).toBe(false); // Discarded by hard revert
 
     const log = await harness.git.log();
-    expect(log.latest?.message).toBe('feat: add file1 and file2');
+    expect(log.latest?.message).toBe('feat: add good file only');
 
     expect(log.latest).not.toBeNull();
 
-    // Verify both files were part of the commit
+    // Verify commit content
     const commitContent = await harness.git.show([
       '--name-only',
       log.latest!.hash,
     ]);
-    expect(commitContent).toContain('file1.md');
-    expect(commitContent).toContain('file2.md');
+    expect(commitContent).toContain('good.md');
+    expect(commitContent).not.toContain('bad.md');
   });
 
   it('should block and gracefully handle path traversal attempts', async () => {

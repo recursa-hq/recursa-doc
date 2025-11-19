@@ -1,15 +1,10 @@
 # Directory Structure
 ```
 docs/
-  PLATFORM_SUPPORT.md
   readme.md
   rules.md
   system-prompt.md
   tools.md
-  TROUBLESHOOTING.md
-scripts/
-  build.js
-  install.js
 src/
   core/
     mem-api/
@@ -42,6 +37,7 @@ src/
 tests/
   e2e/
     agent-workflow.test.ts
+    mcp-tools.test.ts
     mcp-workflow.test.ts
   integration/
     mem-api-file-ops.test.ts
@@ -77,1155 +73,265 @@ tsconfig.tsbuildinfo
 
 # Files
 
-## File: docs/PLATFORM_SUPPORT.md
-````markdown
-# Cross-Platform Support
-
-This document outlines the cross-platform compatibility features and installation instructions for Recursa MCP Server.
-
-## Supported Platforms
-
-### ✅ Fully Supported
-- **Linux** (Ubuntu, Debian, Fedora, Arch, etc.)
-- **macOS** (Intel and Apple Silicon)
-- **Windows** (Windows 10/11 with WSL2 recommended)
-- **Termux/Android** (Android 7.0+)
-
-### ⚠️ Partial Support
-- **Windows (Native)** - Limited by symlink support and file system constraints
-
-## Platform-Specific Features
-
-### 🔧 Platform Detection
-The server automatically detects the runtime environment and adjusts behavior:
-
-```typescript
-import platform from '../src/lib/platform.js';
-
-console.log(`Running on: ${platform.platformString}`);
-console.log(`Is Termux: ${platform.isTermux}`);
-console.log(`Is Windows: ${platform.isWindows}`);
-```
-
-### 📱 Termux/Android Optimizations
-- Conservative resource limits (256MB memory, 15s timeout)
-- Automatic permission fixes for binary executables
-- Storage permission validation
-- Symlink-free installation process
-
-### 🖥️ Windows Optimizations
-- Case-insensitive path handling
-- Drive letter normalization
-- UNC path support
-- File locking awareness with retry logic
-
-### 🍎 macOS/Linux Optimizations
-- Full symlink support
-- Native file permissions
-- Standard resource limits
-- Unix-specific optimizations
-
-## Installation Instructions
-
-### Standard Installation (Linux, macOS, WSL2)
-```bash
-# Clone the repository
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-
-# Install dependencies automatically
-npm run install:auto
-
-# Build the project
-npm run build:auto
-
-# Start development server
-npm run dev
-```
-
-### Termux/Android Installation
-```bash
-# Install Termux from F-Droid (recommended)
-# Update packages
-pkg update && pkg upgrade
-
-# Install required tools
-pkg install nodejs npm git
-
-# Clone the repository
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-
-# Install with Termux-specific optimizations
-npm run install:termux
-
-# Build for Termux
-npm run build:termux
-
-# Start development server
-npm run dev:termux
-```
-
-### Windows Native Installation
-```bash
-# Use Git Bash or PowerShell with admin privileges
-git clone https://github.com/your-repo/recursa-doc.git
-cd recursa-doc
-
-# Install with Windows compatibility
-npm run install:standard
-
-# Build project
-npm run build:standard
-
-# Start development server
-npm run dev:standard
-```
-
-## Configuration
-
-### Environment Variables
-All platforms support the same environment variables, with platform-specific defaults:
-
-```bash
-# Required
-OPENROUTER_API_KEY=your_api_key_here
-KNOWLEDGE_GRAPH_PATH=/path/to/your/knowledge/graph
-
-# Optional (platform-specific defaults apply)
-LLM_MODEL=anthropic/claude-3-haiku-20240307
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=4000
-SANDBOX_TIMEOUT=10000
-SANDBOX_MEMORY_LIMIT=100
-GIT_USER_NAME=Recursa Agent
-GIT_USER_EMAIL=recursa@local
-```
-
-### Platform-Specific Defaults
-
-| Setting | Linux/macOS | Termux/Android | Windows |
-|---------|-------------|-----------------|---------|
-| `LLM_MAX_TOKENS` | 4000 | 2000 | 4000 |
-| `LLM_TEMPERATURE` | 0.7 | 0.5 | 0.7 |
-| `SANDBOX_TIMEOUT` | 10000ms | 15000ms | 10000ms |
-| `SANDBOX_MEMORY_LIMIT` | 512MB | 256MB | 512MB |
-
-## Security Features
-
-### Cross-Platform Path Security
-- **Canonical path resolution** using `fs.realpath()`
-- **Case-insensitive validation** on Windows and macOS
-- **Symlink attack prevention** with configurable policies
-- **Path traversal detection** with platform-specific patterns
-
-### File System Protections
-- **Atomic file operations** with temporary files
-- **Permission validation** adapted for each platform
-- **Resource limits** enforced platform-wide
-- **Sandbox isolation** with platform-specific constraints
-
-## Troubleshooting
-
-### Common Issues
-
-#### Permission Denied (Termux)
-```bash
-# Fix storage permissions in Termux
-termux-setup-storage
-
-# Or manually fix binary permissions
-chmod +x node_modules/.bin/*
-```
-
-#### Symlink Errors (Windows)
-```bash
-# Enable developer mode on Windows
-# Or run with administrator privileges
-
-# Alternative: Use WSL2 for full compatibility
-wsl --install
-```
-
-#### Out of Memory (All Platforms)
-```bash
-# Increase Node.js memory limit
-export NODE_OPTIONS="--max-old-space-size=2048"
-
-# Or use conservative settings in Termux
-export SANDBOX_MEMORY_LIMIT=128
-```
-
-#### Git Integration Issues
-```bash
-# Configure git for the current user
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-
-# For Termux, ensure git is installed
-pkg install git
-```
-
-### Platform-Specific Debugging
-
-#### Enable Debug Logging
-```bash
-# Set debug environment variable
-export DEBUG=recursa:*
-export NODE_ENV=development
-
-# Run with verbose output
-npm run dev -- --verbose
-```
-
-#### Platform Detection Output
-```bash
-# Check what platform is detected
-node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-```
-
-## Development
-
-### Testing on Multiple Platforms
-```bash
-# Run platform-specific tests
-npm run test:linux
-npm run test:macos
-npm run test:windows
-npm run test:termux
-```
-
-### Building for Specific Platforms
-```bash
-# Explicit platform builds
-npm run build:standard  # Linux/macOS/Windows
-npm run build:termux    # Termux/Android
-```
-
-### Cross-Platform CI/CD
-The project includes GitHub Actions for testing across:
-- Ubuntu (latest)
-- macOS (latest)
-- Windows (latest)
-- Android/Termux (emulated)
-
-## Performance Considerations
-
-### Termux/Android
-- Reduced memory and CPU limits
-- Conservative token limits
-- Longer timeouts for mobile network conditions
-- Optimized for battery life
-
-### Desktop Platforms
-- Full resource utilization
-- Standard token limits
-- Faster response times
-- Complete feature set
-
-### Windows Native
-- Slightly reduced performance due to filesystem constraints
-- Additional validation overhead
-- Recommended to use WSL2 for best performance
-
-## Contributing
-
-When adding new features:
-1. Test on all supported platforms
-2. Use platform detection utilities from `src/lib/platform.ts`
-3. Add platform-specific defaults where appropriate
-4. Update documentation for platform-specific behavior
-5. Include cross-platform tests in CI/CD
-
-### Platform Detection Usage
-```typescript
-import platform from '../src/lib/platform.js';
-
-if (platform.isTermux) {
-  // Termux-specific code
-  const limits = platform.getResourceLimits();
-  console.log(`Memory limit: ${limits.maxMemory}`);
-}
-
-if (platform.isWindows) {
-  // Windows-specific code
-  const normalizedPath = platform.normalizePath(userPath);
-}
-```
-
-## Limitations
-
-### Windows Native
-- No symlink support in node_modules
-- Case-insensitive filesystem may cause issues
-- Some Unix-specific tools unavailable
-
-### Termux/Android
-- Limited memory and CPU resources
-- Storage access restrictions
-- Some native modules may not compile
-
-### macOS
-- Gatekeeper may block execution of unsigned binaries
-- Case-insensitive filesystem can cause path issues
-
-## Support
-
-For platform-specific issues:
-1. Check this documentation first
-2. Review troubleshooting section
-3. Check existing GitHub issues
-4. Create new issue with platform information:
-   - Operating system and version
-   - Node.js version
-   - Platform detection output
-   - Error messages and logs
-````
-
-## File: docs/TROUBLESHOOTING.md
-````markdown
-# Troubleshooting Guide
-
-This guide covers common issues and their solutions across different platforms.
-
-## Installation Issues
-
-### npm install fails with permission errors
-
-#### Linux/macOS
-```bash
-# Fix npm permissions
-sudo chown -R $(whoami) ~/.npm
-sudo chown -R $(whoami) /usr/local/lib/node_modules
-
-# Alternative: Use nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-nvm install 18
-nvm use 18
-```
-
-#### Termux/Android
-```bash
-# Use Termux-specific installation
-npm run install:termux
-
-# Or manually fix permissions
-find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \;
-```
-
-#### Windows
-```bash
-# Run as administrator
-# Or use PowerShell with elevated privileges
-
-# Alternative: Use Chocolatey or Scoop
-choco install nodejs
-# or
-scoop install nodejs
-```
-
-### Symlink errors during installation
-
-#### Windows Native
-```bash
-# Enable Developer Mode
-# Settings > Update & Security > For developers > Developer mode
-
-# Or run with administrator privileges
-npm install --no-bin-links
-```
-
-#### All Platforms
-```bash
-# Use the cross-platform installer
-npm run install:auto
-
-# Manual installation without symlinks
-npm install --ignore-scripts --no-bin-links
-```
-
-## Build Issues
-
-### TypeScript compilation fails
-
-#### General Solutions
-```bash
-# Clean build
-rm -rf node_modules dist
-npm run install:auto
-npm run build:auto
-
-# Check TypeScript version
-npx tsc --version
-
-# Manual compilation
-node node_modules/typescript/bin/tsc
-```
-
-#### Termux Specific
-```bash
-# Ensure TypeScript is executable
-chmod +x node_modules/.bin/tsc
-chmod +x node_modules/typescript/bin/tsc
-
-# Use Termux build script
-npm run build:termux
-```
-
-#### Windows Specific
-```bash
-# Use Windows build script
-npm run build:standard
-
-# Check if paths are too long (Windows limitation)
-# Move project closer to drive root (e.g., C:\dev\recursa)
-```
-
-## Runtime Issues
-
-### "Permission denied" errors
-
-#### File Access Issues
-```bash
-# Check file permissions
-ls -la filename
-
-# Fix permissions (Unix-like systems)
-chmod 644 filename
-chmod 755 directory
-
-# Windows: Check file properties > Security
-# Ensure your user has read/write permissions
-```
-
-#### Termux Storage Permissions
-```bash
-# Setup storage access
-termux-setup-storage
-
-# Check if storage is accessible
-ls -R ~/storage/shared
-
-# Use internal storage for knowledge graph
-export KNOWLEDGE_GRAPH_PATH=~/storage/shared/Documents/knowledge-graph
-```
-
-#### Git Repository Permissions
-```bash
-# Check git repository permissions
-git status
-
-# Fix git repository permissions (Unix-like)
-chmod -R u+rw .git/
-
-# Windows: Ensure git repository isn't read-only
-# Right-click folder > Properties > uncheck "Read-only"
-```
-
-### Memory errors
-
-#### Node.js Out of Memory
-```bash
-# Increase Node.js memory limit
-export NODE_OPTIONS="--max-old-space-size=2048"
-
-# Windows
-set NODE_OPTIONS=--max-old-space-size=2048
-
-# Run with increased memory
-node --max-old-space-size=2048 dist/server.js
-```
-
-#### Termux Memory Limits
-```bash
-# Use conservative settings
-export SANDBOX_MEMORY_LIMIT=128
-export LLM_MAX_TOKENS=1000
-
-# Check available memory
-free -h  # Linux/Termux
-```
-
-#### Windows Memory Issues
-```bash
-# Close unnecessary applications
-# Increase virtual memory
-# System > Advanced system settings > Performance > Advanced > Virtual memory
-```
-
-### Network/Connection Issues
-
-#### API Connection Problems
-```bash
-# Test network connectivity
-curl -I https://openrouter.ai/api/v1/models
-
-# Check if API key is valid
-echo $OPENROUTER_API_KEY
-
-# Use proxy if necessary
-export HTTP_PROXY=http://proxy.example.com:8080
-export HTTPS_PROXY=http://proxy.example.com:8080
-```
-
-#### Git Repository Issues
-```bash
-# Check git configuration
-git config --list
-
-# Configure git if needed
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-
-# Test git repository access
-git remote -v
-git fetch origin
-```
-
-## Platform-Specific Issues
-
-### Termux/Android
-
-#### Package Installation Fails
-```bash
-# Update package databases
-pkg update && pkg upgrade
-
-# Install required packages
-pkg install nodejs npm git make python
-
-# Clear npm cache
-npm cache clean --force
-```
-
-#### Storage Access Denied
-```bash
-# Request storage permissions
-termux-setup-storage
-
-# Check accessible directories
-ls ~/storage/
-
-# Use accessible storage location
-export KNOWLEDGE_GRAPH_PATH=~/storage/shared/Documents/recursa
-```
-
-#### Performance Issues
-```bash
-# Use conservative settings
-export LLM_MAX_TOKENS=500
-export LLM_TEMPERATURE=0.3
-export SANDBOX_TIMEOUT=30000
-
-# Monitor resource usage
-top -n 1
-```
-
-### Windows
-
-#### Path Too Long Errors
-```bash
-# Move project closer to drive root
-# C:\recursa instead of C:\Users\name\long\path\to\project
-
-# Enable long path support (Windows 10 1607+)
-# Group Policy Editor > Computer Configuration > Administrative Templates > System > Filesystem > Enable Win32 long paths
-```
-
-#### PowerShell Execution Policy
-```powershell
-# Check execution policy
-Get-ExecutionPolicy
-
-# Set execution policy (run as administrator)
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-#### Antivirus Blocking
-```bash
-# Add exception for Node.js and your project folder
-# Windows Security > Virus & threat protection > Manage settings > Add or remove exclusions
-```
-
-### macOS
-
-#### Gatekeeper Blocking App
-```bash
-# Allow app from unidentified developer
-# System Preferences > Security & Privacy > General > Allow apps downloaded from: App Store and identified developers
-
-# Or allow specific app
-xattr -d com.apple.quarantine /path/to/app
-```
-
-#### File Permissions Issues
-```bash
-# Fix permissions for user-owned files
-sudo chown -R $(whoami) ~/.npm
-sudo chown -R $(whoami) /usr/local/lib/node_modules
-
-# Alternative: Use Homebrew for Node.js
-brew install node
-```
-
-### Linux
-
-#### Permission Denied for Global Packages
-```bash
-# Use nvm (recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-
-# Or configure npm global directory
-mkdir ~/.npm-global
-npm config set prefix '~/.npm-global'
-echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
-```
-
-#### Package Building Issues
-```bash
-# Install build tools
-# Ubuntu/Debian
-sudo apt-get install build-essential
-
-# Fedora
-sudo dnf groupinstall "Development Tools"
-
-# Arch Linux
-sudo pacman -S base-devel
-```
-
-## Debugging
-
-### Enable Debug Logging
-```bash
-# Set debug environment variable
-export DEBUG=recursa:*
-
-# Set Node.js debug mode
-export NODE_ENV=development
-
-# Run with verbose output
-npm run dev -- --verbose --log-level debug
-```
-
-### Check Platform Detection
-```bash
-# Test platform detection
-node -e "
-import('./src/lib/platform.js').then(platform => {
-  console.log('Platform:', platform.default.platformString);
-  console.log('Is Termux:', platform.default.isTermux);
-  console.log('Is Windows:', platform.default.isWindows);
-  console.log('Has Symlinks:', platform.default.supportsSymlinks);
-});
-"
-```
-
-### Validate Configuration
-```bash
-# Test configuration loading
-node -e "
-import('./src/config.js').then(config => {
-  config.loadAndValidateConfig()
-    .then(cfg => console.log('Config valid:', cfg))
-    .catch(err => console.error('Config error:', err));
-});
-"
-```
-
-### Check Dependencies
-```bash
-# Verify all dependencies are installed
-npm ls
-
-# Check for missing binaries
-npx tsc --version
-npx tsx --version
-
-# Test individual components
-node -e "console.log('Node.js works')"
-node -e "import('./src/lib/platform.js').then(() => console.log('Platform module works'))"
-```
-
-## Performance Optimization
-
-### General Tips
-```bash
-# Use SSD storage for knowledge graph
-# Increase Node.js memory limit
-# Use latest Node.js version
-# Enable compression for large files
-```
-
-### Termux Optimization
-```bash
-# Use conservative LLM settings
-export LLM_MAX_TOKENS=500
-export LLM_TEMPERATURE=0.3
-
-# Close background apps
-# Use WiFi instead of mobile data
-```
-
-### Desktop Optimization
-```bash
-# Use higher token limits for better results
-export LLM_MAX_TOKENS=4000
-export SANDBOX_MEMORY_LIMIT=1024
-
-# Enable parallel processing if supported
-export WORKER_THREADS=4
-```
-
-## Getting Help
-
-### Collect Debug Information
-```bash
-# Create debug report
-{
-  echo "=== Platform Information ==="
-  uname -a
-  node --version
-  npm --version
-
-  echo "=== Platform Detection ==="
-  node -e "import('./src/lib/platform.js').then(p => console.log(p.default.platformString))"
-
-  echo "=== Environment Variables ==="
-  env | grep -E "(RECURSA|NODE|PATH)" | sort
-
-  echo "=== Dependency Status ==="
-  npm ls --depth=0
-
-  echo "=== Configuration Status ==="
-  node -e "
-    import('./src/config.js').then(config => {
-      config.loadAndValidateConfig()
-        .then(cfg => console.log('✅ Configuration valid'))
-        .catch(err => console.error('❌ Configuration error:', err.message));
-    });
-  "
-} > debug-report.txt
-
-# Share debug-report.txt when asking for help
-```
-
-### File an Issue
-When creating GitHub issues, include:
-1. Operating system and version
-2. Node.js and npm versions
-3. Platform detection output
-4. Error messages and stack traces
-5. Steps to reproduce the issue
-6. Debug report (if applicable)
-
-### Community Support
-- Check existing GitHub issues
-- Review documentation
-- Ask questions in discussions
-- Join Discord/Slack communities (if available)
-````
-
-## File: scripts/build.js
-````javascript
-#!/usr/bin/env node
-
-/**
- * Cross-platform build script with platform detection
- */
-
-import { execSync } from 'child_process';
-import { existsSync } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..');
-
-// Platform detection utilities
-const platform = {
-  isWindows: process.platform === 'win32',
-  isMacOS: process.platform === 'darwin',
-  isLinux: process.platform === 'linux',
-  isAndroid: process.platform === 'android',
-  get isTermux() {
-    return this.isAndroid ||
-           process.env.TERMUX === 'true' ||
-           process.env.PREFIX?.includes('/com.termux') ||
-           process.env.TERMUX_VERSION !== undefined;
-  }
-};
-
-/**
- * Execute command with platform-specific handling
- */
-function execCommand(command, options = {}) {
-  try {
-    console.log(`🔨 Executing: ${command}`);
-    execSync(command, {
-      stdio: 'inherit',
-      cwd: projectRoot,
-      ...options
-    });
-  } catch {
-    console.error(`❌ Command failed: ${command}`);
-    process.exit(1);
-  }
-}
-
-/**
- * Check if binary exists and is executable
- */
-function checkBinary(binary) {
-  const hasBin = existsSync(path.join(projectRoot, 'node_modules', '.bin', binary));
-  if (hasBin) {
-    try {
-      execCommand(`node node_modules/.bin/${binary} --version`, { stdio: 'pipe' });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
-/**
- * Build for Termux/Android
- */
-function buildTermux() {
-  console.log('🏗️  Building for Termux/Android...');
-
-  // Check TypeScript is available
-  if (!checkBinary('tsc')) {
-    console.log('📦 Installing TypeScript...');
-    execCommand('npm install typescript --no-save --ignore-scripts --no-bin-links');
-  }
-
-  // Fix executable permissions
-  console.log('🔧 Fixing executable permissions...');
-  try {
-    execCommand('find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \\;');
-    execCommand('find node_modules -name "tsx" -type f -exec chmod +x {} \\;');
-    execCommand('find node_modules -name "esbuild" -type f -exec chmod +x {} \\;');
-  } catch {
-    console.log('⚠️  Permission fixes failed, continuing...');
-  }
-
-  // Run TypeScript compiler
-  console.log('📝 Running TypeScript compiler...');
-  try {
-    if (checkBinary('tsc')) {
-      execCommand('node node_modules/.bin/tsc');
-    } else {
-      execCommand('node node_modules/typescript/bin/tsc');
-    }
-  } catch {
-    console.log('❌ TypeScript compilation failed');
-    process.exit(1);
-  }
-
-  console.log('✅ Termux build completed!');
-}
-
-/**
- * Build for standard platforms (Linux, macOS, Windows)
- */
-function buildStandard() {
-  console.log('🏗️  Building for standard platform...');
-
-  // Use standard npm build
-  execCommand('npm run build');
-
-  console.log('✅ Standard build completed!');
-}
-
-/**
- * Main build function
- */
-function main() {
-  const buildType = process.argv[2];
-
-  console.log(`🚀 Starting build for platform: ${platform.platformString || process.platform}-${process.arch}`);
-  console.log(`📁 Project root: ${projectRoot}`);
-
-  // Check if node_modules exists
-  if (!existsSync(path.join(projectRoot, 'node_modules'))) {
-    console.log('❌ node_modules not found. Please run "npm install" first.');
-    process.exit(1);
-  }
-
-  // Handle specific build types
-  if (buildType === 'termux') {
-    buildTermux();
-    return;
-  }
-
-  if (buildType === 'standard') {
-    buildStandard();
-    return;
-  }
-
-  // Auto-detect and use appropriate build method
-  if (platform.isTermux) {
-    buildTermux();
-  } else {
-    buildStandard();
-  }
-}
-
-// Error handling
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught exception:', error.message);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// Run the build
-main();
-````
-
-## File: scripts/install.js
-````javascript
-#!/usr/bin/env node
-
-/**
- * Cross-platform installation script with platform detection
- */
-
-import { execSync, spawn } from 'child_process';
-import { existsSync, chmodSync } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..');
-
-// Platform detection
-const platform = {
-  isWindows: process.platform === 'win32',
-  isMacOS: process.platform === 'darwin',
-  isLinux: process.platform === 'linux',
-  isAndroid: process.platform === 'android',
-  get isTermux() {
-    return this.isAndroid ||
-           process.env.TERMUX === 'true' ||
-           process.env.PREFIX?.includes('/com.termux') ||
-           process.env.TERMUX_VERSION !== undefined;
-  },
-  get platformString() {
-    const parts = [process.platform, process.arch];
-    if (this.isTermux) parts.push('termux');
-    return parts.join('-');
-  }
-};
-
-/**
- * Execute command with real-time output
- */
-function execCommand(command, args = [], options = {}) {
-  return new Promise((resolve, reject) => {
-    console.log(`🔨 Executing: ${command} ${args.join(' ')}`);
-
-    const child = spawn(command, args, {
-      stdio: 'inherit',
-      cwd: projectRoot,
-      ...options
-    });
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(code);
-      } else {
-        reject(new Error(`Command failed with exit code ${code}`));
-      }
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
+## File: tests/e2e/mcp-tools.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  createMockQueryLLM,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import { getFreePort } from '../lib/test-util';
+import { createMcpServer } from '../../src/server';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+// Polyfill EventSource for Node.js environment
+import EventSource from 'eventsource';
+
+// @ts-ignore
+global.EventSource = EventSource;
+
+describe('MCP Tools E2E Tests (Real Client -> Server -> Agent)', () => {
+  let harness: TestHarnessState;
+  let server: any;
+  let client: Client;
+  let serverPort: number;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
   });
-}
 
-/**
- * Fix executable permissions for Termux/Android
- */
-function fixPermissions() {
-  console.log('🔧 Fixing executable permissions...');
-
-  const fixes = [
-    'find node_modules -name "*.js" -path "*/bin/*" -exec chmod +x {} \\;',
-    'find node_modules -name "tsx" -type f -exec chmod +x {} \\;',
-    'find node_modules -name "esbuild" -type f -exec chmod +x {} \\;',
-    'find node_modules -name "tsc" -type f -exec chmod +x {} \\;'
-  ];
-
-  for (const fix of fixes) {
-    try {
-      execSync(fix, { stdio: 'pipe', cwd: projectRoot });
-    } catch {
-      console.log(`⚠️  Permission fix failed: ${fix}`);
+  afterEach(async () => {
+    if (client) {
+      await client.close();
     }
-  }
+    if (server) {
+      if (server.stop) await server.stop();
+    }
+    await cleanupTestHarness(harness);
+  });
 
-  // Fix specific binary paths
-  const binaryPaths = [
-    'node_modules/.bin/tsc',
-    'node_modules/.bin/tsx',
-    'node_modules/typescript/bin/tsc',
-    'node_modules/tsx/dist/cli.mjs'
-  ];
+  const startServerAndConnectClient = async (mockLLM: any) => {
+    // 1. Create Server with Mock LLM
+    server = await createMcpServer(harness.mockConfig, {
+      queryLLM: mockLLM,
+    });
 
-  for (const binaryPath of binaryPaths) {
-    const fullPath = path.join(projectRoot, binaryPath);
-    if (existsSync(fullPath)) {
-      try {
-        chmodSync(fullPath, 0o755);
-      } catch {
-        console.log(`⚠️  Could not chmod ${binaryPath}: ${error.message}`);
+    // 2. Start Server on a free port using SSE
+    serverPort = await getFreePort();
+    
+    await server.start({
+      transportType: 'sse',
+      sse: { endpoint: '/sse', port: serverPort },
+    });
+
+    // 3. Connect Client
+    const transport = new SSEClientTransport(
+      new URL(`http://localhost:${serverPort}/sse`)
+    );
+    client = new Client(
+      {
+        name: 'test-client',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {},
       }
-    }
-  }
-}
+    );
 
-/**
- * Install for Termux/Android
- */
-async function installTermux() {
-  console.log('📦 Installing for Termux/Android...');
+    await client.connect(transport);
+  };
 
-  try {
-    // Clean existing installation if present
-    if (existsSync(path.join(projectRoot, 'node_modules'))) {
-      console.log('🧹 Cleaning existing installation...');
-      await execCommand('rm', ['-rf', 'node_modules']);
-    }
+  it('should perform file operations via MCP (Create & Read)', async () => {
+    // Arrange: Mock LLM to write a file
+    const mockLLM = createMockQueryLLM([
+      `<think>Creating a test file via MCP.</think>
+       <typescript>await mem.writeFile('mcp-test.txt', 'content from mcp');</typescript>
+       <reply>File created.</reply>`,
+    ]);
 
-    // Install with Termux-specific flags
-    console.log('📥 Installing dependencies with Termux compatibility...');
-    await execCommand('npm', ['install', '--ignore-scripts', '--no-bin-links']);
+    await startServerAndConnectClient(mockLLM);
 
-    // Fix permissions
-    fixPermissions();
+    // Act: Call the tool via MCP Client
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Create a file named mcp-test.txt',
+        runId: 'test-run-1',
+      },
+    });
 
-    // Try to run postinstall scripts manually for critical packages
-    console.log('🔧 Running essential postinstall scripts...');
-    try {
-      const criticalPackages = ['typescript', 'tsx'];
-      for (const pkg of criticalPackages) {
-        const pkgPath = path.join(projectRoot, 'node_modules', pkg);
-        if (existsSync(pkgPath)) {
-          const packageJsonPath = path.join(pkgPath, 'package.json');
-          if (existsSync(packageJsonPath)) {
-            const packageJson = require(packageJsonPath);
-            if (packageJson.scripts?.postinstall) {
-              console.log(`🔧 Running postinstall for ${pkg}...`);
-              try {
-                execSync('npm explore ' + pkg + ' -- npm run postinstall', {
-                  stdio: 'pipe',
-                  cwd: projectRoot
-                });
-              } catch {
-                console.log(`⚠️  Postinstall failed for ${pkg}, continuing...`);
-              }
-            }
-          }
-        }
-      }
-    } catch {
-      console.log('⚠️  Postinstall setup failed, continuing...');
-    }
+    // Assert: Check result content
+    const content = (result as any).content[0].text;
+    const parsed = JSON.parse(content);
+    expect(parsed.reply).toBe('File created.');
 
-    console.log('✅ Termux installation completed!');
-    console.log('');
-    console.log('🎯 Next steps:');
-    console.log('   npm run build:termux');
-    console.log('   npm run dev:termux');
+    // Assert: Check side-effects on filesystem
+    const fileExists = await harness.mem.fileExists('mcp-test.txt');
+    expect(fileExists).toBe(true);
+    const fileContent = await harness.mem.readFile('mcp-test.txt');
+    expect(fileContent).toBe('content from mcp');
+  });
 
-  } catch {
-    console.error('❌ Termux installation failed:', error.message);
-    process.exit(1);
-  }
-}
+  it('should perform git operations via MCP (Commit & Log)', async () => {
+    // Arrange: Mock LLM to commit changes
+    const mockLLM = createMockQueryLLM([
+      `<think>Committing changes.</think>
+       <typescript>await mem.writeFile('git-test.txt', 'v1'); await mem.commitChanges('feat: mcp commit');</typescript>
+       <reply>Committed.</reply>`,
+    ]);
 
-/**
- * Install for standard platforms
- */
-async function installStandard() {
-  console.log('📦 Installing for standard platform...');
+    await startServerAndConnectClient(mockLLM);
 
-  try {
-    // Use standard npm install
-    await execCommand('npm', ['install']);
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Create and commit a file',
+        runId: 'test-run-2',
+      },
+    });
 
-    console.log('✅ Standard installation completed!');
-    console.log('');
-    console.log('🎯 Next steps:');
-    console.log('   npm run build');
-    console.log('   npm run dev');
+    // Assert
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.reply).toBe('Committed.');
 
-  } catch {
-    console.error('❌ Standard installation failed:', error.message);
-    process.exit(1);
-  }
-}
+    // Verify Git Log
+    const log = await harness.git.log();
+    expect(log.latest?.message).toBe('feat: mcp commit');
+  });
 
-/**
- * Main installation function
- */
-async function main() {
-  const installType = process.argv[2];
+  it('should perform graph operations via MCP (Query)', async () => {
+    // Arrange: Create some files in the graph first
+    await harness.mem.writeFile('Person.md', '- # Person\n  - type:: person\n  - name:: John Doe');
+    await harness.mem.writeFile('Project.md', '- # Project\n  - type:: project\n  - lead:: [[John Doe]]');
 
-  console.log(`🚀 Starting installation for platform: ${platform.platformString}`);
-  console.log(`📁 Project root: ${projectRoot}`);
+    // Arrange: Mock LLM to query the graph
+    const mockLLM = createMockQueryLLM([
+      `<think>Querying the graph for persons.</think>
+       <typescript>
+         const results = await mem.queryGraph('(property type:: person)');
+         const paths = results.map(r => r.filePath);
+         console.log(paths);
+       </typescript>
+       <reply>Found persons.</reply>`,
+    ]);
 
-  // Check Node.js version
-  const nodeVersion = process.version;
-  const majorVersion = parseInt(nodeVersion.slice(1).split('.')[0]);
-  if (majorVersion < 18) {
-    console.log(`❌ Node.js ${nodeVersion} is not supported. Please use Node.js 18 or higher.`);
-    process.exit(1);
-  }
-  console.log(`✅ Node.js version: ${nodeVersion}`);
+    await startServerAndConnectClient(mockLLM);
 
-  // Handle specific installation types
-  if (installType === 'termux') {
-    await installTermux();
-    return;
-  }
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Find all people',
+        runId: 'test-run-graph',
+      },
+    });
 
-  if (installType === 'standard') {
-    await installStandard();
-    return;
-  }
+    // Assert
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.reply).toBe('Found persons.');
+    // We rely on the fact that the agent ran successfully. 
+    // In a real scenario, the agent would use the query results in its reply.
+  });
 
-  // Auto-detect and use appropriate installation method
-  if (platform.isTermux) {
-    await installTermux();
-  } else {
-    await installStandard();
-  }
-}
+  it('should perform state operations via MCP (Checkpoints)', async () => {
+    // Arrange: Mock LLM to save and revert checkpoint
+    const mockLLM = createMockQueryLLM([
+      `<think>Testing checkpoints.</think>
+       <typescript>
+         await mem.writeFile('check.txt', 'initial');
+         await mem.saveCheckpoint();
+         await mem.writeFile('check.txt', 'modified');
+         await mem.revertToLastCheckpoint();
+       </typescript>
+       <reply>Reverted.</reply>`,
+    ]);
 
-// Error handling
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught exception:', error.message);
-  process.exit(1);
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Test checkpoints',
+        runId: 'test-run-state',
+      },
+    });
+
+    // Assert
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.reply).toBe('Reverted.');
+
+    // Verify file content was reverted
+    const content = await harness.mem.readFile('check.txt');
+    expect(content).toBe('initial');
+  });
+
+  it('should perform utility operations via MCP (Token Count)', async () => {
+    // Arrange: Mock LLM to count tokens
+    await harness.mem.writeFile('long.txt', 'word '.repeat(100));
+
+    const mockLLM = createMockQueryLLM([
+      `<think>Counting tokens.</think>
+       <typescript>
+         const count = await mem.getTokenCount('long.txt');
+       </typescript>
+       <reply>Counted tokens.</reply>`,
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Count tokens',
+        runId: 'test-run-util',
+      },
+    });
+
+    // Assert
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.reply).toBe('Counted tokens.');
+  });
+
+  it('should return error response via MCP when sandbox fails', async () => {
+    // Arrange: Mock LLM to throw error
+    const mockLLM = createMockQueryLLM([
+      `<think>This will fail.</think>
+       <typescript>throw new Error('Sandbox Explosion');</typescript>`,
+       // The loop catches the error and feeds it back to LLM. 
+       // The LLM normally tries to fix it. 
+       // Let's make the LLM give up or explain the error in next turn.
+       `<think>I see it failed.</think>
+       <reply>Operation failed due to Sandbox Explosion.</reply>`
+    ]);
+
+    await startServerAndConnectClient(mockLLM);
+
+    // Act
+    const result = await client.callTool({
+      name: 'process_query',
+      arguments: {
+        query: 'Make it crash',
+        runId: 'test-run-error',
+      },
+    });
+
+    // Assert
+    const parsed = JSON.parse((result as any).content[0].text);
+    expect(parsed.reply).toBe('Operation failed due to Sandbox Explosion.');
+  });
 });
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// Run the installation
-main();
 ````
 
 ## File: src/lib/platform.ts
@@ -1748,282 +854,6 @@ describe('MemAPI Git Ops Integration Tests', () => {
 });
 ````
 
-## File: tests/integration/mem-api-graph-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Graph Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    // Disable .gitignore for these tests so we can correctly search .log files
-    harness = await createTestHarness({ withGitignore: false });
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should query the graph with multiple conditions', async () => {
-    const pageAContent = `
-- # Page A
-  - prop:: value
-  - Link to [[Page B]].
-    `;
-    const pageBContent = `
-- # Page B
-  - prop:: other
-  - No links here.
-    `;
-
-    await mem.writeFile('PageA.md', pageAContent);
-    await mem.writeFile('PageB.md', pageBContent);
-
-    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(1);
-    expect(results[0]).toBeDefined();
-    expect(results[0]?.filePath).toBe('PageA.md');
-  });
-
-  it('should return an empty array for a query with no matches', async () => {
-    const pageAContent = `- # Page A\n  - prop:: value`;
-    await mem.writeFile('PageA.md', pageAContent);
-
-    const query = `(property prop:: non-existent-value)`;
-    const results = await mem.queryGraph(query);
-
-    expect(results).toHaveLength(0);
-  });
-
-  it('should get backlinks and outgoing links', async () => {
-    // PageA links to PageB and PageC
-    await mem.writeFile('PageA.md', 'Links to [[Page B]] and [[Page C]].');
-    // PageB links to PageC
-    await mem.writeFile('PageB.md', 'Links to [[Page C]].');
-    // PageC has no outgoing links
-    await mem.writeFile('PageC.md', 'No links.');
-    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
-    await mem.writeFile('PageD.md', 'Links to [[PageA]].');
-
-    // Test outgoing links
-    const outgoingA = await mem.getOutgoingLinks('PageA.md');
-    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
-    expect(outgoingA.length).toBe(2);
-
-    const outgoingC = await mem.getOutgoingLinks('PageC.md');
-    expect(outgoingC).toEqual([]);
-
-    // Test backlinks
-    const backlinksA = await mem.getBacklinks('PageA.md');
-    expect(backlinksA).toEqual(['PageD.md']);
-
-    const backlinksC = await mem.getBacklinks('PageC.md');
-    expect(backlinksC).toEqual(
-      expect.arrayContaining(['PageA.md', 'PageB.md'])
-    );
-    expect(backlinksC.length).toBe(2);
-  });
-
-  it('should perform a global full-text search', async () => {
-    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
-    await mem.writeFile('b.md', 'This file has a common-search-term.');
-    await mem.writeFile('c.log', 'This one also has a common-search-term.');
-    await mem.writeFile(
-      'd.txt',
-      'This file has nothing interesting to find.'
-    );
-
-    // Search for a unique term
-    const uniqueResults = await mem.searchGlobal('unique-search-term');
-    expect(uniqueResults).toEqual(['a.txt']);
-
-    // Search for a common term
-    const commonResults = await mem.searchGlobal('common-search-term');
-    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
-    expect(commonResults.length).toBe(2);
-
-    // Search for a non-existent term
-    const noResults = await mem.searchGlobal('non-existent-term');
-    expect(noResults).toEqual([]);
-  });
-});
-````
-
-## File: tests/integration/mem-api-state-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI State Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should save and revert to a checkpoint', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'version a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes and save checkpoint
-    await mem.writeFile('b.txt', 'version b');
-    const successSave = await mem.saveCheckpoint();
-    expect(successSave).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
-
-    // 3. Make more changes
-    await mem.writeFile('c.txt', 'version c');
-    expect(await mem.fileExists('c.txt')).toBe(true);
-
-    // 4. Revert by applying the stashed changes
-    const successRevert = await mem.revertToLastCheckpoint();
-    expect(successRevert).toBe(true);
-
-    // 5. Assert state
-    expect(await mem.fileExists('a.txt')).toBe(true);
-    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
-    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
-  });
-
-  it('should discard all staged and unstaged changes', async () => {
-    // 1. Initial state
-    await mem.writeFile('a.txt', 'original a');
-    await mem.commitChanges('commit a');
-
-    // 2. Make changes
-    await mem.writeFile('a.txt', 'modified a'); // unstaged
-    await mem.writeFile('b.txt', 'new b'); // unstaged
-    await mem.writeFile('c.txt', 'new c'); // will be staged
-    await harness.git.add('c.txt');
-
-    // 3. Discard
-    const successDiscard = await mem.discardChanges();
-    expect(successDiscard).toBe(true);
-
-    // 4. Assert state
-    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
-    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
-    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
-
-    const status = await harness.git.status();
-    expect(status.isClean()).toBe(true);
-  });
-
-  it('should handle reverting when no checkpoint exists', async () => {
-    await mem.writeFile('a.txt', 'content');
-    const success = await mem.revertToLastCheckpoint();
-
-    // It should not throw an error and return false to indicate nothing was reverted.
-    expect(success).toBe(false);
-    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
-  });
-});
-````
-
-## File: tests/integration/mem-api-util-ops.test.ts
-````typescript
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from '@jest/globals';
-import {
-  createTestHarness,
-  cleanupTestHarness,
-  type TestHarnessState,
-} from '../lib/test-harness';
-import type { MemAPI } from '../../src/types';
-
-describe('MemAPI Util Ops Integration Tests', () => {
-  let harness: TestHarnessState;
-  let mem: MemAPI;
-
-  beforeEach(async () => {
-    harness = await createTestHarness();
-    mem = harness.mem;
-  });
-
-  afterEach(async () => {
-    await cleanupTestHarness(harness);
-  });
-
-  it('should return the correct graph root path', async () => {
-    const root = await mem.getGraphRoot();
-    expect(root).toBe(harness.tempDir);
-  });
-
-  it('should correctly estimate token count for a single file', async () => {
-    const content = 'This is a test sentence with several words.'; // 44 chars
-    await mem.writeFile('test.txt', content);
-    const tokenCount = await mem.getTokenCount('test.txt');
-    const expected = Math.ceil(content.length / 4); // 11
-    expect(tokenCount).toBe(expected);
-  });
-
-  it('should correctly estimate token counts for multiple files', async () => {
-    const content1 = 'File one content.'; // 17 chars -> 5 tokens
-    const content2 = 'File two has slightly more content here.'; // 38 chars -> 10 tokens
-    await mem.writeFile('file1.txt', content1);
-    await mem.writeFile('sub/file2.txt', content2);
-
-    const results = await mem.getTokenCountForPaths([
-      'file1.txt',
-      'sub/file2.txt',
-    ]);
-
-    expect(results).toHaveLength(2);
-    expect(results).toEqual(
-      expect.arrayContaining([
-        { path: 'file1.txt', tokenCount: Math.ceil(content1.length / 4) },
-        { path: 'sub/file2.txt', tokenCount: Math.ceil(content2.length / 4) },
-      ])
-    );
-  });
-
-  it('should throw an error when counting tokens for a non-existent file', async () => {
-    await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
-      /Failed to count tokens for not-real.txt/
-    );
-  });
-});
-````
-
 ## File: tests/setup.ts
 ````typescript
 // Jest setup file to handle Node.js v25+ compatibility issues
@@ -2491,6 +1321,282 @@ export const combineIgnoreFilters = (
 };
 ````
 
+## File: tests/integration/mem-api-graph-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Graph Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    // Disable .gitignore for these tests so we can correctly search .log files
+    harness = await createTestHarness({ withGitignore: false });
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should query the graph with multiple conditions', async () => {
+    const pageAContent = `
+- # Page A
+  - prop:: value
+  - Link to [[Page B]].
+    `;
+    const pageBContent = `
+- # Page B
+  - prop:: other
+  - No links here.
+    `;
+
+    await mem.writeFile('PageA.md', pageAContent);
+    await mem.writeFile('PageB.md', pageBContent);
+
+    const query = `(property prop:: value) AND (outgoing-link [[Page B]])`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    expect(results[0]?.filePath).toBe('PageA.md');
+  });
+
+  it('should return an empty array for a query with no matches', async () => {
+    const pageAContent = `- # Page A\n  - prop:: value`;
+    await mem.writeFile('PageA.md', pageAContent);
+
+    const query = `(property prop:: non-existent-value)`;
+    const results = await mem.queryGraph(query);
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('should get backlinks and outgoing links', async () => {
+    // PageA links to PageB and PageC
+    await mem.writeFile('PageA.md', 'Links to [[Page B]] and [[Page C]].');
+    // PageB links to PageC
+    await mem.writeFile('PageB.md', 'Links to [[Page C]].');
+    // PageC has no outgoing links
+    await mem.writeFile('PageC.md', 'No links.');
+    // PageD links to PageA. The filename is `PageA.md`, so the link must match the basename.
+    await mem.writeFile('PageD.md', 'Links to [[PageA]].');
+
+    // Test outgoing links
+    const outgoingA = await mem.getOutgoingLinks('PageA.md');
+    expect(outgoingA).toEqual(expect.arrayContaining(['Page B', 'Page C']));
+    expect(outgoingA.length).toBe(2);
+
+    const outgoingC = await mem.getOutgoingLinks('PageC.md');
+    expect(outgoingC).toEqual([]);
+
+    // Test backlinks
+    const backlinksA = await mem.getBacklinks('PageA.md');
+    expect(backlinksA).toEqual(['PageD.md']);
+
+    const backlinksC = await mem.getBacklinks('PageC.md');
+    expect(backlinksC).toEqual(
+      expect.arrayContaining(['PageA.md', 'PageB.md'])
+    );
+    expect(backlinksC.length).toBe(2);
+  });
+
+  it('should perform a global full-text search', async () => {
+    await mem.writeFile('a.txt', 'This file contains a unique-search-term.');
+    await mem.writeFile('b.md', 'This file has a common-search-term.');
+    await mem.writeFile('c.log', 'This one also has a common-search-term.');
+    await mem.writeFile(
+      'd.txt',
+      'This file has nothing interesting to find.'
+    );
+
+    // Search for a unique term
+    const uniqueResults = await mem.searchGlobal('unique-search-term');
+    expect(uniqueResults).toEqual(['a.txt']);
+
+    // Search for a common term
+    const commonResults = await mem.searchGlobal('common-search-term');
+    expect(commonResults).toEqual(expect.arrayContaining(['b.md', 'c.log']));
+    expect(commonResults.length).toBe(2);
+
+    // Search for a non-existent term
+    const noResults = await mem.searchGlobal('non-existent-term');
+    expect(noResults).toEqual([]);
+  });
+});
+````
+
+## File: tests/integration/mem-api-state-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI State Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should save and revert to a checkpoint', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'version a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes and save checkpoint
+    await mem.writeFile('b.txt', 'version b');
+    const successSave = await mem.saveCheckpoint();
+    expect(successSave).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(false); // Stashing removes the file from the working dir
+
+    // 3. Make more changes
+    await mem.writeFile('c.txt', 'version c');
+    expect(await mem.fileExists('c.txt')).toBe(true);
+
+    // 4. Revert by applying the stashed changes
+    const successRevert = await mem.revertToLastCheckpoint();
+    expect(successRevert).toBe(true);
+
+    // 5. Assert state
+    expect(await mem.fileExists('a.txt')).toBe(true);
+    expect(await mem.fileExists('b.txt')).toBe(true); // Restored from checkpoint
+    expect(await mem.fileExists('c.txt')).toBe(true); // Other working dir changes are preserved
+  });
+
+  it('should discard all staged and unstaged changes', async () => {
+    // 1. Initial state
+    await mem.writeFile('a.txt', 'original a');
+    await mem.commitChanges('commit a');
+
+    // 2. Make changes
+    await mem.writeFile('a.txt', 'modified a'); // unstaged
+    await mem.writeFile('b.txt', 'new b'); // unstaged
+    await mem.writeFile('c.txt', 'new c'); // will be staged
+    await harness.git.add('c.txt');
+
+    // 3. Discard
+    const successDiscard = await mem.discardChanges();
+    expect(successDiscard).toBe(true);
+
+    // 4. Assert state
+    expect(await mem.readFile('a.txt')).toBe('original a'); // Reverted
+    expect(await mem.fileExists('b.txt')).toBe(false); // Removed
+    expect(await mem.fileExists('c.txt')).toBe(false); // Removed
+
+    const status = await harness.git.status();
+    expect(status.isClean()).toBe(true);
+  });
+
+  it('should handle reverting when no checkpoint exists', async () => {
+    await mem.writeFile('a.txt', 'content');
+    const success = await mem.revertToLastCheckpoint();
+
+    // It should not throw an error and return false to indicate nothing was reverted.
+    expect(success).toBe(false);
+    expect(await mem.readFile('a.txt')).toBe('content'); // File should be untouched
+  });
+});
+````
+
+## File: tests/integration/mem-api-util-ops.test.ts
+````typescript
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from '@jest/globals';
+import {
+  createTestHarness,
+  cleanupTestHarness,
+  type TestHarnessState,
+} from '../lib/test-harness';
+import type { MemAPI } from '../../src/types';
+
+describe('MemAPI Util Ops Integration Tests', () => {
+  let harness: TestHarnessState;
+  let mem: MemAPI;
+
+  beforeEach(async () => {
+    harness = await createTestHarness();
+    mem = harness.mem;
+  });
+
+  afterEach(async () => {
+    await cleanupTestHarness(harness);
+  });
+
+  it('should return the correct graph root path', async () => {
+    const root = await mem.getGraphRoot();
+    expect(root).toBe(harness.tempDir);
+  });
+
+  it('should correctly estimate token count for a single file', async () => {
+    const content = 'This is a test sentence with several words.'; // 44 chars
+    await mem.writeFile('test.txt', content);
+    const tokenCount = await mem.getTokenCount('test.txt');
+    const expected = Math.ceil(content.length / 4); // 11
+    expect(tokenCount).toBe(expected);
+  });
+
+  it('should correctly estimate token counts for multiple files', async () => {
+    const content1 = 'File one content.'; // 17 chars -> 5 tokens
+    const content2 = 'File two has slightly more content here.'; // 38 chars -> 10 tokens
+    await mem.writeFile('file1.txt', content1);
+    await mem.writeFile('sub/file2.txt', content2);
+
+    const results = await mem.getTokenCountForPaths([
+      'file1.txt',
+      'sub/file2.txt',
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        { path: 'file1.txt', tokenCount: Math.ceil(content1.length / 4) },
+        { path: 'sub/file2.txt', tokenCount: Math.ceil(content2.length / 4) },
+      ])
+    );
+  });
+
+  it('should throw an error when counting tokens for a non-existent file', async () => {
+    await expect(mem.getTokenCount('not-real.txt')).rejects.toThrow(
+      /Failed to count tokens for not-real.txt/
+    );
+  });
+});
+````
+
 ## File: .dockerignore
 ````
 # Git
@@ -2711,6 +1817,88 @@ export interface ExecutionConstraints {
 }
 ````
 
+## File: .env.test
+````
+# Test Environment Configuration
+OPENROUTER_API_KEY="mock-test-api-key"
+KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
+LLM_MODEL="mock-test-model"
+````
+
+## File: jest.config.js
+````javascript
+/** @type {import('ts-jest').JestConfigWithTsJest} */
+export default {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  moduleNameMapper: {
+    '(.+)\\.js$': '$1',
+  },
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        useESM: true,
+      },
+    ],
+  },
+  extensionsToTreatAsEsm: ['.ts'],
+  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
+  clearMocks: true,
+  collectCoverage: true,
+  coverageDirectory: 'coverage',
+  coverageProvider: 'v8',
+  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
+};
+````
+
+## File: src/types/llm.ts
+````typescript
+export type ParsedLLMResponse = {
+  think?: string;
+  typescript?: string;
+  reply?: string;
+};
+
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
+export interface LLMRequest {
+  messages: ChatMessage[];
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+export interface LLMResponse {
+  content: string;
+  model: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export interface LLMConfig {
+  apiKey: string;
+  baseUrl?: string;
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+export interface LLMProvider {
+  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
+  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
+}
+
+export type StreamingCallback = (chunk: string) => void;
+````
+
 ## File: tests/e2e/mcp-workflow.test.ts
 ````typescript
 import {
@@ -2852,10 +2040,12 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
     const log = await harness.git.log();
     expect(log.latest?.message).toBe('feat: add file1 and file2');
 
+    expect(log.latest).not.toBeNull();
+
     // Verify both files were part of the commit
     const commitContent = await harness.git.show([
       '--name-only',
-      log.latest.hash,
+      log.latest!.hash,
     ]);
     expect(commitContent).toContain('file1.md');
     expect(commitContent).toContain('file2.md');
@@ -2893,95 +2083,30 @@ await mem.commitChanges('feat: Add Dr. Aris Thorne and AI Research Institute ent
 
 ## File: tests/lib/test-util.ts
 ````typescript
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
-import type { TestHarnessState } from './test-harness';
-import type {
-  MCPRequest,
-  MCPResponse,
-  MCPNotification,
-} from '../../src/types';
-````
+import { createServer } from 'net';
 
-## File: .env.test
-````
-# Test Environment Configuration
-OPENROUTER_API_KEY="mock-test-api-key"
-KNOWLEDGE_GRAPH_PATH="/tmp/recursa-test-knowledge-graph"
-LLM_MODEL="mock-test-model"
-````
-
-## File: jest.config.js
-````javascript
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-export default {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  moduleNameMapper: {
-    '(.+)\\.js$': '$1',
-  },
-  transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        useESM: true,
-      },
-    ],
-  },
-  extensionsToTreatAsEsm: ['.ts'],
-  testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
-  clearMocks: true,
-  collectCoverage: true,
-  coverageDirectory: 'coverage',
-  coverageProvider: 'v8',
-  setupFilesAfterEnv: ['jest-extended/all', '<rootDir>/tests/setup.ts'],
+/**
+ * Finds a free port on the local machine.
+ * Useful for starting servers in tests without port conflicts.
+ */
+export const getFreePort = (): Promise<number> => {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, () => {
+      const address = server.address();
+      const port = typeof address === 'string' ? 0 : address?.port;
+      server.close(() => {
+        if (port) {
+          resolve(port);
+        } else {
+          reject(new Error('Could not determine free port'));
+        }
+      });
+    });
+  });
 };
-````
-
-## File: src/types/llm.ts
-````typescript
-export type ParsedLLMResponse = {
-  think?: string;
-  typescript?: string;
-  reply?: string;
-};
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
-export interface LLMRequest {
-  messages: ChatMessage[];
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-  topP?: number;
-}
-
-export interface LLMResponse {
-  content: string;
-  model: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
-
-export interface LLMConfig {
-  apiKey: string;
-  baseUrl?: string;
-  model: string;
-  maxTokens?: number;
-  temperature?: number;
-}
-
-export interface LLMProvider {
-  generateCompletion: (request: LLMRequest) => Promise<LLMResponse>;
-  streamCompletion?: (request: LLMRequest) => AsyncIterable<string>;
-}
-
-export type StreamingCallback = (chunk: string) => void;
 ````
 
 ## File: tests/unit/parser.test.ts
@@ -3654,100 +2779,6 @@ export type GitCommand =
   | 'branch';
 ````
 
-## File: src/core/mem-api/git-ops.ts
-````typescript
-import type { SimpleGit } from 'simple-git';
-import type { LogEntry } from '../../types';
-
-// Note: These functions take a pre-configured simple-git instance.
-
-export const gitDiff =
-  (git: SimpleGit) =>
-  async (
-    filePath: string,
-    fromCommit?: string,
-    toCommit?: string
-  ): Promise<string> => {
-    try {
-      if (fromCommit && toCommit) {
-        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
-      } else if (fromCommit) {
-        return await git.diff([`${fromCommit}`, '--', filePath]);
-      } else {
-        return await git.diff([filePath]);
-      }
-    } catch (error) {
-      throw new Error(
-        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const gitLog =
-  (git: SimpleGit) =>
-  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
-    try {
-      const options = {
-        maxCount: maxCommits,
-        ...(filePath ? { file: filePath } : {}),
-      };
-      const result = await git.log(options);
-      return result.all.map((entry) => ({
-        hash: entry.hash,
-        message: entry.message,
-        date: entry.date,
-      }));
-    } catch (error) {
-      const target = filePath || 'repository';
-      throw new Error(
-        `Failed to get git log for ${target}: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const getChangedFiles =
-  (git: SimpleGit) => async (): Promise<string[]> => {
-    try {
-      const status = await git.status();
-      // Combine all relevant file arrays and remove duplicates
-      const allFiles = new Set([
-        ...status.staged,
-        ...status.modified,
-        ...status.created,
-        ...status.deleted,
-        ...status.not_added, // Add untracked files
-        ...status.renamed.map((r) => r.to),
-      ]);
-      return Array.from(allFiles);
-    } catch (error) {
-      throw new Error(
-        `Failed to get changed files: ${(error as Error).message}`
-      );
-    }
-  };
-
-export const commitChanges =
-  (git: SimpleGit) =>
-  async (message: string): Promise<string> => {
-    try {
-      // Stage all changes
-      await git.add('.');
-
-      // Commit staged changes
-      const result = await git.commit(message);
-
-      // Return the commit hash
-      if (result.commit) {
-        return result.commit;
-      }
-      // If result.commit is empty or null, it means no changes were committed. This is not an error.
-      return 'No changes to commit.';
-    } catch (error) {
-      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
-    }
-  };
-````
-
 ## File: src/core/mem-api/secure-path.ts
 ````typescript
 import path from 'path';
@@ -4198,6 +3229,100 @@ export interface MCPNotification {
   method: string;
   params?: unknown;
 }
+````
+
+## File: src/core/mem-api/git-ops.ts
+````typescript
+import type { SimpleGit } from 'simple-git';
+import type { LogEntry } from '../../types';
+
+// Note: These functions take a pre-configured simple-git instance.
+
+export const gitDiff =
+  (git: SimpleGit) =>
+  async (
+    filePath: string,
+    fromCommit?: string,
+    toCommit?: string
+  ): Promise<string> => {
+    try {
+      if (fromCommit && toCommit) {
+        return await git.diff([`${fromCommit}..${toCommit}`, '--', filePath]);
+      } else if (fromCommit) {
+        return await git.diff([`${fromCommit}`, '--', filePath]);
+      } else {
+        return await git.diff([filePath]);
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to get git diff for ${filePath}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const gitLog =
+  (git: SimpleGit) =>
+  async (filePath?: string, maxCommits = 5): Promise<LogEntry[]> => {
+    try {
+      const options = {
+        maxCount: maxCommits,
+        ...(filePath ? { file: filePath } : {}),
+      };
+      const result = await git.log(options);
+      return result.all.map((entry) => ({
+        hash: entry.hash,
+        message: entry.message,
+        date: entry.date,
+      }));
+    } catch (error) {
+      const target = filePath || 'repository';
+      throw new Error(
+        `Failed to get git log for ${target}: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const getChangedFiles =
+  (git: SimpleGit) => async (): Promise<string[]> => {
+    try {
+      const status = await git.status();
+      // Combine all relevant file arrays and remove duplicates
+      const allFiles = new Set([
+        ...status.staged,
+        ...status.modified,
+        ...status.created,
+        ...status.deleted,
+        ...status.not_added, // Add untracked files
+        ...status.renamed.map((r) => r.to),
+      ]);
+      return Array.from(allFiles);
+    } catch (error) {
+      throw new Error(
+        `Failed to get changed files: ${(error as Error).message}`
+      );
+    }
+  };
+
+export const commitChanges =
+  (git: SimpleGit) =>
+  async (message: string): Promise<string> => {
+    try {
+      // Stage all changes
+      await git.add('.');
+
+      // Commit staged changes
+      const result = await git.commit(message);
+
+      // Return the commit hash
+      if (result.commit) {
+        return result.commit;
+      }
+      // If result.commit is empty or null, it means no changes were committed. This is not an error.
+      return 'No changes to commit.';
+    } catch (error) {
+      throw new Error(`Failed to commit changes: ${(error as Error).message}`);
+    }
+  };
 ````
 
 ## File: src/core/mem-api/index.ts
@@ -5549,7 +4674,7 @@ const mockFetch = jest.fn().mockImplementation(() =>
     statusText: 'OK',
   })
 );
-global.fetch = mockFetch as any;
+global.fetch = mockFetch as jest.Mock;
 
 const mockConfig: AppConfig = {
   openRouterApiKey: 'test-api-key',
@@ -5781,6 +4906,63 @@ Based on plan UUID: a8e9f2d1-0c6a-4b3f-8e1d-9f4a6c7b8d9e
 - **job-id**:
 - **depends-on**: [b3e4f5a6-7b8c-4d9e-8f0a-1b2c3d4e5f6g, a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d, f6a5b4c3-2d1e-4b9c-8a7f-6e5d4c3b2a1f, e5d4c3b2-a1f6-4a9b-8c7d-6b5c4d3e2a1f, b1a0c9d8-e7f6-4a5b-9c3d-2e1f0a9b8c7d, a9b8c7d6-e5f4-4a3b-2c1d-0e9f8a7b6c5d]
 - **description**: Merge every job-\* branch. Lint & auto-fix entire codebase. Run full test suite → 100% pass. Commit 'chore: final audit & lint'.
+````
+
+## File: repomix.config.json
+````json
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repo/repomix.md",
+    "style": "markdown",
+    "parsableStyle": true,
+    "fileSummary": false,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "truncateBase64": false,
+    "copyToClipboard": true,
+    "includeFullDirectoryStructure": false,
+    "tokenCountTree": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false,
+      "includeLogs": false,
+      "includeLogsCount": 50
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".relay/",
+      "agent-spawner.claude.md",
+      "agent-spawner.droid.md",
+      "AGENTS.md",
+      "repo",
+      "prompt",
+      "scripts",
+      "docs/TROUBLESHOOTING.md",
+      "docs/PLATFORM_SUPPORT.md"
+      //   "tests"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
 ````
 
 ## File: src/core/mem-api/file-ops.ts
@@ -6026,7 +5208,7 @@ export const fileExists =
       const fullPath = resolveSecurePath(graphRoot, filePath);
       await fs.access(fullPath);
       return true;
-    } catch (error: unknown) {
+    } catch {
       // Any error (security, not found, permissions) results in false.
       return false;
     }
@@ -6067,237 +5249,6 @@ export const listFiles =
     } catch (error) {
       throw handleFileError(error, `list files in directory`, directoryPath || 'root');
     }
-  };
-````
-
-## File: repomix.config.json
-````json
-{
-  "$schema": "https://repomix.com/schemas/latest/schema.json",
-  "input": {
-    "maxFileSize": 52428800
-  },
-  "output": {
-    "filePath": "repo/repomix.md",
-    "style": "markdown",
-    "parsableStyle": true,
-    "fileSummary": false,
-    "directoryStructure": true,
-    "files": true,
-    "removeComments": false,
-    "removeEmptyLines": false,
-    "compress": false,
-    "topFilesLength": 5,
-    "showLineNumbers": false,
-    "truncateBase64": false,
-    "copyToClipboard": true,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
-    "git": {
-      "sortByChanges": true,
-      "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
-      "includeLogs": false,
-      "includeLogsCount": 50
-    }
-  },
-  "include": [],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      ".relay/",
-      "agent-spawner.claude.md",
-      "agent-spawner.droid.md",
-      "AGENTS.md",
-      "repo",
-      "prompt"
-      //   "tests"
-    ]
-  },
-  "security": {
-    "enableSecurityCheck": true
-  },
-  "tokenCount": {
-    "encoding": "o200k_base"
-  }
-}
-````
-
-## File: src/core/mem-api/graph-ops.ts
-````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import type { GraphQueryResult } from '../../types';
-import { resolveSecurePath } from './secure-path.js';
-import { walk } from './fs-walker.js';
-import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
-
-type PropertyCondition = {
-  type: 'property';
-  key: string;
-  value: string;
-};
-
-type OutgoingLinkCondition = {
-  type: 'outgoing-link';
-  target: string;
-};
-
-type Condition = PropertyCondition | OutgoingLinkCondition;
-
-const parseCondition = (conditionStr: string): Condition | null => {
-  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
-  let match = conditionStr.trim().match(propertyRegex);
-  if (match?.[1] && match[2]) {
-    return {
-      type: 'property',
-      key: match[1].trim(),
-      value: match[2].trim(),
-    };
-  }
-
-  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
-  match = conditionStr.trim().match(linkRegex);
-  if (match?.[1]) {
-    return {
-      type: 'outgoing-link',
-      target: match[1].trim(),
-    };
-  }
-
-  return null;
-};
-
-const checkCondition = (content: string, condition: Condition): string[] => {
-  const matches: string[] = [];
-  if (condition.type === 'property') {
-    const lines = content.split('\n');
-    for (const line of lines) {
-      // Handle indented properties by removing the leading list marker
-      const trimmedLine = line.trim().replace(/^- /, '');
-      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
-        matches.push(line);
-      }
-    }
-  } else if (condition.type === 'outgoing-link') {
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const outgoingLinks = new Set(
-      Array.from(content.matchAll(linkRegex), (m) => m[1])
-    );
-    if (outgoingLinks.has(condition.target)) {
-      // Return a generic match since we don't have a specific line
-      matches.push(`[[${condition.target}]]`);
-    }
-  }
-  return matches;
-};
-
-export const queryGraph =
-  (graphRoot: string) =>
-  async (query: string): Promise<GraphQueryResult[]> => {
-    const conditionStrings = query.split(/ AND /i);
-    const conditions = conditionStrings
-      .map(parseCondition)
-      .filter((c): c is Condition => c !== null);
-
-    if (conditions.length === 0) {
-      return [];
-    }
-
-    const results: GraphQueryResult[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      if (!filePath.endsWith('.md')) continue;
-
-      const content = await fs.readFile(filePath, 'utf-8');
-      const allMatchingLines: string[] = [];
-      let allConditionsMet = true;
-
-      for (const condition of conditions) {
-        const matchingLines = checkCondition(content, condition);
-        if (matchingLines.length > 0) {
-          allMatchingLines.push(...matchingLines);
-        } else {
-          allConditionsMet = false;
-          break;
-        }
-      }
-
-      if (allConditionsMet) {
-        results.push({
-          filePath: path.relative(graphRoot, filePath),
-          matches: allMatchingLines,
-        });
-      }
-    }
-    return results;
-  };
-
-export const getBacklinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const targetBaseName = path.basename(filePath, path.extname(filePath));
-    const linkPattern = `[[${targetBaseName}]]`;
-    const backlinks: string[] = [];
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
-      // Don't link to self
-      if (path.resolve(currentFilePath) === path.resolve(graphRoot, filePath)) {
-        continue;
-      }
-
-      if (currentFilePath.endsWith('.md')) {
-        try {
-          const content = await fs.readFile(currentFilePath, 'utf-8');
-          if (content.includes(linkPattern)) {
-            backlinks.push(path.relative(graphRoot, currentFilePath));
-          }
-        } catch {
-          // Ignore files that can't be read
-        }
-      }
-    }
-    return backlinks;
-  };
-
-export const getOutgoingLinks =
-  (graphRoot: string) =>
-  async (filePath: string): Promise<string[]> => {
-    const fullPath = resolveSecurePath(graphRoot, filePath);
-    const content = await fs.readFile(fullPath, 'utf-8');
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    const matches = content.matchAll(linkRegex);
-    const uniqueLinks = new Set<string>();
-
-    for (const match of matches) {
-      if (match[1]) {
-        uniqueLinks.add(match[1]);
-      }
-    }
-    return Array.from(uniqueLinks);
-  };
-
-export const searchGlobal =
-  (graphRoot: string) =>
-  async (query: string): Promise<string[]> => {
-    const matchingFiles: string[] = [];
-    const lowerCaseQuery = query.toLowerCase();
-    const isIgnored = await createIgnoreFilter(graphRoot);
-
-    for await (const filePath of walk(graphRoot, isIgnored)) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        if (content.toLowerCase().includes(lowerCaseQuery)) {
-          matchingFiles.push(path.relative(graphRoot, filePath));
-        }
-      } catch {
-        // Ignore binary files or files that can't be read
-      }
-    }
-    return matchingFiles;
   };
 ````
 
@@ -6447,6 +5398,8 @@ Done. I've created pages for both Dr. Aris Thorne and the AI Research Institute 
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "eventsource": "^2.0.2",
     "@types/expect": "^1.20.4",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.10.0",
@@ -6684,6 +5637,203 @@ export const handleUserQuery = async (
 };
 ````
 
+## File: src/core/mem-api/graph-ops.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import type { GraphQueryResult } from '../../types';
+import { resolveSecurePath } from './secure-path.js';
+import { walk } from './fs-walker.js';
+import { createIgnoreFilter } from '../../lib/gitignore-parser.js';
+
+type PropertyCondition = {
+  type: 'property';
+  key: string;
+  value: string;
+};
+
+type OutgoingLinkCondition = {
+  type: 'outgoing-link';
+  target: string;
+};
+
+type Condition = PropertyCondition | OutgoingLinkCondition;
+
+const parseCondition = (conditionStr: string): Condition | null => {
+  const propertyRegex = /^\(property\s+([^:]+?)::\s*(.+?)\)$/;
+  let match = conditionStr.trim().match(propertyRegex);
+  if (match?.[1] && match[2]) {
+    return {
+      type: 'property',
+      key: match[1].trim(),
+      value: match[2].trim(),
+    };
+  }
+
+  const linkRegex = /^\(outgoing-link\s+\[\[(.+?)\]\]\)$/;
+  match = conditionStr.trim().match(linkRegex);
+  if (match?.[1]) {
+    return {
+      type: 'outgoing-link',
+      target: match[1].trim(),
+    };
+  }
+
+  return null;
+};
+
+const checkCondition = (content: string, condition: Condition): string[] => {
+  const matches: string[] = [];
+  if (condition.type === 'property') {
+    const lines = content.split('\n');
+    for (const line of lines) {
+      // Handle indented properties by removing the leading list marker
+      const trimmedLine = line.trim().replace(/^- /, '');
+      if (trimmedLine === `${condition.key}:: ${condition.value}`) {
+        matches.push(line);
+      }
+    }
+  } else if (condition.type === 'outgoing-link') {
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const outgoingLinks = new Set(
+      Array.from(content.matchAll(linkRegex), (m) => m[1])
+    );
+    if (outgoingLinks.has(condition.target)) {
+      // Return a generic match since we don't have a specific line
+      matches.push(`[[${condition.target}]]`);
+    }
+  }
+  return matches;
+};
+
+export const queryGraph =
+  (graphRoot: string) =>
+  async (query: string): Promise<GraphQueryResult[]> => {
+    const conditionStrings = query.split(/ AND /i);
+    const conditions = conditionStrings
+      .map(parseCondition)
+      .filter((c): c is Condition => c !== null);
+
+    if (conditions.length === 0) {
+      return [];
+    }
+
+    const results: GraphQueryResult[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const filePath of walk(graphRoot, isIgnored)) {
+      if (!filePath.endsWith('.md')) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const allMatchingLines: string[] = [];
+      let allConditionsMet = true;
+
+      for (const condition of conditions) {
+        const matchingLines = checkCondition(content, condition);
+        if (matchingLines.length > 0) {
+          allMatchingLines.push(...matchingLines);
+        } else {
+          allConditionsMet = false;
+          break;
+        }
+      }
+
+      if (allConditionsMet) {
+        results.push({
+          filePath: path.relative(graphRoot, filePath),
+          matches: allMatchingLines,
+        });
+      }
+    }
+    return results;
+  };
+
+export const getBacklinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const targetBaseName = path.basename(filePath, path.extname(filePath));
+    const targetWithoutExt = path.basename(filePath, path.extname(filePath));
+    const targetWithExt = path.basename(filePath);
+
+    const backlinks: string[] = [];
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const currentFilePath of walk(graphRoot, isIgnored)) {
+      // Don't link to self
+      if (path.resolve(currentFilePath) === resolveSecurePath(graphRoot, filePath)) {
+        continue;
+      }
+
+      if (currentFilePath.endsWith('.md')) {
+        try {
+          const content = await fs.readFile(currentFilePath, 'utf-8');
+          // Extract all outgoing links from the current file
+          const linkRegex = /\[\[(.*?)\]\]/g;
+          const matches = content.matchAll(linkRegex);
+
+          for (const match of matches) {
+            if (match[1]) {
+              const linkTarget = match[1].trim();
+              // Check if this link points to our target file
+              // Try matching against various possible formats:
+              // - Exact basename without extension (e.g., "PageC")
+              // - Exact basename with extension (e.g., "PageC.md")
+              // - With spaces (e.g., "Page C" for "PageC")
+              if (linkTarget === targetWithoutExt ||
+                  linkTarget === targetWithExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithoutExt ||
+                  linkTarget.replace(/\s+/g, '') === targetWithExt) {
+                backlinks.push(path.relative(graphRoot, currentFilePath));
+                break; // Found a match, no need to check more links in this file
+              }
+            }
+          }
+        } catch {
+          // Ignore files that can't be read
+        }
+      }
+    }
+    return backlinks;
+  };
+
+export const getOutgoingLinks =
+  (graphRoot: string) =>
+  async (filePath: string): Promise<string[]> => {
+    const fullPath = resolveSecurePath(graphRoot, filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const linkRegex = /\[\[(.*?)\]\]/g;
+    const matches = content.matchAll(linkRegex);
+    const uniqueLinks = new Set<string>();
+
+    for (const match of matches) {
+      if (match[1]) {
+        uniqueLinks.add(match[1]);
+      }
+    }
+    return Array.from(uniqueLinks);
+  };
+
+export const searchGlobal =
+  (graphRoot: string) =>
+  async (query: string): Promise<string[]> => {
+    const matchingFiles: string[] = [];
+    const lowerCaseQuery = query.toLowerCase();
+    const isIgnored = await createIgnoreFilter(graphRoot);
+
+    for await (const filePath of walk(graphRoot, isIgnored)) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.toLowerCase().includes(lowerCaseQuery)) {
+          matchingFiles.push(path.relative(graphRoot, filePath));
+        }
+      } catch {
+        // Ignore binary files or files that can't be read
+      }
+    }
+    return matchingFiles;
+  };
+````
+
 ## File: src/core/sandbox.ts
 ````typescript
 import { createContext, runInContext } from 'node:vm';
@@ -6777,10 +5927,108 @@ ${code}
 ````typescript
 import { handleUserQuery } from './core/loop.js';
 import { logger } from './lib/logger.js';
-import { loadAndValidateConfig } from './config.js';
+import { loadAndValidateConfig, type AppConfig } from './config.js';
 import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
-import type { StatusUpdate } from './types/loop.js';
+import type { StatusUpdate, ChatMessage } from './types/loop.js';
+import { fileURLToPath } from 'url';
+
+/**
+ * Factory function to create the MCP server instance.
+ * Allows dependency injection for testing (e.g., mocking the LLM).
+ */
+export const createMcpServer = async (
+  config: AppConfig,
+  dependencies: {
+    queryLLM?: (
+      history: ChatMessage[],
+      config: AppConfig
+    ) => Promise<string | unknown>;
+  } = {}
+) => {
+  // Create FastMCP server
+  const server = new FastMCP({
+    name: 'recursa-server',
+    version: '0.1.0',
+  });
+
+  // Add resources
+  server.addResource({
+    uri: `file://${config.knowledgeGraphPath}`,
+    name: 'Knowledge Graph Root',
+    mimeType: 'text/directory',
+    description: 'Root directory of the knowledge graph',
+    async load() {
+      return {
+        text: `This resource represents the root of the knowledge graph at ${config.knowledgeGraphPath}. It cannot be loaded directly.`,
+      };
+    },
+  });
+
+  // Add tools
+  server.addTool({
+    name: 'process_query',
+    description: 'Processes a high-level user query by running the agent loop.',
+    parameters: z.object({
+      query: z.string().describe('The user query to process.'),
+      sessionId: z
+        .string()
+        .describe('An optional session ID to maintain context.')
+        .optional(),
+      runId: z
+        .string()
+        .describe(
+          'A unique ID for this execution run, used for notifications.'
+        ),
+    }),
+    execute: async (args, { log }) => {
+      const onStatusUpdate = (update: StatusUpdate) => {
+        // Map StatusUpdate to fastmcp logs, which are sent as notifications.
+        const { type, content, data } = update;
+        const message = `[${type}] ${content}`;
+
+        switch (type) {
+          case 'think':
+            log.info(content || 'Thinking...');
+            break;
+          case 'act':
+            log.info(message, data);
+            break;
+          case 'error':
+            log.error(message, undefined, data);
+            break;
+          default:
+            log.debug(message, data);
+        }
+      };
+
+      try {
+        const finalReply = await handleUserQuery(
+          args.query,
+          config,
+          args.sessionId,
+          dependencies.queryLLM, // Inject the mock LLM if provided
+          onStatusUpdate
+        );
+
+        return JSON.stringify({ reply: finalReply, runId: args.runId });
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        log.error(
+          `Error in process_query: ${errorMessage}`,
+          error instanceof Error ? error : new Error(errorMessage)
+        );
+        return JSON.stringify({
+          error: errorMessage,
+          runId: args.runId,
+        });
+      }
+    },
+  });
+
+  return server;
+};
 
 const main = async () => {
   logger.info('Starting Recursa MCP Server...');
@@ -6789,86 +6037,10 @@ const main = async () => {
     // 1. Load configuration
     const config = await loadAndValidateConfig();
 
-    // 2. Create FastMCP server
-    const server = new FastMCP({
-      name: 'recursa-server',
-      version: '0.1.0',
-    });
+    // 2. Create server instance
+    const server = await createMcpServer(config);
 
-    // 3. Add resources
-    server.addResource({
-      uri: `file://${config.knowledgeGraphPath}`,
-      name: 'Knowledge Graph Root',
-      mimeType: 'text/directory',
-      description: 'Root directory of the knowledge graph',
-      async load() {
-        return {
-          text: `This resource represents the root of the knowledge graph at ${config.knowledgeGraphPath}. It cannot be loaded directly.`,
-        };
-      },
-    });
-
-    // 4. Add tools
-    server.addTool({
-      name: 'process_query',
-      description:
-        'Processes a high-level user query by running the agent loop.',
-      parameters: z.object({
-        query: z.string().describe('The user query to process.'),
-        sessionId: z
-          .string()
-          .describe('An optional session ID to maintain context.')
-          .optional(),
-        runId: z
-          .string()
-          .describe(
-            'A unique ID for this execution run, used for notifications.'
-          ),
-      }),
-      execute: async (args, { log }) => {
-        const onStatusUpdate = (update: StatusUpdate) => {
-          // Map StatusUpdate to fastmcp logs, which are sent as notifications.
-          const { type, content, data } = update;
-          const message = `[${type}] ${content}`;
-
-          switch (type) {
-            case 'think':
-              log.info(content || 'Thinking...');
-              break;
-            case 'act':
-              log.info(message, data);
-              break;
-            case 'error':
-              log.error(message, undefined, data);
-              break;
-            default:
-              log.debug(message, data);
-          }
-        };
-
-        try {
-          const finalReply = await handleUserQuery(
-            args.query,
-            config,
-            args.sessionId,
-            undefined,
-            onStatusUpdate
-          );
-
-          return JSON.stringify({ reply: finalReply, runId: args.runId });
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          log.error(`Error in process_query: ${errorMessage}`, error instanceof Error ? error : new Error(errorMessage));
-          return JSON.stringify({
-            error: errorMessage,
-            runId: args.runId,
-          });
-        }
-      },
-    });
-
-    // 5. Start the server
+    // 3. Start the server
     await server.start({ transportType: 'stdio' });
 
     logger.info('Recursa MCP Server is running and listening on stdio.');
@@ -6878,5 +6050,8 @@ const main = async () => {
   }
 };
 
-main();
+// Only run main if this file is the entry point
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}
 ````

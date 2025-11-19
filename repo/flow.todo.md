@@ -1,12 +1,10 @@
-
 ===
 
 discrepancy analysis
 
-
 ===
 
-we need many test cases to cover all llm tools so it can function as expected readme and user specs
+we need many test cases to cover all llm tools so it can function as expected readme and user specs. the tests should be real mcp client on non stream http
 
 === DONE
 

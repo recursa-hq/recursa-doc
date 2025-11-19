@@ -15,16 +15,25 @@ export const saveCheckpoint =
 export const revertToLastCheckpoint =
   (git: SimpleGit) => async (): Promise<boolean> => {
     try {
-      // 1. Apply the most recent stash: `await git.stash(['pop'])`.
-      // This can fail if the stash is empty, so wrap in a try/catch.
+      // 0. Check if there is a checkpoint to revert to
+      const stash = await git.stashList();
+      if (stash.total === 0) {
+        console.warn('Could not revert to checkpoint, stash is empty.');
+        return false;
+      }
+
+      // 1. Discard all current changes (staged, unstaged, and untracked)
+      // This prevents conflicts when popping the stash.
+      await git.reset(['--hard', 'HEAD']);
+      await git.clean('f', ['-d']);
+
+      // 2. Apply the most recent stash: `await git.stash(['pop'])`.
       await git.stash(['pop']);
       return true;
-    } catch {
-      // If stash is empty, simple-git throws. We can consider this a "success"
-      // in that there's nothing to revert to. Or we can re-throw.
-      // For now, let's log and return false.
-       
-      console.warn('Could not revert to checkpoint, stash may be empty.');
+    } catch (error) {
+      // If stash pop fails for some other reason (e.g. merge conflict despite clean wd),
+      // log it and return false.
+      console.warn('Could not revert to checkpoint:', error);
       return false;
     }
   };

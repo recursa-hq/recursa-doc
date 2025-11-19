@@ -37,7 +37,10 @@
       "agent-spawner.droid.md",
       "AGENTS.md",
       "repo",
-      "prompt"
+      "prompt",
+      "scripts",
+      "docs/TROUBLESHOOTING.md",
+      "docs/PLATFORM_SUPPORT.md"
       //   "tests"
     ]
   },
