@@ -126,7 +126,8 @@ export const createMcpServer = async (
  * Ensures the knowledge graph is a valid git repository.
  */
 const ensureGitRepo = async (config: AppConfig) => {
-  const git = simpleGit(config.knowledgeGraphPath);
+  // Initialize git in the knowledge graph directory specifically
+  const git = simpleGit({ baseDir: config.knowledgeGraphPath });
   
   // 1. Check Git Binary
   try {
@@ -150,7 +151,8 @@ const ensureGitRepo = async (config: AppConfig) => {
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       logger.info('Initializing new Git repository...', { path: config.knowledgeGraphPath });
-      await git.init();
+      // Initialize git repository specifically in the knowledge graph path
+      await git.init({ '--initial-branch': 'main' });
       // Set local config for this repo to ensure commits work
       await git.addConfig('user.name', config.gitUserName);
       await git.addConfig('user.email', config.gitUserEmail);

@@ -96,11 +96,14 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-# Your OpenRouter API Key
+# Required: Your OpenRouter API Key
 OPENROUTER_API_KEY="sk-or-..."
 
-# The ABSOLUTE path to your graph's directory
+# Required: The ABSOLUTE path to your graph's directory
 KNOWLEDGE_GRAPH_PATH="/path/to/your/notes"
+
+# Optional: Transport type - 'stdio' for MCP clients, 'sse' for development/testing
+TRANSPORT_TYPE="stdio"
 
 # Optional: Model selection
 LLM_MODEL="anthropic/claude-3-haiku-20240307"
@@ -114,7 +117,7 @@ LLM_MODEL="anthropic/claude-3-haiku-20240307"
 # Build the project
 npm run build
 
-# Start the server (Stdio mode)
+# Start the server (defaults to stdio mode)
 npm start
 ```
 
@@ -133,7 +136,36 @@ npm run build:termux
 npm run start:termux
 ```
 
-### 4. Connecting an MCP Client
+### 4. Testing with MCP Inspector
+
+For development and debugging, you can test the server using the MCP Inspector:
+
+**For Stdio Transport (default):**
+
+```bash
+# Test with CLI mode
+TRANSPORT_TYPE=stdio npx @modelcontextprotocol/inspector --cli node dist/server.js --method tools/list
+
+# Test with UI mode
+TRANSPORT_TYPE=stdio npx @modelcontextprotocol/inspector node dist/server.js
+```
+
+**For SSE Transport (development mode):**
+
+```bash
+# Set transport type in .env file
+TRANSPORT_TYPE=sse
+
+# Then test with inspector
+npx @modelcontextprotocol/inspector node dist/server.js
+```
+
+**Important Notes:**
+- Stdio transport requires explicit `TRANSPORT_TYPE=stdio` environment variable
+- Ensure `OPENROUTER_API_KEY` and `KNOWLEDGE_GRAPH_PATH` are set in environment
+- CLI mode is useful for automated testing and debugging
+
+### 5. Connecting an MCP Client
 
 Recursa runs as an MCP server over Stdio. Configure your MCP client (like Claude Desktop) to run the startup command:
 
