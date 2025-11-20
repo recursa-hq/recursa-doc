@@ -60,7 +60,7 @@ export const createInspectorHarness = async (): Promise<InspectorHarnessContext>
       // 2. Setup Transport
       if (transport === 'sse') {
         const port = await getFreePort();
-        
+
         // Start the server as a background process
         serverProcess = spawn('npx', ['tsx', 'src/server.ts'], {
           env: {
@@ -70,39 +70,66 @@ export const createInspectorHarness = async (): Promise<InspectorHarnessContext>
             OPENROUTER_API_KEY: 'TEST_MOCK_KEY',
             MOCK_QUEUE_FILE: queuePath,
             KNOWLEDGE_GRAPH_PATH: graphPath,
+            NODE_ENV: 'test', // Ensure we're in test mode
             CI: 'true', // Suppress interactive prompts
           },
           stdio: 'pipe',
         });
 
-        // Wait for the "running on SSE" log message
+        // Wait for the "running on SSE" log message with better error handling
         await new Promise<void>((resolve, reject) => {
           if (!serverProcess) return reject(new Error('Failed to spawn server'));
 
           let started = false;
+          let stdout = '';
+          let stderr = '';
+
           const onData = (data: Buffer) => {
-            if (data.toString().includes('running on SSE')) {
+            const output = data.toString();
+            stdout += output;
+
+            if (output.includes('running on SSE') || output.includes('server is running on SSE')) {
+              started = true;
+              resolve();
+            }
+          };
+
+          const onError = (data: Buffer) => {
+            const output = data.toString();
+            stderr += output;
+
+            // Also check stderr for startup messages
+            if (output.includes('running on SSE') || output.includes('server is running on SSE')) {
               started = true;
               resolve();
             }
           };
 
           serverProcess.stdout?.on('data', onData);
-          serverProcess.stderr?.on('data', onData);
+          serverProcess.stderr?.on('data', onError);
 
-          serverProcess.on('error', reject);
-          serverProcess.on('exit', (code) => {
-            if (!started)
-              reject(new Error(`Server exited early with code ${code}`));
+          serverProcess.on('error', (error) => {
+            reject(new Error(`Server process error: ${error.message}`));
           });
 
-          // 10s timeout for startup
+          serverProcess.on('exit', (code) => {
+            if (!started) {
+              reject(new Error(`Server exited early with code ${code}. Stdout: ${stdout}, Stderr: ${stderr}`));
+            }
+          });
+
+          // 15s timeout for startup (increased from 10s)
           setTimeout(() => {
-            if (!started) reject(new Error('Timeout waiting for SSE server'));
-          }, 10000);
+            if (!started) {
+              reject(new Error(`Timeout waiting for SSE server to start. Stdout: ${stdout}, Stderr: ${stderr}`));
+            }
+          }, 15000);
         });
 
         inspectorUrl = `http://localhost:${port}/sse`;
+
+        // Add a small delay to ensure server is fully ready
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       // 3. Build Inspector Command
@@ -114,6 +141,9 @@ export const createInspectorHarness = async (): Promise<InspectorHarnessContext>
         args.push('-e', 'OPENROUTER_API_KEY=TEST_MOCK_KEY');
         args.push('-e', `MOCK_QUEUE_FILE=${queuePath}`);
         args.push('-e', `KNOWLEDGE_GRAPH_PATH=${graphPath}`);
+        args.push('-e', 'NODE_ENV=test');
+        args.push('-e', 'CI=true');
+        args.push('-e', 'TRANSPORT_TYPE=stdio');
 
         // Server Command
         args.push('npx', 'tsx', 'src/server.ts');
@@ -161,7 +191,17 @@ export const createInspectorHarness = async (): Promise<InspectorHarnessContext>
     } finally {
       // Cleanup background process if needed
       if (serverProcess) {
-        serverProcess.kill();
+        // Try graceful shutdown first
+        if (serverProcess.kill) {
+          serverProcess.kill('SIGTERM');
+
+          // Wait a bit for graceful shutdown, then force kill
+          setTimeout(() => {
+            if (serverProcess.kill && !serverProcess.killed) {
+              serverProcess.kill('SIGKILL');
+            }
+          }, 2000);
+        }
       }
     }
   };

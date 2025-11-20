@@ -40,7 +40,8 @@
       "prompt",
       "scripts",
       "docs/TROUBLESHOOTING.md",
-      "docs/PLATFORM_SUPPORT.md"
+      "docs/PLATFORM_SUPPORT.md",
+      "docs/inspector.mcp.md"
       //   "tests"
     ]
   },

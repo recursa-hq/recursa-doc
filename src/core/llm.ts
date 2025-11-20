@@ -64,9 +64,10 @@ export const queryLLM = async (
   // Mock Engine: If using the special test key, bypass OpenRouter and read from the file queue.
   if (config.openRouterApiKey === 'TEST_MOCK_KEY') {
     const queueFile = config.mockQueueFile || process.env.MOCK_QUEUE_FILE;
-    
+
     if (!queueFile) {
-      throw new Error('TEST_MOCK_KEY is set, but MOCK_QUEUE_FILE is missing.');
+      throw new Error('TEST_MOCK_KEY is set, but MOCK_QUEUE_FILE is missing. Environment variables: ' +
+                     JSON.stringify({ mockQueueFile: config.mockQueueFile, envMockQueue: process.env.MOCK_QUEUE_FILE }));
     }
 
     try {
@@ -74,18 +75,32 @@ export const queryLLM = async (
       const queue = JSON.parse(content);
 
       if (!Array.isArray(queue) || queue.length === 0) {
-        throw new Error('Mock response queue is empty.');
+        throw new Error(`Mock response queue is empty or invalid. Queue file: ${queueFile}, Content: ${content}`);
       }
 
       const response = queue.shift();
-      
+
+      // Handle different response formats
+      let formattedResponse: string;
+      if (typeof response === 'string') {
+        formattedResponse = response;
+      } else if (response.content && typeof response.content === 'string') {
+        formattedResponse = response.content;
+      } else {
+        throw new Error(`Invalid mock response format: ${JSON.stringify(response)}`);
+      }
+
       // Write back updated queue for stateful multi-turn testing
       await fs.writeFile(queueFile, JSON.stringify(queue, null, 2));
-      
-      logger.info('Mock LLM: Using response from queue', { remaining: queue.length });
-      return response;
+
+      logger.info('Mock LLM: Using response from queue', {
+        queueFile,
+        remaining: queue.length,
+        responseType: typeof response
+      });
+      return formattedResponse;
     } catch (error) {
-      throw new Error(`Mock LLM Engine failed: ${(error as Error).message}`);
+      throw new Error(`Mock LLM Engine failed: ${(error as Error).message}. Queue file: ${queueFile}`);
     }
   }
 

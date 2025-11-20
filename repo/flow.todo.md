@@ -1,3 +1,7 @@
+===
+
+I try run query then I see server notification messages that recursa took too many tool call on simple query like "my name is dono"
+
 ====
 
 I want all important test cases should be real mcp client using inspector docs/inspector.mcp.md cli mode with all transport coverage

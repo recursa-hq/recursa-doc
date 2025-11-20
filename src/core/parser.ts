@@ -17,9 +17,22 @@ export const parseLLMResponse = (response: string): ParsedLLMResponse => {
     return match && match[1] ? match[1].trim() : undefined;
   };
 
+  const think = extractTagContent('think');
+  const typescript = extractTagContent('typescript');
+  const reply = extractTagContent('reply');
+
+  // Fallback: If no tags are present but there is text, treat it as a conversational reply.
+  if (!think && !typescript && !reply && response.trim().length > 0) {
+    return {
+      think: undefined,
+      typescript: undefined,
+      reply: response.trim(),
+    };
+  }
+
   return {
-    think: extractTagContent('think'),
-    typescript: extractTagContent('typescript'),
-    reply: extractTagContent('reply'),
+    think,
+    typescript,
+    reply,
   };
 };

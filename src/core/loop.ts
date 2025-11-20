@@ -23,11 +23,18 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
   }
 
   try {
-    // Get the directory of the current module (src/core or dist/core)
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    
-    // Resolve the path to 'docs/system-prompt.md' from the project root.
-    const promptPath = path.resolve(__dirname, '../../docs/system-prompt.md');
+    // When bundled, we need to resolve from the current working directory
+    // In development, this resolves from the source location
+    let promptPath: string;
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+
+    if (currentDir.includes('dist')) {
+      // We're in the bundled version, resolve from project root
+      promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
+    } else {
+      // We're in development, resolve from source location
+      promptPath = path.resolve(currentDir, '../../docs/system-prompt.md');
+    }
 
     // Read the file content asynchronously.
     const systemPromptContent = await fs.readFile(promptPath, 'utf-8');
@@ -143,6 +150,8 @@ export const handleUserQuery = async (
       }
     }
 
+    let executionFailed = false;
+
     // **Act**
     if (parsedResponse.typescript) {
       logger.info('Executing TypeScript code', { runId });
@@ -186,6 +195,7 @@ export const handleUserQuery = async (
           onStatusUpdate(successUpdate);
         }
       } catch (e) {
+        executionFailed = true;
         logger.error('Code execution failed', e as Error, { runId });
         const feedback = `[Execution Error]: Your code failed to execute. Error: ${
           (e as Error).message
@@ -206,7 +216,7 @@ export const handleUserQuery = async (
     }
 
     // **Reply**
-    if (parsedResponse.reply) {
+    if (parsedResponse.reply && !executionFailed) {
       logger.info('Agent replied', { runId, reply: parsedResponse.reply });
       return parsedResponse.reply;
     }

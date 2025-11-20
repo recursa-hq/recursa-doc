@@ -1,0 +1,12 @@
+[
+  {
+    "type": "success",
+    "content": "Hello! I'm Recursa, your AI agent for working with documentation. I can help you analyze and process markdown files in your knowledge graph. What would you like me to help you with today?",
+    "runId": "test-run-001"
+  },
+  {
+    "type": "success",
+    "content": "I've analyzed your knowledge graph and found several interesting documents. Here's what I can help you with:\n\n1. **Document Analysis**: I can analyze markdown files and extract key information\n2. **Knowledge Graph Navigation**: I can help you explore and understand your documentation structure\n3. **Content Generation**: I can help create new documentation based on your existing content\n4. **Query Processing**: I can answer questions about your documentation content\n\nLet me know what specific task you'd like me to help with!",
+    "runId": "test-run-002"
+  }
+]
