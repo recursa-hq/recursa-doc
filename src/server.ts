@@ -196,41 +196,188 @@ const ensureGitRepo = async (config: AppConfig) => {
 export const main = async () => {
   logger.info('Starting Recursa MCP Server...');
 
-  try {
-    // 1. Load configuration
-    const config = await loadAndValidateConfig();
+  // Lazy-loaded configuration and server state
+  let configPromise: Promise<AppConfig> | null = null;
+  let configError: Error | null = null;
 
-    // 2. Ensure Git repository exists (with better error handling)
-    try {
-      await ensureGitRepo(config);
-    } catch (gitError) {
-      logger.error('Failed to initialize git repository', gitError as Error);
-      // In test mode, we might want to continue even if git setup fails
-      if (process.env.NODE_ENV !== 'test') {
-        throw gitError;
-      } else {
-        logger.warn('Continuing in test mode despite git initialization failure');
-      }
+  // Helper to get or initialize config
+  const getConfig = async (): Promise<AppConfig> => {
+    if (configError) {
+      throw configError;
     }
+    if (!configPromise) {
+      configPromise = (async () => {
+        try {
+          const config = await loadAndValidateConfig();
 
-    // 3. Create server instance
-    const server = await createMcpServer(config);
+          // Ensure Git repository exists
+          try {
+            await ensureGitRepo(config);
+          } catch (gitError) {
+            logger.error('Failed to initialize git repository', gitError as Error);
+            if (process.env.NODE_ENV !== 'test') {
+              throw gitError;
+            } else {
+              logger.warn('Continuing in test mode despite git initialization failure');
+            }
+          }
 
-    // 4. Start the server
-    if (config.transportType === 'sse') {
+          return config;
+        } catch (error) {
+          configError = error as Error;
+          throw error;
+        }
+      })();
+    }
+    return configPromise;
+  };
+
+  try {
+    // Create a minimal server that will load config on first tool call
+    const server = new FastMCP({
+      name: 'recursa-server',
+      version: '0.1.0',
+    });
+
+    // Add resource (will be populated after config loads)
+    server.addResource({
+      uri: 'config://status',
+      name: 'Configuration Status',
+      mimeType: 'application/json',
+      description: 'Current configuration status and validation',
+      async load() {
+        try {
+          const config = await getConfig();
+          return {
+            text: JSON.stringify({
+              status: 'ok',
+              knowledgeGraphPath: config.knowledgeGraphPath,
+              llmModel: config.llmModel,
+              transportType: config.transportType,
+            }, null, 2),
+          };
+        } catch (error) {
+          return {
+            text: JSON.stringify({
+              status: 'error',
+              error: error instanceof Error ? error.message : String(error),
+              help: 'Please check your environment variables. Required: OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH. See TROUBLESHOOTING.md for details.',
+            }, null, 2),
+          };
+        }
+      },
+    });
+
+    // Add the main tool with lazy config loading
+    server.addTool({
+      name: 'process_query',
+      description: 'Processes a high-level user query by running the agent loop.',
+      parameters: z.object({
+        query: z.string().describe('The user query to process.'),
+        sessionId: z
+          .string()
+          .describe('An optional session ID to maintain context.')
+          .optional(),
+        runId: z
+          .string()
+          .describe(
+            'A unique ID for this execution run, used for notifications.'
+          ),
+      }),
+      execute: async (args, { log }) => {
+        // Load and validate config on first tool execution
+        let config: AppConfig;
+        try {
+          config = await getConfig();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log.error('Configuration error', {
+            message: errorMessage,
+            help: 'Please check your environment variables. Required: OPENROUTER_API_KEY, KNOWLEDGE_GRAPH_PATH',
+          } as SerializableValue);
+          return JSON.stringify({
+            error: 'Configuration error: ' + errorMessage,
+            help: 'Please verify your environment variables. See the "Configuration Status" resource for details.',
+            runId: args.runId,
+          });
+        }
+
+        const onStatusUpdate = (update: StatusUpdate) => {
+          const { type, content, data } = update;
+          const message = `[${type}] ${content}`;
+
+          switch (type) {
+            case 'think':
+              log.info(content || 'Thinking...');
+              break;
+            case 'act':
+              log.info(message, data as SerializableValue);
+              break;
+            case 'error':
+              log.error(message, data as SerializableValue);
+              break;
+            default:
+              log.debug(message, data as SerializableValue);
+          }
+        };
+
+        try {
+          const finalReply = await handleUserQuery(
+            args.query,
+            config,
+            args.sessionId,
+            undefined,
+            onStatusUpdate
+          );
+
+          return JSON.stringify({ reply: finalReply, runId: args.runId });
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          log.error(
+            `Error in process_query: ${errorMessage}`,
+            (error instanceof Error
+              ? { message: error.message, stack: error.stack, name: error.name }
+              : {
+                message: errorMessage,
+                original: error,
+              }) as SerializableValue
+          );
+          return JSON.stringify({
+            error: errorMessage,
+            runId: args.runId,
+          });
+        }
+      },
+    });
+
+    // Determine transport type from environment (with fallback)
+    const transportType = (process.env.TRANSPORT_TYPE || 'stdio') as 'stdio' | 'sse';
+    const port = parseInt(process.env.PORT || '3000', 10);
+
+    // Start the server immediately (before config validation)
+    if (transportType === 'sse') {
       await server.start({
         transportType: 'httpStream',
         httpStream: {
           endpoint: '/sse',
-          port: config.port,
+          port: port,
         },
       });
-      // Use stderr for this message to match what the test harness expects
-      console.error(`[FastMCP info] server is running on SSE at http://localhost:${config.port}/sse`);
+      console.error(`[FastMCP info] server is running on SSE at http://localhost:${port}/sse`);
     } else {
       await server.start({ transportType: 'stdio' });
       logger.info('Recursa MCP Server is running on stdio.');
     }
+
+    // Pre-load config in background (but don't fail if it errors)
+    getConfig().catch((error) => {
+      const err = error as Error;
+      logger.warn('Configuration validation failed. Server will return errors when tools are called.', {
+        error: { message: err.message, stack: err.stack },
+      });
+    });
+
   } catch (error) {
     logger.error('Failed to start server', error as Error);
     process.exit(1);

@@ -177,8 +177,29 @@ Recursa runs as an MCP server over Stdio. Configure your MCP client (like Claude
     "recursa": {
       "command": "recursa-mcp",
       "env": {
-        "OPENROUTER_API_KEY": "your-key",
-        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph"
+        "OPENROUTER_API_KEY": "sk-or-v1-your-key-here",
+        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph",
+        "TRANSPORT_TYPE": "stdio",
+        "LLM_MODEL": "anthropic/claude-3-haiku-20240307"
+      }
+    }
+  }
+}
+```
+
+**Using npx (no installation required):**
+
+```json
+{
+  "mcpServers": {
+    "recursa": {
+      "command": "npx",
+      "args": ["-y", "recursa-mcp@latest"],
+      "env": {
+        "OPENROUTER_API_KEY": "sk-or-v1-your-key-here",
+        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph",
+        "TRANSPORT_TYPE": "stdio",
+        "LLM_MODEL": "anthropic/claude-3-haiku-20240307"
       }
     }
   }
@@ -194,13 +215,22 @@ Recursa runs as an MCP server over Stdio. Configure your MCP client (like Claude
       "command": "node",
       "args": ["/path/to/recursa-doc/dist/server.js"],
       "env": {
-        "OPENROUTER_API_KEY": "your-key",
-        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph"
+        "OPENROUTER_API_KEY": "sk-or-v1-your-key-here",
+        "KNOWLEDGE_GRAPH_PATH": "/absolute/path/to/graph",
+        "TRANSPORT_TYPE": "stdio"
       }
     }
   }
 }
 ```
+
+**Important Configuration Notes:**
+- `KNOWLEDGE_GRAPH_PATH` **must** be an absolute path (e.g., `/home/user/notes` or `C:\Users\user\notes`)
+- `TRANSPORT_TYPE` should be set to `"stdio"` for MCP clients
+- The knowledge graph directory will be created automatically if it doesn't exist
+- Git will be initialized automatically in the knowledge graph directory
+
+**Troubleshooting:** If you encounter connection errors, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for detailed diagnostic steps.
 
 ## 🛠️ Implemented Tools
 
