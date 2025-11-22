@@ -133,8 +133,9 @@ const ensureGitRepo = async (config: AppConfig) => {
   try {
     await git.version();
   } catch (e) {
-    logger.error('Git binary not found. Please install Git.', e as Error);
-    throw new Error('Git binary not found. Please install Git to use Recursa.');
+    const msg = 'Git binary not found. Recursa requires Git to function. Please install Git and ensure it is in your system PATH.';
+    logger.error(msg, e as Error);
+    throw new Error(msg);
   }
 
   // 2. Detect Stale Lock Files
@@ -385,6 +386,18 @@ export const main = async () => {
 };
 
 // Only run main if this file is the entry point
-if (typeof import.meta !== 'undefined' && process.argv[1] === fileURLToPath(import.meta.url)) {
+const isMain = () => {
+  // Check for CJS
+  if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+    return true;
+  }
+  // Check for ESM
+  if (typeof import.meta !== 'undefined' && import.meta.url) {
+    return process.argv[1] === fileURLToPath(import.meta.url);
+  }
+  return false;
+};
+
+if (isMain()) {
   main();
 }

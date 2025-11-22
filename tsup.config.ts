@@ -8,8 +8,10 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
+  shims: true,
   external: ['fastmcp', 'dotenv', 'simple-git', 'zod'],
   platform: 'node',
   outDir: 'dist',
+  publicDir: 'docs',
   onSuccess: 'echo "Build completed successfully!"',
 });

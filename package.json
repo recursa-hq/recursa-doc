@@ -1,6 +1,6 @@
 {
   "name": "recursa-mcp",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Git-Native AI agent with MCP protocol support",
   "type": "module",
   "main": "dist/server.cjs",
@@ -21,6 +21,7 @@
   "files": [
     "dist/",
     "bin/",
+    "docs/",
     "README.md",
     "TROUBLESHOOTING.md",
     "LICENSE"

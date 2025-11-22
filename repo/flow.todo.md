@@ -9,6 +9,11 @@ code execution error count
 
 ===
 
+handle scenario where in the env cannot find git
+also current system-prompt.md not got carried away to npm publication so many mcp user client says always error in cannot find system prompt
+
+===
+
 I try run query then I see server notification messages that recursa took too many tool call on simple query like "my name is dono"
 
 ====

@@ -26,13 +26,15 @@ const getSystemPrompt = async (): Promise<ChatMessage> => {
     // When bundled, we need to resolve from the current working directory
     // In development, this resolves from the source location
     let promptPath: string;
-    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    const currentDir = __dirname;
 
-    if (currentDir.includes('dist')) {
-      // We're in the bundled version, resolve from project root
-      promptPath = path.resolve(process.cwd(), 'docs/system-prompt.md');
-    } else {
-      // We're in development, resolve from source location
+    // Check if the system prompt exists in the current directory (bundled case)
+    const bundledPath = path.join(currentDir, 'system-prompt.md');
+    try {
+      await fs.access(bundledPath);
+      promptPath = bundledPath;
+    } catch {
+      // Fallback to development path
       promptPath = path.resolve(currentDir, '../../docs/system-prompt.md');
     }
 
@@ -197,9 +199,8 @@ export const handleUserQuery = async (
       } catch (e) {
         executionFailed = true;
         logger.error('Code execution failed', e as Error, { runId });
-        const feedback = `[Execution Error]: Your code failed to execute. Error: ${
-          (e as Error).message
-        }. You must analyze this error and correct your code in the next turn.`;
+        const feedback = `[Execution Error]: Your code failed to execute. Error: ${(e as Error).message
+          }. You must analyze this error and correct your code in the next turn.`;
         context.history.push({ role: 'user', content: feedback });
 
         // Send error status update
