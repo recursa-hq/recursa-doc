@@ -107,9 +107,9 @@ export const createMcpServer = async (
           (error instanceof Error
             ? { message: error.message, stack: error.stack, name: error.name }
             : {
-                message: errorMessage,
-                original: error,
-              }) as SerializableValue
+              message: errorMessage,
+              original: error,
+            }) as SerializableValue
         );
         return JSON.stringify({
           error: errorMessage,
@@ -128,7 +128,7 @@ export const createMcpServer = async (
 const ensureGitRepo = async (config: AppConfig) => {
   // Initialize git in the knowledge graph directory specifically
   const git = simpleGit({ baseDir: config.knowledgeGraphPath });
-  
+
   // 1. Check Git Binary
   try {
     await git.version();
@@ -167,25 +167,25 @@ const ensureGitRepo = async (config: AppConfig) => {
       const msg = (error as Error).message;
       // If HEAD is invalid, this is a fresh repo. Error messages vary by git version.
       if (msg.includes("HEAD") || msg.includes("bad default revision") || msg.includes("does not have any commits")) {
-         logger.info('Creating initial commit to establish HEAD...');
-         const gitignorePath = path.join(config.knowledgeGraphPath, '.gitignore');
-         try {
-           await fs.access(gitignorePath);
-         } catch {
-            // Create a default .gitignore if it doesn't exist
-            await fs.writeFile(gitignorePath, 'node_modules/\n.env\n.DS_Store\n*.log\n');
-         }
-         await git.add('.gitignore');
-         await git.commit('root: initialize knowledge graph');
-         logger.info('Initial commit created.');
+        logger.info('Creating initial commit to establish HEAD...');
+        const gitignorePath = path.join(config.knowledgeGraphPath, '.gitignore');
+        try {
+          await fs.access(gitignorePath);
+        } catch {
+          // Create a default .gitignore if it doesn't exist
+          await fs.writeFile(gitignorePath, 'node_modules/\n.env\n.DS_Store\n*.log\n');
+        }
+        await git.add('.gitignore');
+        await git.commit('root: initialize knowledge graph');
+        logger.info('Initial commit created.');
       }
     }
 
     // 4. Warn on Dirty State
     const status = await git.status();
     if (!status.isClean()) {
-        logger.warn('⚠️  Repository has uncommitted changes. The agent may commit these changes automatically.');
-        logger.warn(`Dirty files: ${status.files.map(f => f.path).join(', ')}`);
+      logger.warn('⚠️  Repository has uncommitted changes. The agent may commit these changes automatically.');
+      logger.warn(`Dirty files: ${status.files.map(f => f.path).join(', ')}`);
     }
   } catch (error) {
     logger.error('Failed to initialize git repository', error as Error);
@@ -193,7 +193,7 @@ const ensureGitRepo = async (config: AppConfig) => {
   }
 };
 
-const main = async () => {
+export const main = async () => {
   logger.info('Starting Recursa MCP Server...');
 
   try {
@@ -219,8 +219,8 @@ const main = async () => {
     // 4. Start the server
     if (config.transportType === 'sse') {
       await server.start({
-        transportType: 'sse',
-        sse: {
+        transportType: 'httpStream',
+        httpStream: {
           endpoint: '/sse',
           port: config.port,
         },

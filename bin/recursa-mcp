@@ -6,7 +6,9 @@ if (typeof global.import_meta2 === 'undefined') {
 }
 
 // Import the server - use relative path from bin directory
-import('../dist/server.js').catch(err => {
+import('../dist/server.js').then(module => {
+  return module.main();
+}).catch(err => {
   console.error('Failed to start Recursa MCP server:', err);
   process.exit(1);
 });
