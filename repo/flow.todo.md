@@ -1,3 +1,12 @@
+should return stats like
+
+time took
+tool call count
+llm call count
+llm token count
+tool call error count
+code execution error count
+
 ===
 
 I try run query then I see server notification messages that recursa took too many tool call on simple query like "my name is dono"
